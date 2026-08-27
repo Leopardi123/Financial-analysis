@@ -37,9 +37,11 @@ export type Tier1PreRevenueAssessment = {
     capitalReturns: Tier1Gate;
   };
   support: {
-    reportBaseNpv10Usd: number | null;
-    reportBaseIrr: number | null;
-    reportBaseNpvOverInitialCapex: number | null;
+    tierBasePriceMode: 'SPOT';
+    tierBasePriceAsOfUtc: string | null;
+    tierBaseNpv10Usd: number | null;
+    tierBaseIrr: number | null;
+    tierBaseNpvOverInitialCapex: number | null;
     cycleNpv10Usd: number | null;
     cycleDurationProductionPeriods: number;
     cycleMultipliersByMetal: Record<string, number>;
@@ -174,23 +176,23 @@ export function assessCombinedScale(
   };
 }
 
-export function assessCapitalReturns(reportBaseIrr: number | null): Tier1Gate {
-  if (!finite(reportBaseIrr)) {
-    return { status: 'NOT_VERIFIED', tier: null, value: null, threshold: TIER1_POLICY.tier1AfterTaxIrr, unit: 'IRR', reason: 'Rapport-/base-IRR kunde inte verifieras.' };
+export function assessCapitalReturns(tierBaseIrr: number | null): Tier1Gate {
+  if (!finite(tierBaseIrr)) {
+    return { status: 'NOT_VERIFIED', tier: null, value: null, threshold: TIER1_POLICY.tier1AfterTaxIrr, unit: 'IRR', reason: 'Tier-IRR vid gemensamt spot-deck kunde inte verifieras.' };
   }
-  const tier = tierBandFromIrr(reportBaseIrr);
+  const tier = tierBandFromIrr(tierBaseIrr);
   if (tier === null) {
     return {
-      status: 'FAIL', tier: null, value: reportBaseIrr, threshold: TIER1_POLICY.minimumQualifiedAfterTaxIrr, unit: 'IRR',
-      reason: `After-tax IRR ${(reportBaseIrr * 100).toFixed(1)} % · under ${(TIER1_POLICY.minimumQualifiedAfterTaxIrr * 100).toFixed(0)} % och därför Ej kvalificerad.`,
+      status: 'FAIL', tier: null, value: tierBaseIrr, threshold: TIER1_POLICY.minimumQualifiedAfterTaxIrr, unit: 'IRR',
+      reason: `After-tax Tier-IRR ${(tierBaseIrr * 100).toFixed(1)} % vid spot · under ${(TIER1_POLICY.minimumQualifiedAfterTaxIrr * 100).toFixed(0)} % och därför Ej kvalificerad.`,
     };
   }
   const reason = tier === 1
-    ? `After-tax IRR ${(reportBaseIrr * 100).toFixed(1)} % · Tier 1 kräver ≥${(TIER1_POLICY.tier1AfterTaxIrr * 100).toFixed(0)} %.`
+    ? `After-tax Tier-IRR ${(tierBaseIrr * 100).toFixed(1)} % vid spot · Tier 1 kräver ≥${(TIER1_POLICY.tier1AfterTaxIrr * 100).toFixed(0)} %.`
     : tier === 2
-      ? `After-tax IRR ${(reportBaseIrr * 100).toFixed(1)} % · Tier 2 (${(TIER1_POLICY.tier2AfterTaxIrr * 100).toFixed(0)}–${(TIER1_POLICY.tier1AfterTaxIrr * 100).toFixed(0)} %).`
-      : `After-tax IRR ${(reportBaseIrr * 100).toFixed(1)} % · Tier 3-ekonomi; miniminivå ${(TIER1_POLICY.minimumQualifiedAfterTaxIrr * 100).toFixed(0)} %.`;
-  return { status: tierStatus(tier), tier, value: reportBaseIrr, threshold: TIER1_POLICY.tier1AfterTaxIrr, unit: 'IRR', reason };
+      ? `After-tax Tier-IRR ${(tierBaseIrr * 100).toFixed(1)} % vid spot · Tier 2 (${(TIER1_POLICY.tier2AfterTaxIrr * 100).toFixed(0)}–${(TIER1_POLICY.tier1AfterTaxIrr * 100).toFixed(0)} %).`
+      : `After-tax Tier-IRR ${(tierBaseIrr * 100).toFixed(1)} % vid spot · Tier 3-ekonomi; miniminivå ${(TIER1_POLICY.minimumQualifiedAfterTaxIrr * 100).toFixed(0)} %.`;
+  return { status: tierStatus(tier), tier, value: tierBaseIrr, threshold: TIER1_POLICY.tier1AfterTaxIrr, unit: 'IRR', reason };
 }
 
 export function assessCycle(cycleNpv10Usd: number | null, reasonIfUnavailable?: string): Tier1Gate {
@@ -205,8 +207,8 @@ export function assessCycle(cycleNpv10Usd: number | null, reasonIfUnavailable?: 
     threshold: 0,
     unit: 'USD NPV10',
     reason: pass
-      ? `${TIER1_POLICY.cycleDurationProductionPeriods} års relativ lågcykel ger positiv NPV10 och klarar kvalificeringskravet.`
-      : `${TIER1_POLICY.cycleDurationProductionPeriods} års relativ lågcykel ger NPV10 ≤ 0 och projektet är Ej kvalificerat.`,
+      ? `${TIER1_POLICY.cycleDurationProductionPeriods} års relativ lågcykel från gemensamt spot-deck ger positiv NPV10 och klarar kvalificeringskravet.`
+      : `${TIER1_POLICY.cycleDurationProductionPeriods} års relativ lågcykel från gemensamt spot-deck ger NPV10 ≤ 0 och projektet är Ej kvalificerat.`,
   };
 }
 
@@ -237,7 +239,7 @@ export function assessCost(args: {
     return { status: 'NOT_VERIFIED', tier: null, value: finite(value) ? value : null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Den statiska Q1-referensen för ${args.primaryMetal} är äldre än ${TIER1_POLICY.costBenchmarkMaxAgeDays} dagar och ska uppdateras.` };
   }
   if (args.primaryMetal === 'Au' && (!finite(args.primaryMetalRevenueShare) || args.primaryMetalRevenueShare < TIER1_POLICY.goldCostDominanceMinimumRevenueShare)) {
-    return { status: 'NOT_VERIFIED', tier: null, value: finite(value) ? value : null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Au står för mindre än ${Math.round(TIER1_POLICY.goldCostDominanceMinimumRevenueShare * 100)} % av metallintäkten; AuEq AISC används därför inte som ren Au-AISC.` };
+    return { status: 'NOT_VERIFIED', tier: null, value: finite(value) ? value : null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Au står för mindre än ${Math.round(TIER1_POLICY.goldCostDominanceMinimumRevenueShare * 100)} % av metallintäkten vid Tier-decket; AuEq AISC används därför inte som ren Au-AISC.` };
   }
   if (!finite(value)) {
     return { status: 'NOT_VERIFIED', tier: null, value: null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `${metricLabel} kan ännu inte beräknas definitionskompatibelt från projektmodellen. Q1-referensen finns, men inget värde antas.` };
@@ -258,6 +260,6 @@ export function assessCost(args: {
   }
   return {
     status: 'NOT_VERIFIED', tier: null, value, threshold: benchmark.q1Max, unit: benchmark.unit,
-    reason: `${metricLabel} ${value.toFixed(2)} ${benchmark.unit} ligger över en konservativ Q1-referens. Exakt Q25-gräns saknas, därför varken godkänd eller underkänd.`,
+    reason: `${metricLabel} ${value.toFixed(2)} ${benchmark.unit} ligger över en konservativ Q1-referens. Exakt Q1/Q2-gräns saknas, därför varken godkänd eller underkänd.`,
   };
 }
