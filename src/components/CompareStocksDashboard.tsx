@@ -45,7 +45,7 @@ const METRIC_GROUPS: readonly MetricGroup[] = [
     ['annualReturn', 'Årlig avk. → prod.', 'Annualiserad utveckling från dagens pris till Corporate target vid produktion'],
   ] },
   { label: 'PROJEKTKVALITET', columns: [
-    ['tier', 'Tier', 'Tier-1 hard gates: LOM, metallspecifik produktionsskala, statisk Q1-kostnadsposition, 3-årig relativ lågcykel och report/base after-tax IRR ≥25%. Ej verifierad om evidens saknas.'],
+    ['tier', 'Tier', 'Tier 1/2/3 för industriell projektkvalitet. Produktionsskala, LOM och after-tax IRR sätter Tier-taket; Tier 1 kräver även verifierad Q1-kostnadsposition och positiv NPV10 i tre års historiskt kalibrerad relativ lågcykel. Mycket liten produktion (<0,40x combined scale) ger alltid högst Tier 3.'],
     ['irr', 'IRR', 'Kanonisk Corporate IRR'],
     ['payback', 'Payback', 'Kanonisk Corporate payback'],
     ['lom', 'LOM', 'Antal år med positiv canonical payable AuEq-produktion'],
