@@ -1,6 +1,10 @@
 import { mergeMonthlyPayload, encodeMonthlyPayload, decodeMonthlyPayload, type MonthlyPricePayload } from "./historyBlob.js";
 import { fetchHistoricalEodFull, fetchLegacyCommodityHistoricalFull } from "./providers/fmp.js";
-import { fetchFredCommodityPriceSeries, getFredHistoryCommodityPriceMapping } from "./providers/fred.js";
+import {
+  fetchFredCommodityPriceSeries,
+  getFredHistoryCommodityPriceMapping,
+  isFredHistoryOnlyCommodityPriceKey,
+} from "./providers/fred.js";
 import { getPriceKeyDefinition, type PriceKey } from "./keys.js";
 import { convertPriceToCanonical } from "./units/convert.js";
 
@@ -115,11 +119,22 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
 
     const mapping = mappingRows[0] ?? null;
     const fredRegistryMapping = getFredHistoryCommodityPriceMapping(args.priceKey);
+    const historyOnlyFred = isFredHistoryOnlyCommodityPriceKey(args.priceKey) && fredRegistryMapping !== null;
+
+    // A verified history-only registry entry deliberately overrides the normal
+    // current-price provider for historical calibration. This is used for Cu:
+    // current spot remains FMP/COMEX, while the long relative-cycle history is
+    // the IMF/FRED global copper benchmark. It is a source/basis distinction,
+    // not an implicit COMEX↔LME conversion.
     const provider = String(
-      mapping?.provider
-      ?? (fredRegistryMapping ? "FRED" : fxProviderSymbolFromKey(args.priceKey) ? "FMP" : ""),
+      historyOnlyFred
+        ? "FRED"
+        : mapping?.provider
+          ?? (fredRegistryMapping ? "FRED" : fxProviderSymbolFromKey(args.priceKey) ? "FMP" : ""),
     ).toUpperCase();
-    let providerSymbol = mapping?.provider_symbol ?? fredRegistryMapping?.fredSeriesId ?? null;
+    let providerSymbol = historyOnlyFred
+      ? fredRegistryMapping?.fredSeriesId ?? null
+      : mapping?.provider_symbol ?? fredRegistryMapping?.fredSeriesId ?? null;
     let providerLabel: "FMP" | "FRED";
     let filtered: HistoryInputRow[];
 
@@ -155,7 +170,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
       if (!fredMapping) {
         throw new Error(`No verified FRED commodity mapping found for price key: ${args.priceKey}`);
       }
-      if (providerSymbol && providerSymbol !== fredMapping.fredSeriesId) {
+      if (!historyOnlyFred && providerSymbol && providerSymbol !== fredMapping.fredSeriesId) {
         throw new Error(
           `FRED provider mapping mismatch for ${args.priceKey}: database=${providerSymbol}, registry=${fredMapping.fredSeriesId}`,
         );
