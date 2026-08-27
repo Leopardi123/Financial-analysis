@@ -9,6 +9,7 @@ import { computeProjectEngineFullProductionV1 } from '../../../lib/project/engin
 import { computeProjectPhase2 } from '../../../lib/project/phase2.ts';
 import { computeTier1CycleMultiplier, toMonthlyLast, type Tier1CycleMultiplierResult } from '../../../lib/tier1/cycle.ts';
 import {
+  TIER1_COST_BENCHMARKS,
   TIER1_POLICY,
   TIER1_PRODUCTION_THRESHOLDS,
   isTier1Metal,
@@ -33,7 +34,7 @@ type ProjectPrepared = {
   yearsByPeriod: number[];
   productionStartPeriod: number;
   priceKeyByMetal: Record<string, string>;
-  fixedPriceByKey: Record<string, number>;
+  basePriceByKey: Record<string, number>;
   baseInput: Awaited<ReturnType<typeof resolveProjectPricesToEngineInput>>;
   baseOutput: ReturnType<typeof computeProjectEngineFullProductionV1>;
 };
@@ -50,10 +51,6 @@ function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function scalarPrice(series: Array<number | null> | undefined): number | null {
   if (!Array.isArray(series)) return null;
   const finiteValues = series.filter((value): value is number => finite(value) && value > 0);
@@ -64,43 +61,22 @@ function scalarPrice(series: Array<number | null> | undefined): number | null {
   return first;
 }
 
-function reportFixedDeck(
-  rawJson: Record<string, unknown>,
-  parsed: ReturnType<typeof parseProjectJsonV1>,
+function resolvedSpotPriceByKey(
+  input: Awaited<ReturnType<typeof resolveProjectPricesToEngineInput>>,
+  priceKeyByMetal: Record<string, string>,
 ): Record<string, number> | null {
-  const economics = isRecord(rawJson.economics) ? rawJson.economics : null;
-  const explicitDeck = economics && isRecord(economics.fixedPriceDeckUSD)
-    ? economics.fixedPriceDeckUSD
-    : null;
-
-  if (explicitDeck) {
-    const fixed: Record<string, number> = {};
-    for (const metal of Object.keys(parsed.engineInputWithoutPrices.payableQtyByMetal)) {
-      const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
-      if (!priceKey) return null;
-      const canonicalField = `${metal}_${getPriceKeyDefinition(priceKey).canonicalUnit}`;
-      const candidates = [explicitDeck[priceKey], explicitDeck[canonicalField]].filter(
-        (value): value is number => finite(value) && value > 0,
-      );
-      if (candidates.length === 0) return null;
-      const first = candidates[0];
-      const tolerance = Math.max(1e-9, Math.abs(first) * 1e-9);
-      if (candidates.some((value) => Math.abs(value - first) > tolerance)) return null;
-      fixed[priceKey] = first;
-    }
-    return fixed;
-  }
-
-  const overrides = parsed.priceOverrides.spotPriceUSDByMetal;
-  if (!overrides) return null;
-  const fixed: Record<string, number> = {};
-  for (const metal of Object.keys(parsed.engineInputWithoutPrices.payableQtyByMetal)) {
-    const priceKey = parsed.engineInputWithoutPrices.priceKeyByMetal[metal];
-    const price = scalarPrice(overrides[metal]);
+  const prices: Record<string, number> = {};
+  for (const [metal, priceKey] of Object.entries(priceKeyByMetal)) {
+    const price = scalarPrice(input.spotPriceUSDByMetal[metal]);
     if (!priceKey || price === null) return null;
-    fixed[priceKey] = price;
+    const existing = prices[priceKey];
+    if (finite(existing)) {
+      const tolerance = Math.max(1e-9, Math.abs(existing) * 1e-9);
+      if (Math.abs(existing - price) > tolerance) return null;
+    }
+    prices[priceKey] = price;
   }
-  return fixed;
+  return prices;
 }
 
 function addToNestedMap(target: Map<string, Map<number, number>>, key: string, year: number, value: number): void {
@@ -204,8 +180,8 @@ async function loadCycleMultiplier(priceKey: string): Promise<Tier1CycleMultipli
       return {
         status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthlyCount,
         ratioObservations: 0, bearEpisodes: 0,
-        method: 'Sustained relative bear episode model',
-        reason: `History refresh failed for ${priceKey}: ${error instanceof Error ? error.message : String(error)}`,
+        method: 'Uthålliga relativa lågcykelepisoder',
+        reason: `Historikuppdatering misslyckades för ${priceKey}: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }
@@ -260,7 +236,8 @@ function unavailableAssessment(diagnostics: string[]): Tier1PreRevenueAssessment
     primaryMetal: null, primaryMetalRevenueShare: null,
     gates: { lom: unavailable, scale: unavailable, cost: unavailable, cycle: unavailable, capitalReturns: unavailable },
     support: {
-      reportBaseNpv10Usd: null, reportBaseIrr: null, reportBaseNpvOverInitialCapex: null,
+      tierBasePriceMode: 'SPOT', tierBasePriceAsOfUtc: new Date().toISOString(),
+      tierBaseNpv10Usd: null, tierBaseIrr: null, tierBaseNpvOverInitialCapex: null,
       cycleNpv10Usd: null, cycleDurationProductionPeriods: TIER1_POLICY.cycleDurationProductionPeriods,
       cycleMultipliersByMetal: {}, cycleMethod: null,
     },
@@ -277,7 +254,7 @@ function equivalentAiscForMetal(
   for (const project of preparedProjects) {
     const priceKey = project.priceKeyByMetal[metal];
     if (!priceKey) return null;
-    const price = project.fixedPriceByKey[priceKey];
+    const price = project.basePriceByKey[priceKey];
     if (!finite(price) || price <= 0) return null;
     const canonicalUnit = getPriceKeyDefinition(priceKey).canonicalUnit;
     for (const revenue of project.baseOutput.revenue.grossRevenueUSD) {
@@ -295,6 +272,13 @@ function equivalentAiscForMetal(
     }
   }
   return equivalentQuantity > 0 ? sustainingCostUsd / equivalentQuantity : null;
+}
+
+function singlePhysicalMetal(quantityByMetalByYear: Map<string, Map<number, number>>): Tier1Metal | null {
+  const metals = [...quantityByMetalByYear.entries()]
+    .filter(([metal, byYear]) => isTier1Metal(metal) && [...byYear.values()].some((value) => finite(value) && value > 0))
+    .map(([metal]) => metal as Tier1Metal);
+  return metals.length === 1 ? metals[0] : null;
 }
 
 export default async function handler(req: any, res: any): Promise<void> {
@@ -321,17 +305,18 @@ export default async function handler(req: any, res: any): Promise<void> {
     const quantityByMetalByYear = new Map<string, Map<number, number>>();
     const quantityUnitByMetal = new Map<string, 'toz' | 'tonne'>();
     const productionYears = new Set<number>();
+    const tierBasePriceAsOfUtc = new Date().toISOString();
     let initialCapexUsd = 0;
     let sustainingCostUsd = 0;
     let auEqDenominatorOz = 0;
-    let reportDeckComplete = true;
+    let spotDeckComplete = true;
 
     for (const project of loaded) {
       const parsed = parseProjectJsonV1(project.rawJson);
       const physicalInput = parsed.engineInputWithoutPrices;
       const yearsByPeriod = physicalInput.yearsByPeriod;
 
-      // PHYSICAL GATES FIRST: payable production is independent of report prices.
+      // Physical mine-plan gates never depend on the report deck or current prices.
       for (const [metal, qtySeries] of Object.entries(physicalInput.payableQtyByMetal)) {
         const priceKey = physicalInput.priceKeyByMetal[metal];
         if (!priceKey) continue;
@@ -342,7 +327,7 @@ export default async function handler(req: any, res: any): Promise<void> {
           if (!standard) continue;
           const existingUnit = quantityUnitByMetal.get(metal);
           if (existingUnit && existingUnit !== standard.unit) {
-            diagnostics.push(`${project.projectId}: inconsistent canonical payable units for ${metal}.`);
+            diagnostics.push(`${project.projectId}: inkonsekventa kanoniska payable-enheter för ${metal}.`);
             continue;
           }
           quantityUnitByMetal.set(metal, standard.unit);
@@ -351,24 +336,39 @@ export default async function handler(req: any, res: any): Promise<void> {
         }
       }
 
-      const fixedPriceByKey = reportFixedDeck(project.rawJson, parsed);
-      if (!fixedPriceByKey) {
-        reportDeckComplete = false;
-        diagnostics.push(`${project.projectId}: rapportens fasta ekonomiska prisdeck kunde inte verifieras; IRR, kostnad och cykel lämnas Ej verifierade för denna del.`);
+      let baseInput: Awaited<ReturnType<typeof resolveProjectPricesToEngineInput>>;
+      try {
+        baseInput = await resolveProjectPricesToEngineInput({
+          parsed,
+          scenario: { mode: 'spot' },
+          allowRefresh: true,
+          projectId: project.projectId,
+        });
+      } catch (error) {
+        spotDeckComplete = false;
+        diagnostics.push(`${project.projectId}: gemensamt Tier-spotdeck kunde inte lösas: ${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
 
-      const from = `${yearsByPeriod[0]}-12-31`;
-      const to = `${yearsByPeriod[yearsByPeriod.length - 1]}-12-31`;
-      const baseInput = await resolveProjectPricesToEngineInput({
-        parsed, scenario: { mode: 'fixed', fixedPriceByKey }, from, to,
-        allowRefresh: false, projectId: project.projectId,
-      });
+      const priceFailures = baseInput.diagnostics?.metalsWithPriceFailure ?? [];
+      const basePriceByKey = resolvedSpotPriceByKey(baseInput, physicalInput.priceKeyByMetal);
+      if (priceFailures.length > 0 || !basePriceByKey) {
+        spotDeckComplete = false;
+        diagnostics.push(`${project.projectId}: spotpris saknas eller är ogiltigt för ${priceFailures.length > 0 ? priceFailures.join(', ') : 'minst en price key'}; prisberoende Tier-kriterier lämnas Ej verifierade.`);
+        continue;
+      }
+      for (const warning of baseInput.diagnostics?.warnings ?? []) diagnostics.push(`${project.projectId}: ${warning}`);
+
       const baseOutput = computeProjectEngineFullProductionV1(baseInput);
       const productionStartPeriod = physicalInput.productionStartPeriod;
       preparedProjects.push({
-        projectId: project.projectId, yearsByPeriod, productionStartPeriod,
-        priceKeyByMetal: physicalInput.priceKeyByMetal, fixedPriceByKey, baseInput, baseOutput,
+        projectId: project.projectId,
+        yearsByPeriod,
+        productionStartPeriod,
+        priceKeyByMetal: physicalInput.priceKeyByMetal,
+        basePriceByKey,
+        baseInput,
+        baseOutput,
       });
 
       for (let t = 0; t <= productionStartPeriod; t += 1) {
@@ -395,8 +395,9 @@ export default async function handler(req: any, res: any): Promise<void> {
     const scaleAssessment = assessCombinedScale(scaleWindow.averagesByMetal, windowLabel);
     const scaleGate = scaleAssessment.gate;
 
-    if (!reportDeckComplete || preparedProjects.length !== loaded.length) {
-      const priceReason = 'Rapportens fasta ekonomiska prisdeck saknas för minst ett projekt; prisberoende kriterier kan inte verifieras.';
+    if (!spotDeckComplete || preparedProjects.length !== loaded.length) {
+      const priceReason = 'Gemensamt kanoniskt spot-deck saknas för minst ett projekt; prisberoende Tier-kriterier kan inte verifieras.';
+      const fallbackPrimary = singlePhysicalMetal(quantityByMetalByYear);
       const gates = {
         lom: lomGate,
         scale: scaleGate,
@@ -408,13 +409,19 @@ export default async function handler(req: any, res: any): Promise<void> {
       const assessment: Tier1PreRevenueAssessment = {
         status: classification.status,
         classificationReason: classification.reason,
-        primaryMetal: null,
-        primaryMetalRevenueShare: null,
+        primaryMetal: fallbackPrimary,
+        primaryMetalRevenueShare: fallbackPrimary ? 1 : null,
         gates,
         support: {
-          reportBaseNpv10Usd: null, reportBaseIrr: null, reportBaseNpvOverInitialCapex: null,
-          cycleNpv10Usd: null, cycleDurationProductionPeriods: TIER1_POLICY.cycleDurationProductionPeriods,
-          cycleMultipliersByMetal: {}, cycleMethod: null,
+          tierBasePriceMode: 'SPOT',
+          tierBasePriceAsOfUtc,
+          tierBaseNpv10Usd: null,
+          tierBaseIrr: null,
+          tierBaseNpvOverInitialCapex: null,
+          cycleNpv10Usd: null,
+          cycleDurationProductionPeriods: TIER1_POLICY.cycleDurationProductionPeriods,
+          cycleMultipliersByMetal: {},
+          cycleMethod: null,
           averageAnnualPayableByMetal: scaleWindow.averagesByMetal,
           scaleEquivalentByMetal: scaleAssessment.equivalentByMetal,
           combinedScaleEquivalent: scaleAssessment.combinedEquivalent,
@@ -431,8 +438,10 @@ export default async function handler(req: any, res: any): Promise<void> {
     const totalRevenue = Object.values(revenueByMetalTotal).reduce<number>((sum, value) => sum + value, 0);
     const sortedRevenue = Object.entries(revenueByMetalTotal).filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
     const primaryRaw = sortedRevenue[0]?.[0] ?? null;
-    const primaryMetal: Tier1Metal | null = primaryRaw && isTier1Metal(primaryRaw) ? primaryRaw : null;
-    const primaryMetalRevenueShare = primaryMetal && totalRevenue > 0 ? (revenueByMetalTotal[primaryMetal] ?? 0) / totalRevenue : null;
+    const primaryMetal: Tier1Metal | null = primaryRaw && isTier1Metal(primaryRaw) ? primaryRaw : singlePhysicalMetal(quantityByMetalByYear);
+    const primaryMetalRevenueShare = primaryMetal && totalRevenue > 0
+      ? (revenueByMetalTotal[primaryMetal] ?? 0) / totalRevenue
+      : primaryMetal ? 1 : null;
 
     const baseCorporate = aggregateFcffByYear(preparedProjects.map((project) => ({ yearsByPeriod: project.yearsByPeriod, fcff: project.baseOutput.phase1.fcffUSD })));
     const basePhase2 = baseCorporate
@@ -466,7 +475,7 @@ export default async function handler(req: any, res: any): Promise<void> {
           fcffUSD: stressCorporate.fcff,
         })
       : null;
-    if (missingCycle.length > 0) diagnostics.push(...missingCycle.map(([priceKey, result]) => `Cycle ${priceKey}: ${result.reason ?? 'Ej verifierad.'}`));
+    if (missingCycle.length > 0) diagnostics.push(...missingCycle.map(([priceKey, result]) => `Cykel ${priceKey}: ${result.reason ?? 'Ej verifierad.'}`));
 
     const capitalReturnsGate = assessCapitalReturns(basePhase2?.irr ?? null);
     const costMetricValues: Partial<Record<Tier1CostMetric, number>> = {};
@@ -493,10 +502,8 @@ export default async function handler(req: any, res: any): Promise<void> {
       }
     }
 
-    const benchmarkMetric = primaryMetal ? costMetricValues : {};
-    const selectedCostMetric = primaryMetal
-      ? (Object.keys(benchmarkMetric).find((metric) => finite(costMetricValues[metric as Tier1CostMetric])) as Tier1CostMetric | undefined) ?? null
-      : null;
+    const benchmark = primaryMetal ? TIER1_COST_BENCHMARKS[primaryMetal] : null;
+    const selectedCostMetric = benchmark && finite(costMetricValues[benchmark.metric]) ? benchmark.metric : null;
 
     const assessment: Tier1PreRevenueAssessment = {
       status: classification.status,
@@ -505,9 +512,11 @@ export default async function handler(req: any, res: any): Promise<void> {
       primaryMetalRevenueShare,
       gates,
       support: {
-        reportBaseNpv10Usd: basePhase2?.npvToday_USD ?? null,
-        reportBaseIrr: basePhase2?.irr ?? null,
-        reportBaseNpvOverInitialCapex: initialCapexUsd > 0 && finite(basePhase2?.npvToday_USD)
+        tierBasePriceMode: 'SPOT',
+        tierBasePriceAsOfUtc,
+        tierBaseNpv10Usd: basePhase2?.npvToday_USD ?? null,
+        tierBaseIrr: basePhase2?.irr ?? null,
+        tierBaseNpvOverInitialCapex: initialCapexUsd > 0 && finite(basePhase2?.npvToday_USD)
           ? (basePhase2!.npvToday_USD as number) / initialCapexUsd
           : null,
         cycleNpv10Usd: stressPhase2?.npvToday_USD ?? null,
