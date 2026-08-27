@@ -1,4 +1,5 @@
 export type Tier1Metal = 'Au' | 'Ag' | 'Cu' | 'Zn' | 'Pb' | 'Ni' | 'Pt' | 'Pd';
+export type TierBand = 1 | 2 | 3;
 
 export type Tier1ProductionThreshold = {
   metal: Tier1Metal;
@@ -32,10 +33,6 @@ export type Tier1CostBenchmark = {
   notes: string;
 };
 
-/**
- * Trial Tier-1 physical scale gates. A polymetallic project may also pass through
- * the combined threshold-equivalent fallback in the assessment layer.
- */
 export const TIER1_PRODUCTION_THRESHOLDS: Record<Tier1Metal, Tier1ProductionThreshold> = {
   Au: { metal: 'Au', minimumAnnualPayable: 300_000, unit: 'toz', label: '300 koz Au/år' },
   Ag: { metal: 'Ag', minimumAnnualPayable: 15_000_000, unit: 'toz', label: '15 Moz Ag/år' },
@@ -48,129 +45,104 @@ export const TIER1_PRODUCTION_THRESHOLDS: Record<Tier1Metal, Tier1ProductionThre
 };
 
 /**
- * Static, manually updateable low-cost evidence for every metal in the current
- * Tier-1 universe. updatedAtUtc is the date the registry was manually verified;
- * the underlying data period is retained separately.
- *
- * EXACT_Q1_BOUNDARY may be used as a true pass/fail boundary when the project
- * metric is definition-compatible. Q1_REFERENCE_CEILING is deliberately more
- * conservative: the cited mine is explicitly described as first-quartile and
- * its published cost is stored as a pass-only ceiling. A project above such a
- * reference is NOT_VERIFIED, never failed, because the true 25th-percentile
- * boundary is not public.
+ * Static, manually updateable low-cost evidence. EXACT_Q1_BOUNDARY may be used
+ * as a true Q1 pass/fail boundary when the project metric is definition-compatible.
+ * Q1_REFERENCE_CEILING is pass-only: above the cited first-quartile mine is unknown,
+ * never an inferred FAIL.
  */
 export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   Au: {
-    metal: 'Au',
-    metric: 'AISC_AU_USD_PER_TOZ',
-    benchmarkKind: 'EXACT_Q1_BOUNDARY',
-    q1Max: 1_228,
-    unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: '2025E',
+    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', benchmarkKind: 'EXACT_Q1_BOUNDARY', q1Max: 1_228, unit: 'USD/toz',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2025E',
     sourceLabel: 'S&P Capital IQ / G2 Goldfields global gold AISC curve',
     sourceUrl: 'https://g2goldfields.com/wp-content/uploads/2026/03/G2-Goldfields-Investor-Presentation-March-2026-Public.pdf',
     notes: 'Explicit 2025E boundary: first quartile < US$1,228/oz Au. Global gold mines >25 koz; co-product AISC.',
   },
   Ag: {
-    metal: 'Ag',
-    metric: 'AISC_AGEQ_USD_PER_TOZ',
-    benchmarkKind: 'Q1_REFERENCE_CEILING',
-    q1Max: 12.9,
-    unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: '2025',
+    metal: 'Ag', metric: 'AISC_AGEQ_USD_PER_TOZ', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 12.9, unit: 'USD/toz',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2025',
     sourceLabel: 'Juanicipio 2025 AgEq AISC; Pan American/S&P first-quartile classification',
     sourceUrl: 'https://www.fresnilloplc.com/media/wfzesgc1/030326-fres-fy25-prelim-presentation-final.pdf',
     evidenceUrl: 'https://panamericansilver.com/wp-content/uploads/2026/06/PAAS-Investor-Presentation_June_2026_vF.pdf',
-    notes: 'Juanicipio 2025 AISC US$12.9/AgEq oz. Pan American’s 2026 S&P-based cost curve explicitly classifies Juanicipio as a first-quartile silver asset. This is a conservative pass-only reference, not the exact Q25 boundary.',
+    notes: 'Juanicipio 2025 AISC US$12.9/AgEq oz and first-quartile classification. Conservative pass-only reference, not exact Q25.',
   },
   Cu: {
-    metal: 'Cu',
-    metric: 'C1_CU_USD_PER_LB',
-    benchmarkKind: 'Q1_REFERENCE_CEILING',
-    q1Max: 1.32,
-    unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: '2025 PFS',
-    sourceLabel: 'Ivanhoe Electric Santa Cruz PFS',
+    metal: 'Cu', metric: 'C1_CU_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 1.32, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2025 PFS', sourceLabel: 'Ivanhoe Electric Santa Cruz PFS',
     sourceUrl: 'https://ivanhoeelectric.com/news/ivanhoe-electrics-preliminary-feasibility-study-for-the-santa-cruz-copper-project-in-arizona-defines-a-high-quality-underground/',
-    notes: 'Santa Cruz LOM C1 cash cost US$1.32/lb Cu, explicitly described as global first quartile. Conservative pass-only reference, not the exact global Q25 boundary.',
+    notes: 'Santa Cruz LOM C1 cash cost US$1.32/lb Cu, explicitly global first quartile. Pass-only reference.',
   },
   Zn: {
-    metal: 'Zn',
-    metric: 'AISC_ZNEQ_USD_PER_LB',
-    benchmarkKind: 'Q1_REFERENCE_CEILING',
-    q1Max: 0.16,
-    unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: 'Taylor FS / 2024 investment approval',
-    sourceLabel: 'South32 Hermosa Taylor FS',
+    metal: 'Zn', metric: 'AISC_ZNEQ_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 0.16, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-27', dataPeriod: 'Taylor FS / 2024 investment approval', sourceLabel: 'South32 Hermosa Taylor FS',
     sourceUrl: 'https://www.south32.net/docs/default-source/exchange-releases/final-investment-approval-to-develop-hermosa-taylor-deposit-0x5ffd9fac3b216589.pdf',
-    notes: 'Taylor Zn-Pb-Ag AISC ~US$0.16/lb on a ZnEq basis and explicitly first quartile. Shared Zn/Pb polymetallic reference; not a standalone zinc Q25 boundary.',
+    notes: 'Taylor Zn-Pb-Ag AISC ~US$0.16/lb ZnEq and explicitly first quartile. Shared basket reference; pass-only.',
   },
   Pb: {
-    metal: 'Pb',
-    metric: 'AISC_ZNEQ_USD_PER_LB',
-    benchmarkKind: 'Q1_REFERENCE_CEILING',
-    q1Max: 0.16,
-    unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: 'Taylor FS / 2024 investment approval',
-    sourceLabel: 'South32 Hermosa Taylor FS',
+    metal: 'Pb', metric: 'AISC_ZNEQ_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 0.16, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-27', dataPeriod: 'Taylor FS / 2024 investment approval', sourceLabel: 'South32 Hermosa Taylor FS',
     sourceUrl: 'https://www.south32.net/docs/default-source/exchange-releases/final-investment-approval-to-develop-hermosa-taylor-deposit-0x5ffd9fac3b216589.pdf',
-    notes: 'Taylor Zn-Pb-Ag AISC ~US$0.16/lb on a ZnEq basis and explicitly first quartile. Used only as a shared Zn/Pb basket reference, never as a standalone Pb Q25 boundary.',
+    notes: 'Taylor Zn-Pb-Ag AISC ~US$0.16/lb ZnEq and explicitly first quartile. Shared basket reference; never treated as standalone Pb Q25.',
   },
   Ni: {
-    metal: 'Ni',
-    metric: 'C1_NI_USD_PER_LB',
-    benchmarkKind: 'Q1_REFERENCE_CEILING',
-    q1Max: 3.34,
-    unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: '2025 project update',
-    sourceLabel: 'Centaurus Metals Jaguar nickel project',
+    metal: 'Ni', metric: 'C1_NI_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 3.34, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2025 project update', sourceLabel: 'Centaurus Metals Jaguar nickel project',
     sourceUrl: 'https://centaurusmetals.com/pdf/b2bc4fc8-f0c0-4704-8d19-6cb756e7a057/Quarterly-ActivitiesAppendix-5B-Cash-Flow-Report.pdf?Platform=ListPage',
-    notes: 'Jaguar LOM C1 US$3.34/lb payable Ni and AISC US$4.43/lb, both explicitly described as first quartile. C1 is stored as the conservative reference because nickel cost curves are normally C1-based.',
+    notes: 'Jaguar LOM C1 US$3.34/lb payable Ni, explicitly first quartile. Pass-only reference.',
   },
   Pt: {
-    metal: 'Pt',
-    metric: 'AISC_PGM3E_USD_PER_TOZ',
-    benchmarkKind: 'Q1_REFERENCE_CEILING',
-    q1Max: 835,
-    unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: '2025',
-    sourceLabel: 'Valterra Platinum Mogalakwena 2025',
+    metal: 'Pt', metric: 'AISC_PGM3E_USD_PER_TOZ', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
     sourceUrl: 'https://www.valterraplatinum.com/media_centre/annual-results-2025/',
-    notes: 'Mogalakwena AISC US$835 per 3E oz sold and explicitly described as firmly first quartile. PGM basket reference only; not a standalone Pt cost curve.',
+    notes: 'Mogalakwena AISC US$835 per 3E oz sold and explicitly first quartile. PGM-basket pass-only reference.',
   },
   Pd: {
-    metal: 'Pd',
-    metric: 'AISC_PGM3E_USD_PER_TOZ',
-    benchmarkKind: 'Q1_REFERENCE_CEILING',
-    q1Max: 835,
-    unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27',
-    dataPeriod: '2025',
-    sourceLabel: 'Valterra Platinum Mogalakwena 2025',
+    metal: 'Pd', metric: 'AISC_PGM3E_USD_PER_TOZ', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
     sourceUrl: 'https://www.valterraplatinum.com/media_centre/annual-results-2025/',
-    notes: 'Mogalakwena AISC US$835 per 3E oz sold and explicitly described as firmly first quartile. PGM basket reference only; not a standalone Pd cost curve.',
+    notes: 'Mogalakwena AISC US$835 per 3E oz sold and explicitly first quartile. PGM-basket pass-only reference.',
   },
 };
 
 export const TIER1_POLICY = {
-  minimumLomYears: 15,
-  minimumAfterTaxIrr: 0.25,
+  tier1LomYears: 15,
+  tier2LomYears: 10,
+  tier1AfterTaxIrr: 0.25,
+  tier2AfterTaxIrr: 0.20,
+  minimumQualifiedAfterTaxIrr: 0.15,
+  tier1ScaleEquivalent: 1.0,
+  tier2ScaleEquivalent: 0.40,
+  sustainedScaleYears: 10,
   cycleLookbackYears: 25,
   cycleTrendMonths: 60,
-  cyclePercentile: 0.20,
+  cycleRollingMonths: 12,
+  cycleBearThresholdRatio: 0.95,
+  cycleMinimumEpisodeMonths: 6,
+  cycleEpisodeTroughQuantile: 0.50,
   cycleDurationProductionPeriods: 3,
   costBenchmarkMaxAgeDays: 365,
   minimumHistoryMonths: 180,
   goldCostDominanceMinimumRevenueShare: 0.80,
-  minimumCombinedScaleEquivalent: 1.0,
 } as const;
+
+export function tierBandFromScaleEquivalent(value: number): TierBand {
+  if (value >= TIER1_POLICY.tier1ScaleEquivalent) return 1;
+  if (value >= TIER1_POLICY.tier2ScaleEquivalent) return 2;
+  return 3;
+}
+
+export function tierBandFromLom(value: number): TierBand {
+  if (value >= TIER1_POLICY.tier1LomYears) return 1;
+  if (value >= TIER1_POLICY.tier2LomYears) return 2;
+  return 3;
+}
+
+export function tierBandFromIrr(value: number): TierBand | null {
+  if (value >= TIER1_POLICY.tier1AfterTaxIrr) return 1;
+  if (value >= TIER1_POLICY.tier2AfterTaxIrr) return 2;
+  if (value >= TIER1_POLICY.minimumQualifiedAfterTaxIrr) return 3;
+  return null;
+}
 
 export function isTier1Metal(value: string): value is Tier1Metal {
   return value in TIER1_PRODUCTION_THRESHOLDS;
@@ -191,5 +163,5 @@ export function tier1CostBenchmarkNeedsUpdate(benchmark: Tier1CostBenchmark, now
 export function getTier1CostBenchmarkTodos(nowUtc = new Date().toISOString()): string[] {
   return Object.values(TIER1_COST_BENCHMARKS)
     .filter((benchmark) => tier1CostBenchmarkNeedsUpdate(benchmark, nowUtc))
-    .map((benchmark) => `Tier-1: uppdatera statisk Q1-kostnadsreferens för ${benchmark.metal} (senast verifierad ${benchmark.updatedAtUtc}; data ${benchmark.dataPeriod}).`);
+    .map((benchmark) => `Tier: uppdatera statisk Q1-kostnadsreferens för ${benchmark.metal} (senast verifierad ${benchmark.updatedAtUtc}; data ${benchmark.dataPeriod}).`);
 }
