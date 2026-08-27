@@ -56,9 +56,8 @@ export function toMonthlyLast(rows: PriceHistoryRow[]): PriceHistoryRow[] {
  * Each observation compares the trailing 12-month average price with the median
  * of the PRECEDING 60 months. Months at or below 95% of that prior regime are
  * grouped into contiguous bear episodes. Only episodes lasting at least six
- * months count; the stored stress multiplier is the median trough across those
- * episodes. This remains relative to each commodity's own historical regime and
- * therefore does not apply obsolete absolute prices to today's cost structure.
+ * months count; the stored stress multiplier is the configured trough quantile
+ * across those episodes. The result is relative to each commodity's own regime.
  */
 export function computeTier1CycleMultiplier(rows: PriceHistoryRow[]): Tier1CycleMultiplierResult {
   const monthly = toMonthlyLast(rows);
@@ -66,13 +65,14 @@ export function computeTier1CycleMultiplier(rows: PriceHistoryRow[]): Tier1Cycle
   const rollingMonths = TIER1_POLICY.cycleRollingMonths;
   const threshold = TIER1_POLICY.cycleBearThresholdRatio;
   const minEpisodeMonths = TIER1_POLICY.cycleMinimumEpisodeMonths;
-  const method = `Sustained bear episodes: ${rollingMonths}m average / prior ${trendMonths}m median; episode <=${threshold.toFixed(2)} for >=${minEpisodeMonths}m; median episode trough; ${TIER1_POLICY.cycleLookbackYears}y lookback; applied for ${TIER1_POLICY.cycleDurationProductionPeriods} production years`;
+  const troughQuantilePct = Math.round(TIER1_POLICY.cycleEpisodeTroughQuantile * 100);
+  const method = `Uthålliga lågcykelepisoder: ${rollingMonths} månaders prisgenomsnitt / medianen för föregående ${trendMonths} månader; lågcykel ≤${threshold.toFixed(2)}x i minst ${minEpisodeMonths} månader; P${troughQuantilePct} av episodernas bottennivåer; ${TIER1_POLICY.cycleLookbackYears} års historik; appliceras under ${TIER1_POLICY.cycleDurationProductionPeriods} produktionsår`;
 
   if (monthly.length < TIER1_POLICY.minimumHistoryMonths) {
     return {
       status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthly.length,
       ratioObservations: 0, bearEpisodes: 0, method,
-      reason: `Need at least ${TIER1_POLICY.minimumHistoryMonths} monthly observations; found ${monthly.length}.`,
+      reason: `Minst ${TIER1_POLICY.minimumHistoryMonths} månadsobservationer krävs; ${monthly.length} hittades.`,
     };
   }
 
@@ -117,8 +117,8 @@ export function computeTier1CycleMultiplier(rows: PriceHistoryRow[]): Tier1Cycle
       status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthly.length,
       ratioObservations: ratios.length, bearEpisodes: sustainedEpisodes.length, method,
       reason: sustainedEpisodes.length === 0
-        ? `No sustained bear episode met <=${threshold.toFixed(2)} for >=${minEpisodeMonths} months.`
-        : `Relative bear multiplier must resolve within (0,1); got ${String(multiplier)}.`,
+        ? `Ingen uthållig lågcykelepisod uppfyllde ≤${threshold.toFixed(2)}x i minst ${minEpisodeMonths} månader.`
+        : `Relativ bear-multiplikator måste ligga mellan 0 och 1; beräknat värde ${String(multiplier)}.`,
     };
   }
 
