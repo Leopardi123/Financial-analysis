@@ -50,6 +50,13 @@ function formatUsd(value: number | null | undefined): string {
   return `${value.toLocaleString('sv-SE', { maximumFractionDigits: 0 })} USD`;
 }
 
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  return date.toLocaleDateString('sv-SE');
+}
+
 function GateRow({ label, gate }: { label: string; gate: Tier1Gate }) {
   const state = gate.status === 'NOT_VERIFIED' ? 'not-verified' : gate.status === 'FAIL' && gate.tier === null ? 'fail' : `tier-${gate.tier ?? 1}`;
   return <div className={`tier1-modal__gate tier1-modal__gate--${state}`}>
@@ -114,7 +121,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           <div>
             <div className="tier1-modal__eyebrow">TIER · PRE REVENUE</div>
             <h3 id={`tier1-title-${symbol}`}>{symbol} · {overallText(assessment)}</h3>
-            <p>Produktionsskala, LOM och kapitalavkastning sätter Tier-taket. Tier 1 kräver dessutom verifierad Q1-kostnadsposition och positiv NPV10 genom bear-testet. För svag ekonomi eller misslyckat bear-test ger Ej kvalificerad.</p>
+            <p>Tier-ekonomin räknas apples-to-apples med Instrumentbrädans gemensamma aktuella spot-deck. Rapportens PEA/PFS/FS-priser används för modellreconciliation, inte för Tier. Produktionsskala och LOM är prisoberoende.</p>
           </div>
           <button type="button" className="tier1-modal__close" onClick={() => setOpen(false)} aria-label="Stäng Tier-bedömning">×</button>
         </div>
@@ -124,11 +131,11 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
 
           <div className="tier1-modal__summary">
             <div><span>Primär metall</span><strong>{assessment.primaryMetal ?? 'Ej verifierad'}</strong></div>
-            <div><span>Revenue-andel</span><strong>{typeof assessment.primaryMetalRevenueShare === 'number' ? `${(assessment.primaryMetalRevenueShare * 100).toFixed(1)} %` : '—'}</strong></div>
-            <div><span>10y combined scale</span><strong>{typeof assessment.support.combinedScaleEquivalent === 'number' ? `${assessment.support.combinedScaleEquivalent.toFixed(2)}x` : '—'}</strong></div>
+            <div><span>Revenue-andel · spot</span><strong>{typeof assessment.primaryMetalRevenueShare === 'number' ? `${(assessment.primaryMetalRevenueShare * 100).toFixed(1)} %` : '—'}</strong></div>
+            <div><span>Uthållig combined scale</span><strong>{typeof assessment.support.combinedScaleEquivalent === 'number' ? `${assessment.support.combinedScaleEquivalent.toFixed(2)}x` : '—'}</strong></div>
             <div><span>Skalfönster</span><strong>{scaleWindow}</strong></div>
-            <div><span>Report/base IRR</span><strong>{typeof assessment.support.reportBaseIrr === 'number' ? `${(assessment.support.reportBaseIrr * 100).toFixed(1)} %` : '—'}</strong></div>
-            <div><span>Bear NPV10</span><strong>{formatUsd(assessment.support.cycleNpv10Usd)}</strong></div>
+            <div><span>Tier-IRR · spot</span><strong>{typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : '—'}</strong></div>
+            <div><span>Spotdatum</span><strong>{formatDate(assessment.support.tierBasePriceAsOfUtc)}</strong></div>
           </div>
 
           <div className="tier1-modal__gates">
@@ -144,14 +151,14 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <div className="tier1-modal__chips">
               {scaleEntries.map(([metal, equivalent]) => <span key={metal}><strong>{metal}</strong> {formatNumber(equivalent as number)}x</span>)}
             </div>
-            <p>Skalan använder bästa sammanhängande 10-årsfönster när minst tio produktionsår finns. 1,00x motsvarar respektive metals fysiska Tier-1-gräns; polymetalliska bidrag summeras utan metallpris eller spot-AuEq. Tier 2 börjar vid 0,40x och under 0,40x ger alltid högst Tier 3.</p>
+            <p>Skalan använder bästa sammanhängande 10-årsfönster när minst tio produktionsår finns; kortare projekt använder hela den tillgängliga produktionsperioden. 1,00x motsvarar respektive metals fysiska Tier-1-gräns. Polymetalliska bidrag summeras utan metallpris eller AuEq. Tier 2 börjar vid 0,40x och under 0,40x ger alltid högst Tier 3.</p>
           </div>}
 
           <div className="tier1-modal__section">
-            <h4>Ekonomiskt stöd</h4>
+            <h4>Ekonomiskt stöd · gemensamt spot-deck</h4>
             <dl className="tier1-modal__facts">
-              <div><dt>Base NPV10</dt><dd>{formatUsd(assessment.support.reportBaseNpv10Usd)}</dd></div>
-              <div><dt>NPV10 / initial CAPEX</dt><dd>{typeof assessment.support.reportBaseNpvOverInitialCapex === 'number' ? `${formatNumber(assessment.support.reportBaseNpvOverInitialCapex)}x` : '—'}</dd></div>
+              <div><dt>Tier NPV10 · spot</dt><dd>{formatUsd(assessment.support.tierBaseNpv10Usd)}</dd></div>
+              <div><dt>NPV10 / initial CAPEX</dt><dd>{typeof assessment.support.tierBaseNpvOverInitialCapex === 'number' ? `${formatNumber(assessment.support.tierBaseNpvOverInitialCapex)}x` : '—'}</dd></div>
               <div><dt>Bear NPV10</dt><dd>{formatUsd(assessment.support.cycleNpv10Usd)}</dd></div>
               <div><dt>Bear-längd</dt><dd>{assessment.support.cycleDurationProductionPeriods} produktionsår</dd></div>
             </dl>
