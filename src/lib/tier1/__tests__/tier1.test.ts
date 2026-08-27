@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { computeTier1CycleMultiplier } from '../cycle.ts';
 import { getTier1CostBenchmarkTodos } from '../config.ts';
 import { assessCapitalReturns, assessCombinedScale, assessLom, classifyTier, type Tier1Gate } from '../preRevenue.ts';
+import { selectConservativeProjectIrr } from '../projectIrr.ts';
 import { getFredCommodityPriceMapping, getFredHistoryCommodityPriceMapping, isFredHistoryOnlyCommodityPriceKey } from '../../prices/providers/fred.ts';
 
 function monthDate(index: number): string {
@@ -43,6 +44,25 @@ assert.equal(assessCapitalReturns(0.22).tier, 2);
 assert.equal(assessCapitalReturns(0.17).tier, 3);
 assert.equal(assessCapitalReturns(0.14).tier, null);
 assert.ok(assessCapitalReturns(0.25).reason.includes('spot'));
+
+// Multi-project Tier uses the lowest valid IRR among projects that actually
+// contain investment cash-flow. A positive-only project has no investment IRR
+// and must not turn the company into NOT_VERIFIED.
+const ggdLikeProjectIrr = selectConservativeProjectIrr([
+  { projectId: 'p3', irr: 1.0263, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
+  { projectId: 'p2', irr: 0.7636, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
+  { projectId: 'p4', irr: null, hasNegativeCashFlow: false, hasPositiveCashFlow: true },
+]);
+assert.equal(ggdLikeProjectIrr.irr, 0.7636);
+assert.deepEqual(ggdLikeProjectIrr.ignoredNoInvestmentProjectIds, ['p4']);
+assert.deepEqual(ggdLikeProjectIrr.unresolvedProjectIds, []);
+
+const unresolvedInvestmentProject = selectConservativeProjectIrr([
+  { projectId: 'p1', irr: 0.30, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
+  { projectId: 'p2', irr: null, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
+]);
+assert.equal(unresolvedInvestmentProject.irr, null);
+assert.deepEqual(unresolvedInvestmentProject.unresolvedProjectIds, ['p2']);
 
 const gate = (tier: 1 | 2 | 3 | null, status: Tier1Gate['status'] = tier === 1 ? 'PASS' : tier === null ? 'NOT_VERIFIED' : 'FAIL'): Tier1Gate => ({
   status, tier, value: 1, threshold: 1, unit: null, reason: '',
