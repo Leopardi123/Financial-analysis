@@ -19,14 +19,16 @@ const cycle = computeTier1CycleMultiplier(history);
 assert.equal(cycle.status, 'COMPUTABLE');
 assert.ok(cycle.multiplier !== null && cycle.multiplier > 0.5 && cycle.multiplier < 0.95);
 assert.ok(cycle.bearEpisodes >= 2);
+assert.ok(cycle.method.includes('Uthålliga lågcykelepisoder'));
 
 assert.equal(assessLom(15).tier, 1);
 assert.equal(assessLom(14).tier, 2);
 assert.equal(assessLom(9).tier, 3);
 
-const abraLikeScale = assessCombinedScale({ Ag: 5_838_160, Au: 61_443 });
-assert.equal(abraLikeScale.gate.tier, 2);
-assert.ok(abraLikeScale.combinedEquivalent !== null && abraLikeScale.combinedEquivalent > 0.59 && abraLikeScale.combinedEquivalent < 0.60);
+// ABRA-like best sustained 10y window (2030–2039): ~11.13 Moz Ag/y + ~75.4 koz Au/y.
+const abraSustainedScale = assessCombinedScale({ Ag: 11_130_000, Au: 75_400 }, '10-års fönster 2030–2039');
+assert.equal(abraSustainedScale.gate.tier, 2);
+assert.ok(abraSustainedScale.combinedEquivalent !== null && abraSustainedScale.combinedEquivalent > 0.99 && abraSustainedScale.combinedEquivalent < 1.0);
 
 const verySmallScale = assessCombinedScale({ Au: 60_000 });
 assert.equal(verySmallScale.gate.tier, 3);
@@ -39,6 +41,7 @@ assert.equal(assessCapitalReturns(0.25).tier, 1);
 assert.equal(assessCapitalReturns(0.22).tier, 2);
 assert.equal(assessCapitalReturns(0.17).tier, 3);
 assert.equal(assessCapitalReturns(0.14).tier, null);
+assert.ok(assessCapitalReturns(0.25).reason.includes('spot'));
 
 const gate = (tier: 1 | 2 | 3 | null, status: Tier1Gate['status'] = tier === 1 ? 'PASS' : tier === null ? 'NOT_VERIFIED' : 'FAIL'): Tier1Gate => ({
   status, tier, value: 1, threshold: 1, unit: null, reason: '',
