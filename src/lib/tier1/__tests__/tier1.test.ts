@@ -3,6 +3,7 @@ import { computeTier1CycleMultiplier } from '../cycle.ts';
 import { getTier1CostBenchmarkTodos } from '../config.ts';
 import { assessCapitalReturns, assessCombinedScale, assessLom, classifyTier, type Tier1Gate } from '../preRevenue.ts';
 import { selectConservativeProjectIrr } from '../projectIrr.ts';
+import { canonicalCostMetricForPrimaryMetal, computeCanonicalC1ForProject, costVintageCompatibility } from '../cost.ts';
 import { getFredCommodityPriceMapping, getFredHistoryCommodityPriceMapping, isFredHistoryOnlyCommodityPriceKey } from '../../prices/providers/fred.ts';
 
 function monthDate(index: number): string {
@@ -63,6 +64,86 @@ const unresolvedInvestmentProject = selectConservativeProjectIrr([
 ]);
 assert.equal(unresolvedInvestmentProject.irr, null);
 assert.deepEqual(unresolvedInvestmentProject.unresolvedProjectIds, ['p2']);
+
+// Canonical Cu/Ni C1 is only computable when mine-site COGS reconciles to OPEX,
+// offsite costs are explicit, and credits cannot be double-counted.
+const canonicalCuInput = {
+  projectId: 'cu-test',
+  primaryMetal: 'Cu' as const,
+  productionStartPeriod: 1,
+  masterN: 2,
+  payableQtyByMetal: { Cu: [0, 100, 100] },
+  payableQtyUnitByMetal: { Cu: 'lb' },
+  operatingCostsUSD: [0, 50, 50],
+  siteGandA_USD: [0, 10, 10],
+  byproductCreditsUSD: [0, 0, 0],
+  economicsBreakdown: {
+    meta: { costBaseYear: 2025 },
+    cogs: {
+      miningUSD: [0, 20, 20],
+      millingUSD: [0, 20, 20],
+      utilitiesUSD: [0, 5, 5],
+      maintenanceUSD: [0, 5, 5],
+      campUSD: [0, 0, 0],
+    },
+    selling: {
+      treatmentChargesUSD: [0, 3, 3],
+      refiningChargesUSD: [0, 2, 2],
+      transportUSD: [0, 2, 2],
+    },
+  },
+  revenueByMetalUSD: { Cu: [0, 1_000, 1_000] },
+};
+
+const canonicalCu = computeCanonicalC1ForProject(canonicalCuInput);
+assert.equal(canonicalCu.status, 'COMPUTABLE');
+assert.equal(canonicalCu.metric, 'C1_CU_USD_PER_LB');
+assert.equal(canonicalCu.costBaseYear, 2025);
+assert.ok(canonicalCu.value !== null && Math.abs(canonicalCu.value - 0.67) < 1e-12);
+assert.equal(canonicalCu.numeratorUSD, 134);
+assert.equal(canonicalCu.denominator, 200);
+
+const cogsMismatch = computeCanonicalC1ForProject({
+  ...canonicalCuInput,
+  economicsBreakdown: {
+    ...canonicalCuInput.economicsBreakdown,
+    cogs: { ...canonicalCuInput.economicsBreakdown.cogs, miningUSD: [0, 30, 30] },
+  },
+});
+assert.equal(cogsMismatch.status, 'NOT_VERIFIED');
+assert.ok(cogsMismatch.reason.includes('reconcilerar inte'));
+
+const missingOffsite = computeCanonicalC1ForProject({
+  ...canonicalCuInput,
+  economicsBreakdown: {
+    ...canonicalCuInput.economicsBreakdown,
+    selling: { transportUSD: [0, 2, 2] },
+  },
+});
+assert.equal(missingOffsite.status, 'NOT_VERIFIED');
+assert.ok(missingOffsite.reason.includes('TC/RC'));
+
+const ambiguousCredits = computeCanonicalC1ForProject({
+  ...canonicalCuInput,
+  byproductCreditsUSD: [0, 4, 4],
+  revenueByMetalUSD: { Cu: [0, 1_000, 1_000], Au: [0, 10, 10] },
+});
+assert.equal(ambiguousCredits.status, 'NOT_VERIFIED');
+assert.ok(ambiguousCredits.reason.includes('dubbelkreditera'));
+
+assert.equal(costVintageCompatibility(2025, '2025 PFS').compatible, true);
+assert.equal(costVintageCompatibility(2024, '2025 PFS').compatible, false);
+assert.equal(costVintageCompatibility(null, '2025 PFS').compatible, false);
+
+const goldAiscNotYetCanonical = canonicalCostMetricForPrimaryMetal({
+  ...canonicalCuInput,
+  primaryMetal: 'Au',
+  payableQtyByMetal: { Au: [0, 100, 100] },
+  payableQtyUnitByMetal: { Au: 'toz' },
+  revenueByMetalUSD: { Au: [0, 1_000, 1_000] },
+});
+assert.equal(goldAiscNotYetCanonical.status, 'NOT_VERIFIED');
+assert.ok(goldAiscNotYetCanonical.reason.includes('Full canonical AISC'));
 
 const gate = (tier: 1 | 2 | 3 | null, status: Tier1Gate['status'] = tier === 1 ? 'PASS' : tier === null ? 'NOT_VERIFIED' : 'FAIL'): Tier1Gate => ({
   status, tier, value: 1, threshold: 1, unit: null, reason: '',
