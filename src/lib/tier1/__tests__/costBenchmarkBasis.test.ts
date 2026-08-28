@@ -17,12 +17,17 @@ assert.deepEqual(
 
 assert.equal(TIER1_COST_BENCHMARKS.Au.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Au.basisId, 'S_AND_P_CO_PRODUCT_AISC_AU');
+assert.equal(TIER1_COST_BENCHMARKS.Au.benchmarkKind, 'EXACT_Q1_BOUNDARY');
+assert.equal(TIER1_COST_BENCHMARKS.Au.q1Max, 1_228);
+assert.equal(TIER1_COST_BENCHMARKS.Au.p50Max, null);
+assert.equal(TIER1_COST_BENCHMARKS.Au.p75Max, null);
 
 assert.equal(TIER1_COST_BENCHMARKS.Ag.comparisonEnabled, false);
 assert.equal(TIER1_COST_BENCHMARKS.Ag.basisId, 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE');
 
 assert.equal(TIER1_COST_BENCHMARKS.Cu.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Cu.basisId, 'S_AND_P_CO_PRODUCT_C1_CU');
+assert.equal(TIER1_COST_BENCHMARKS.Cu.p50Max, null);
 
 assert.equal(TIER1_COST_BENCHMARKS.Zn.comparisonEnabled, false);
 assert.equal(TIER1_COST_BENCHMARKS.Pb.comparisonEnabled, false);
@@ -31,15 +36,24 @@ assert.equal(TIER1_COST_BENCHMARKS.Zn.basisId, 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS
 assert.equal(TIER1_COST_BENCHMARKS.Ni.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Ni.basisId, 'JAGUAR_NI_C1_MINE_SITE_GA');
 assert.equal(TIER1_COST_BENCHMARKS.Ni.q1Max, 3.34);
-assert.ok(TIER1_COST_BENCHMARKS.Ni.notes.includes('payable nickel basis'));
-assert.ok(TIER1_COST_BENCHMARKS.Ni.notes.includes('2,67'));
+assert.equal(TIER1_COST_BENCHMARKS.Ni.p50Max, null);
+assert.ok(TIER1_COST_BENCHMARKS.Ni.notes.includes('payable Ni basis'));
+assert.ok(TIER1_COST_BENCHMARKS.Ni.notes.includes('by-product/co-product'));
 
 assert.equal(TIER1_COST_BENCHMARKS.Pt.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Pd.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Pt.basisId, 'VALTERRA_PGM_3E_AISC_SOLD');
 assert.equal(TIER1_COST_BENCHMARKS.Pd.basisId, 'VALTERRA_PGM_3E_AISC_SOLD');
 assert.equal(TIER1_COST_BENCHMARKS.Pt.q1Max, 835);
+assert.equal(TIER1_COST_BENCHMARKS.Pt.p50Max, null);
 assert.ok(TIER1_COST_BENCHMARKS.Pt.notes.includes('första kvartilen'));
 assert.ok(TIER1_COST_BENCHMARKS.Pt.evidenceUrl?.includes('integrated-report-2025.pdf'));
+
+for (const benchmark of Object.values(TIER1_COST_BENCHMARKS)) {
+  assert.ok(benchmark.boundaryUncertaintyAbs >= 0);
+  if (benchmark.benchmarkKind === 'FULL_QUARTILE_CURVE') {
+    assert.ok(typeof benchmark.p50Max === 'number');
+  }
+}
 
 console.log('costBenchmarkBasis.test.ts passed');
