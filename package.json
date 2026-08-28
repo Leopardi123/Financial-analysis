@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "npm run test:tier",
+    "prebuild": "npm test",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test:tier": "node --experimental-strip-types src/lib/tier1/__tests__/tier1.test.ts && node --experimental-strip-types src/lib/tier1/__tests__/costBenchmarkBasis.test.ts && node --experimental-strip-types src/lib/tier1/__tests__/reportedCost.test.ts && node --experimental-strip-types src/lib/tier1/__tests__/reconciliation.test.ts && node --experimental-strip-types src/lib/tier1/__tests__/projectEvidenceTemplate.test.ts && node --experimental-strip-types src/pages/__tests__/companyProjectShift.test.ts",
@@ -14,7 +14,7 @@
   "dependencies": {
     "@libsql/client": "latest",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react-dom": "^18.3.0",
     "react-google-charts": "^4.0.1"
   },
   "devDependencies": {
