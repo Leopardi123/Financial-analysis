@@ -1,5 +1,6 @@
 import { mergeMonthlyPayload, encodeMonthlyPayload, decodeMonthlyPayload, type MonthlyPricePayload } from "./historyBlob.js";
 import { fetchHistoricalEodFull, fetchLegacyCommodityHistoricalFull } from "./providers/fmp.js";
+import { getLegacySymbolForPriceKey } from "./providers/legacyCommoditySymbolMap.ts";
 import {
   fetchFredCommodityPriceSeries,
   getFredHistoryCommodityPriceMapping,
@@ -143,25 +144,55 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
       if (!providerSymbol) {
         throw new Error(`No FMP mapping found for price key: ${args.priceKey}`);
       }
-      const allRows = await fetchHistoricalFn(providerSymbol);
-      filtered = allRows.filter((row) => row.date >= args.from && row.date <= args.to);
 
-      // The stable FMP full-history endpoint can return only the recent portion of a
-      // requested commodity history. The repository already has the legacy v3
-      // historical-price-full/{symbol}?from=&to= resolver, so use it as a verified
-      // range backfill only when the stable result clearly starts materially after
-      // the requested start date. Stable rows win on overlapping dates.
-      if (hasMaterialLeadingGap(filtered, args.from)) {
+      const verifiedLegacySymbol = getLegacySymbolForPriceKey(args.priceKey);
+      const legacySymbol = verifiedLegacySymbol ?? providerSymbol;
+      let stableRows: HistoryInputRow[] = [];
+      let stableError: unknown = null;
+
+      try {
+        const allRows = await fetchHistoricalFn(providerSymbol);
+        stableRows = allRows.filter((row) => row.date >= args.from && row.date <= args.to);
+      } catch (error) {
+        stableError = error;
+      }
+
+      if (stableError !== null) {
+        if (!verifiedLegacySymbol) {
+          throw stableError;
+        }
         try {
-          const legacyRows = await fetchLegacyHistoricalFn(providerSymbol, {
+          const legacyRows = await fetchLegacyHistoricalFn(verifiedLegacySymbol, {
             fromUtc: args.from,
             toUtc: args.to,
           });
-          const legacyFiltered = legacyRows.filter((row) => row.date >= args.from && row.date <= args.to);
-          filtered = mergeHistoryRows(filtered, legacyFiltered);
-        } catch {
-          // Keep the valid stable history. Callers that require longer coverage
-          // (e.g. Tier cycle resilience) will remain NOT_VERIFIED rather than guess.
+          filtered = legacyRows.filter((row) => row.date >= args.from && row.date <= args.to);
+          providerSymbol = verifiedLegacySymbol;
+        } catch (legacyError) {
+          throw new Error(
+            `FMP stable history failed for ${args.priceKey}/${providerSymbol}: ${stableError instanceof Error ? stableError.message : String(stableError)}; verified legacy ${verifiedLegacySymbol} also failed: ${legacyError instanceof Error ? legacyError.message : String(legacyError)}`,
+          );
+        }
+      } else {
+        filtered = stableRows;
+
+        // The stable FMP full-history endpoint can return only the recent portion of a
+        // requested commodity history. Use the verified legacy v3 range endpoint as a
+        // backfill when stable starts materially after the requested start. Stable rows
+        // win on overlapping dates. If the legacy call fails, retain valid stable rows;
+        // callers requiring longer coverage remain NOT_VERIFIED rather than guessing.
+        if (hasMaterialLeadingGap(filtered, args.from)) {
+          try {
+            const legacyRows = await fetchLegacyHistoricalFn(legacySymbol, {
+              fromUtc: args.from,
+              toUtc: args.to,
+            });
+            const legacyFiltered = legacyRows.filter((row) => row.date >= args.from && row.date <= args.to);
+            filtered = mergeHistoryRows(filtered, legacyFiltered);
+            if (verifiedLegacySymbol) providerSymbol = verifiedLegacySymbol;
+          } catch {
+            // Keep valid stable history.
+          }
         }
       }
       providerLabel = "FMP";
