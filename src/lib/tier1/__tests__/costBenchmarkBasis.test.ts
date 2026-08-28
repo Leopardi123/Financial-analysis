@@ -17,10 +17,13 @@ assert.deepEqual(
 
 assert.equal(TIER1_COST_BENCHMARKS.Au.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Au.basisId, 'S_AND_P_CO_PRODUCT_AISC_AU');
-assert.equal(TIER1_COST_BENCHMARKS.Au.benchmarkKind, 'EXACT_Q1_BOUNDARY');
+assert.equal(TIER1_COST_BENCHMARKS.Au.benchmarkKind, 'FULL_QUARTILE_CURVE');
 assert.equal(TIER1_COST_BENCHMARKS.Au.q1Max, 1_228);
-assert.equal(TIER1_COST_BENCHMARKS.Au.p50Max, null);
-assert.equal(TIER1_COST_BENCHMARKS.Au.p75Max, null);
+assert.equal(TIER1_COST_BENCHMARKS.Au.p50Max, 1_501);
+assert.equal(TIER1_COST_BENCHMARKS.Au.p75Max, 1_840);
+assert.equal(TIER1_COST_BENCHMARKS.Au.boundaryUncertaintyAbs, 0);
+assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q2 1 228–1 501'));
+assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q3 1 501–1 840'));
 
 assert.equal(TIER1_COST_BENCHMARKS.Ag.comparisonEnabled, false);
 assert.equal(TIER1_COST_BENCHMARKS.Ag.basisId, 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE');
@@ -53,6 +56,9 @@ for (const benchmark of Object.values(TIER1_COST_BENCHMARKS)) {
   assert.ok(benchmark.boundaryUncertaintyAbs >= 0);
   if (benchmark.benchmarkKind === 'FULL_QUARTILE_CURVE') {
     assert.ok(typeof benchmark.p50Max === 'number');
+    assert.ok(typeof benchmark.p75Max === 'number');
+    assert.ok(benchmark.q1Max < benchmark.p50Max);
+    assert.ok(benchmark.p50Max < benchmark.p75Max);
   }
 }
 
