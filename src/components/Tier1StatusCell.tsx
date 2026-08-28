@@ -61,16 +61,21 @@ function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | nu
   return promise;
 }
 
-function reconciliationIsProvisional(assessment: Tier1PreRevenueAssessment | null): boolean {
+function assessmentIsProvisional(assessment: Tier1PreRevenueAssessment | null): boolean {
   if (!assessment) return false;
   const support = assessment.support as ExtendedTierSupport;
-  return support.reconciliationVerified === false
-    && (assessment.status === 'TIER_2' || assessment.status === 'TIER_3' || assessment.status === 'NOT_QUALIFIED');
+  const visibleResult = assessment.status === 'TIER_2' || assessment.status === 'TIER_3' || assessment.status === 'NOT_QUALIFIED';
+  if (!visibleResult) return false;
+  const reconciliationIncomplete = support.reconciliationVerified === false;
+  // A structural Tier 2 can still fall to Tier 3 when cost is unknown. A
+  // structural Tier 3 cannot be lowered further within the current 3-band scale.
+  const costCanStillChangeResult = assessment.status === 'TIER_2' && assessment.gates.cost.status === 'NOT_VERIFIED';
+  return reconciliationIncomplete || costCanStillChangeResult;
 }
 
 function overallText(assessment: Tier1PreRevenueAssessment | null): string {
   if (!assessment) return 'Ej verifierad';
-  const provisional = reconciliationIsProvisional(assessment) ? ' · prov.' : '';
+  const provisional = assessmentIsProvisional(assessment) ? ' · prov.' : '';
   if (assessment.status === 'TIER_1') return 'Tier 1';
   if (assessment.status === 'TIER_2') return `Tier 2${provisional}`;
   if (assessment.status === 'TIER_3') return `Tier 3${provisional}`;
@@ -205,8 +210,11 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
 
   const title = useMemo(() => {
     if (!assessment) return 'Tier-bedömning kunde inte hämtas.';
-    if (reconciliationIsProvisional(assessment)) return 'Beräknad Tier; PEA/PFS/FS-avstämning är ännu Ej verifierad. Klicka för detaljer.';
-    return 'Klicka för full Tier-bedömning.';
+    const support = assessment.support as ExtendedTierSupport;
+    const reasons: string[] = [];
+    if (support.reconciliationVerified === false) reasons.push('PEA/PFS/FS-avstämning saknas');
+    if (assessment.status === 'TIER_2' && assessment.gates.cost.status === 'NOT_VERIFIED') reasons.push('kostnads-Tier kan fortfarande sänka klassningen');
+    return reasons.length > 0 ? `Provisorisk Tier: ${reasons.join('; ')}. Klicka för detaljer.` : 'Klicka för full Tier-bedömning.';
   }, [assessment]);
   if (!loaded) return <span title="Tier-bedömning beräknas…">…</span>;
 
@@ -256,6 +264,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <div><span>Uthållig combined scale</span><strong>{typeof assessment.support.combinedScaleEquivalent === 'number' ? `${assessment.support.combinedScaleEquivalent.toFixed(2)}x` : '—'}</strong></div>
             <div><span>Skalfönster</span><strong>{scaleWindow}</strong></div>
             <div><span>Tier-IRR · spot</span><strong>{typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : '—'}</strong></div>
+            <div><span>Kostnads-Tier</span><strong>{gateText(assessment.gates.cost)}</strong></div>
             <div><span>Spotdatum</span><strong>{formatDate(assessment.support.tierBasePriceAsOfUtc)}</strong></div>
             <div><span>Rapportavstämning</span><strong>{support?.reconciliationVerified === true ? 'Verifierad' : 'Ej verifierad'}</strong></div>
             {support?.preReconciliationTierStatus && <div><span>Beräknad Tier före rapportguard</span><strong>{tierStatusText(support.preReconciliationTierStatus)}</strong></div>}
@@ -327,12 +336,20 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           </div>
 
           {benchmark && <div className="tier1-modal__section">
-            <h4>Statisk kostnadsreferens · {benchmark.metal}</h4>
-            <p><strong>{benchmark.q1Max} {benchmark.unit}</strong> · {benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'publicerad Q1-gräns' : 'konservativ Q1-referens'} · {benchmark.comparisonEnabled ? 'jämförelse aktiverad' : 'endast informativ'}</p>
+            <h4>Kostnadskurva · {benchmark.metal}</h4>
+            <dl className="tier1-modal__facts">
+              <div><dt>P25 / Q1 max</dt><dd>{formatNumber(benchmark.q1Max)} {benchmark.unit}</dd></div>
+              <div><dt>P50 / median</dt><dd>{benchmark.p50Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.p50Max)} ${benchmark.unit}`}</dd></div>
+              <div><dt>P75</dt><dd>{benchmark.p75Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.p75Max)} ${benchmark.unit}`}</dd></div>
+              <div><dt>Kurvtyp</dt><dd>{benchmark.benchmarkKind === 'FULL_QUARTILE_CURVE' ? 'Full P25/P50/P75' : benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'Exakt Q1-gräns' : 'Q1-referens · pass-only'}</dd></div>
+              <div><dt>Jämförelse</dt><dd>{benchmark.comparisonEnabled ? 'Aktiverad' : 'Endast informativ'}</dd></div>
+              <div><dt>Gränsosäkerhet</dt><dd>{benchmark.boundaryUncertaintyAbs > 0 ? `±${formatNumber(benchmark.boundaryUncertaintyAbs)} ${benchmark.unit}` : 'Ingen angiven'}</dd></div>
+            </dl>
+            <p>Cost Tier-policy: Q1 = Tier 1, Q2 = Tier 2, övre halvan (Q3/Q4) = Tier 3. Om en digitaliserad gräns har osäkerhet och projektkostnaden ligger inom osäkerhetsbandet lämnas Cost Tier Ej verifierad.</p>
             <p>{benchmark.notes}</p>
             <p><strong>Definitionsbasis:</strong> {benchmark.basisId}</p>
             <p><strong>Verifierad:</strong> {benchmark.updatedAtUtc} · <strong>dataperiod:</strong> {benchmark.dataPeriod}</p>
-            <a href={benchmark.sourceUrl} target="_blank" rel="noreferrer">Källa</a>{benchmark.evidenceUrl && <> · <a href={benchmark.evidenceUrl} target="_blank" rel="noreferrer">Q1-evidens</a></>}
+            <a href={benchmark.sourceUrl} target="_blank" rel="noreferrer">Källa</a>{benchmark.evidenceUrl && <> · <a href={benchmark.evidenceUrl} target="_blank" rel="noreferrer">Evidens</a></>}
           </div>}
 
           {diagnostics.length > 0 && <details className="tier1-modal__section tier1-modal__diagnostics">
