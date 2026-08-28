@@ -51,7 +51,6 @@ export type ProjectJsonV1 = {
     operatingCostsUSD: Array<number | null>;
     sustainingCapexUSD: Array<number | null>;
     siteGandA_USD: Array<number | null>;
-    // Optional depreciation & amortization series for EBITDA display.
     depreciationUSD?: Array<number | null>;
     workingCapitalDeltaUSD?: Array<number | null>;
     royaltiesUSD?: Array<number | null>;
@@ -83,25 +82,17 @@ export type ProjectJsonV1 = {
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
     oreTonnageUnit?: 'tonne' | 'short_ton' | 'long_ton' | null;
-    // Per-period head grade by metal (unit declared in gradeUnitByMetal).
     gradeByMetal?: Record<string, Array<number | null>>;
     gradeUnitByMetal?: Record<string, 'gpt' | 'pct' | 'ozpt' | string>;
-    // Per-period metallurgical recovery by metal (0..1 or 0..100 accepted).
     recoveryPctByMetal?: Record<string, Array<number | null>>;
   } | null;
 
   economicsBreakdown?: {
     meta?: {
       defaultSource?: 'PEA' | 'PFS' | 'FS' | 'Other' | null;
-      /** Nominal USD cost basis used for the operating/offsite cost estimate. */
       costBaseYear?: number | null;
       notes?: string | null;
     } | null;
-    /**
-     * Prefer a directly reported AISC/C1 when the report explicitly supports
-     * the same cost definition as the Tier benchmark. The definition basis is
-     * mandatory and is never inferred from the metric name.
-     */
     reportedCostMetrics?: Array<{
       metric: ProjectReportedCostMetric;
       basisId: ProjectReportedCostBasis;
@@ -143,25 +134,32 @@ export type ProjectJsonV1 = {
   } | null;
 
   /**
-   * Hard PEA/PFS/FS reconciliation evidence. VERIFIED is derived by the Tier
-   * guard; project JSON cannot assert its own verification status.
+   * Hard PEA/PFS/FS reconciliation evidence. The report timeline is stored as
+   * published. The planning timeline in time.* may be shifted by an explicit,
+   * uniform calendarShiftYears, but relative period order and tp must match.
+   * VERIFIED is derived by the Tier guard; project JSON cannot assert status.
    */
   reconciliation?: {
     report: {
       sourceId: string;
       pageOrTable: string;
+      timeline: {
+        periodYears: number[];
+        productionStartPeriod: number;
+      };
       discountRate: number;
       npv: number;
       npvCurrency: string;
       irrAfterTax: number;
       priceDeckByMetal: Record<string, { value: number; unit: string }>;
     };
+    /** project_json calendar year minus report calendar year for every period. */
+    calendarShiftYears: number;
     jsonCheck: {
       npvAtReportDiscountRate: number;
       irrAfterTax: number;
     };
     checks: {
-      periodMappingVerified: boolean;
       capexPlacementVerified: boolean;
       closureWorkingCapitalVerified: boolean;
       reportPricesAndAssumptionsVerified: boolean;
