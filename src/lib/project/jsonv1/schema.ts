@@ -6,6 +6,7 @@ export type PriceUnit = 'USD_per_toz' | 'USD_per_lb' | 'USD_per_tonne';
 
 export type ProjectReportedCostMetric =
   | 'AISC_AU_USD_PER_TOZ'
+  | 'AISC_AG_CO_PRODUCT_USD_PER_TOZ'
   | 'AISC_AGEQ_USD_PER_TOZ'
   | 'C1_CU_USD_PER_LB'
   | 'AISC_ZNEQ_USD_PER_LB'
@@ -15,6 +16,7 @@ export type ProjectReportedCostMetric =
 
 export type ProjectReportedCostBasis =
   | 'S_AND_P_CO_PRODUCT_AISC_AU'
+  | 'S_AND_P_CO_PRODUCT_AISC_AG'
   | 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE'
   | 'S_AND_P_CO_PRODUCT_C1_CU'
   | 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS'
