@@ -76,6 +76,8 @@ export type ProjectJsonV1 = {
   economicsBreakdown?: {
     meta?: {
       defaultSource?: 'PEA' | 'PFS' | 'FS' | 'Other' | null;
+      /** Nominal USD cost basis used for the operating/offsite cost estimate. */
+      costBaseYear?: number | null;
       notes?: string | null;
     } | null;
     cogs?: {
