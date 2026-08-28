@@ -33,9 +33,6 @@
     },
     "api/tier1-pre-revenue.ts": {
       "includeFiles": "src/**/*.ts"
-    },
-    "api/tier-cycle-history-check.ts": {
-      "includeFiles": "src/**/*.ts"
     }
   }
 }
