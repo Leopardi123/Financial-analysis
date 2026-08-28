@@ -17,11 +17,23 @@ export type Tier1CostMetric =
   | 'AISC_NI_USD_PER_LB'
   | 'AISC_PGM3E_USD_PER_TOZ';
 
+/** Exact cost-definition family required for benchmark compatibility. */
+export type Tier1CostBasisId =
+  | 'S_AND_P_CO_PRODUCT_AISC_AU'
+  | 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE'
+  | 'S_AND_P_CO_PRODUCT_C1_CU'
+  | 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS'
+  | 'JAGUAR_NI_C1_MINE_SITE_GA'
+  | 'VALTERRA_PGM_3E_AISC_SOLD';
+
 export type Tier1CostBenchmarkKind = 'EXACT_Q1_BOUNDARY' | 'Q1_REFERENCE_CEILING';
 
 export type Tier1CostBenchmark = {
   metal: Tier1Metal;
   metric: Tier1CostMetric;
+  basisId: Tier1CostBasisId;
+  /** False means the cited value is retained as evidence but may not classify Tier cost. */
+  comparisonEnabled: boolean;
   benchmarkKind: Tier1CostBenchmarkKind;
   q1Max: number;
   unit: 'USD/toz' | 'USD/lb';
@@ -46,61 +58,69 @@ export const TIER1_PRODUCTION_THRESHOLDS: Record<Tier1Metal, Tier1ProductionThre
 
 /**
  * Static, manually updateable low-cost evidence. EXACT_Q1_BOUNDARY may be used
- * as a true Q1 pass/fail boundary when the project metric is definition-compatible.
- * Q1_REFERENCE_CEILING is pass-only: above the cited first-quartile mine is unknown,
- * never an inferred FAIL.
+ * as a true Q1 pass/fail boundary only when metric, basis and cost vintage are
+ * definition-compatible. Q1_REFERENCE_CEILING is pass-only: above a cited
+ * first-quartile asset is unknown, never an inferred FAIL.
  */
 export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   Au: {
-    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', benchmarkKind: 'EXACT_Q1_BOUNDARY', q1Max: 1_228, unit: 'USD/toz',
+    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', comparisonEnabled: true,
+    benchmarkKind: 'EXACT_Q1_BOUNDARY', q1Max: 1_228, unit: 'USD/toz',
     updatedAtUtc: '2026-08-27', dataPeriod: '2025E',
     sourceLabel: 'S&P Capital IQ / G2 Goldfields global gold AISC curve',
     sourceUrl: 'https://g2goldfields.com/wp-content/uploads/2026/03/G2-Goldfields-Investor-Presentation-March-2026-Public.pdf',
-    notes: 'Publicerad 2025E-gräns: första kvartilen <1 228 USD/oz Au. Globalt urval av guldgruvor över 25 koz; co-product AISC.',
+    notes: 'Publicerad 2025E Q1-gräns <1 228 USD/oz Au. Global mines >25 koz; S&P AISC på co-product basis. Endast co-product-kompatibel Au AISC får jämföras.',
   },
   Ag: {
-    metal: 'Ag', metric: 'AISC_AGEQ_USD_PER_TOZ', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 12.9, unit: 'USD/toz',
+    metal: 'Ag', metric: 'AISC_AGEQ_USD_PER_TOZ', basisId: 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE', comparisonEnabled: false,
+    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 12.9, unit: 'USD/toz',
     updatedAtUtc: '2026-08-27', dataPeriod: '2025',
-    sourceLabel: 'Juanicipio 2025 AgEq AISC; Pan American/S&P first-quartile classification',
+    sourceLabel: 'Juanicipio reported AgEq AISC + Pan American/S&P first-quartile evidence',
     sourceUrl: 'https://www.fresnilloplc.com/media/wfzesgc1/030326-fres-fy25-prelim-presentation-final.pdf',
     evidenceUrl: 'https://panamericansilver.com/wp-content/uploads/2026/06/PAAS-Investor-Presentation_June_2026_vF.pdf',
-    notes: 'Juanicipio redovisade 2025 AISC på 12,9 USD/AgEq oz och klassificeras i första kostnadskvartilen. Konservativ pass-only-referens; ingen exakt Q1/Q2-gräns antas.',
+    notes: '12,9 USD/AgEq oz är ett rapporterat Juanicipio-mått, medan Pan Americans Q1-kostnadskurva uttryckligen använder S&P modellerad co-product AISC. Definitionerna är inte samma; referensen visas men får inte klassificera förrän en homogen Ag-benchmark finns.',
   },
   Cu: {
-    metal: 'Cu', metric: 'C1_CU_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 1.32, unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27', dataPeriod: '2025 PFS', sourceLabel: 'Ivanhoe Electric Santa Cruz PFS',
+    metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', comparisonEnabled: true,
+    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 1.32, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2025 PFS', sourceLabel: 'Ivanhoe Electric Santa Cruz PFS / S&P co-product C1 curve',
     sourceUrl: 'https://ivanhoeelectric.com/news/ivanhoe-electrics-preliminary-feasibility-study-for-the-santa-cruz-copper-project-in-arizona-defines-a-high-quality-underground/',
-    notes: 'Santa Cruz LOM C1 cash cost 1,32 USD/lb Cu och uttryckligen första globala kostnadskvartilen. Konservativ pass-only-referens.',
+    notes: 'Santa Cruz LOM C1 1,32 USD/lb jämförs av Ivanhoe uttryckligen mot S&P Global Market Intelligence co-product C1 copper cash cost curve. Santa Cruz-tabellen visar C1 som mining + processing + G&A för single-product cathode. Polymetallisk Cu kräver verifierad co-product-allokering eller kompatibelt rapporterat C1.',
   },
   Zn: {
-    metal: 'Zn', metric: 'AISC_ZNEQ_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 0.16, unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27', dataPeriod: 'Taylor FS / 2024 investment approval', sourceLabel: 'South32 Hermosa Taylor FS',
+    metal: 'Zn', metric: 'AISC_ZNEQ_USD_PER_LB', basisId: 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS', comparisonEnabled: false,
+    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 0.16, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2024 FS / investment approval', sourceLabel: 'South32 Hermosa Taylor FS',
     sourceUrl: 'https://www.south32.net/docs/default-source/exchange-releases/final-investment-approval-to-develop-hermosa-taylor-deposit-0x5ffd9fac3b216589.pdf',
-    notes: 'Taylor Zn-Pb-Ag AISC cirka 0,16 USD/lb ZnEq och uttryckligen första kostnadskvartilen. Basket-referens och endast pass-only.',
+    notes: 'Taylor ~0,16 USD/lb är Zn AISC net of Pb/Ag credits, inklusive TCRCs och sustaining capital. Det är inte ZnEq AISC. Nuvarande AISC_ZNEQ-metrik får därför inte jämföras mot denna referens.',
   },
   Pb: {
-    metal: 'Pb', metric: 'AISC_ZNEQ_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 0.16, unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27', dataPeriod: 'Taylor FS / 2024 investment approval', sourceLabel: 'South32 Hermosa Taylor FS',
+    metal: 'Pb', metric: 'AISC_ZNEQ_USD_PER_LB', basisId: 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS', comparisonEnabled: false,
+    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 0.16, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-27', dataPeriod: '2024 FS / investment approval', sourceLabel: 'South32 Hermosa Taylor FS',
     sourceUrl: 'https://www.south32.net/docs/default-source/exchange-releases/final-investment-approval-to-develop-hermosa-taylor-deposit-0x5ffd9fac3b216589.pdf',
-    notes: 'Taylor Zn-Pb-Ag AISC cirka 0,16 USD/lb ZnEq och uttryckligen första kostnadskvartilen. Basket-referens; behandlas aldrig som en fristående Pb-kvartilgräns.',
+    notes: 'Taylor-referensen är uttryckligen Zn AISC net of Pb/Ag credits, inte en fristående Pb- eller ZnEq-kvartilgräns. Behålls som evidens men klassificering är avstängd.',
   },
   Ni: {
-    metal: 'Ni', metric: 'C1_NI_USD_PER_LB', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 3.34, unit: 'USD/lb',
+    metal: 'Ni', metric: 'C1_NI_USD_PER_LB', basisId: 'JAGUAR_NI_C1_MINE_SITE_GA', comparisonEnabled: true,
+    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 3.34, unit: 'USD/lb',
     updatedAtUtc: '2026-08-27', dataPeriod: '2025 project update', sourceLabel: 'Centaurus Metals Jaguar nickel project',
     sourceUrl: 'https://centaurusmetals.com/pdf/b2bc4fc8-f0c0-4704-8d19-6cb756e7a057/Quarterly-ActivitiesAppendix-5B-Cash-Flow-Report.pdf?Platform=ListPage',
-    notes: 'Jaguar LOM C1 3,34 USD/lb payable Ni och uttryckligen första kostnadskvartilen. Konservativ pass-only-referens.',
+    notes: 'Jaguar LOM C1 3,34 USD/lb payable Ni och uttryckligen första kostnadskvartilen. Disclosed bridge: mining + processing + G&A; product logistics, royalties och by-product credit visas utanför C1.',
   },
   Pt: {
-    metal: 'Pt', metric: 'AISC_PGM3E_USD_PER_TOZ', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
+    metal: 'Pt', metric: 'AISC_PGM3E_USD_PER_TOZ', basisId: 'VALTERRA_PGM_3E_AISC_SOLD', comparisonEnabled: true,
+    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
     updatedAtUtc: '2026-08-27', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
     sourceUrl: 'https://www.valterraplatinum.com/media_centre/annual-results-2025/',
-    notes: 'Mogalakwena AISC 835 USD per såld 3E oz och uttryckligen första kostnadskvartilen. PGM-basketreferens och endast pass-only.',
+    notes: 'Mogalakwena AISC 835 USD per såld 3E oz och uttryckligen första kostnadskvartilen. Endast ett kompatibelt 3E-oz-sold AISC får jämföras.',
   },
   Pd: {
-    metal: 'Pd', metric: 'AISC_PGM3E_USD_PER_TOZ', benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
+    metal: 'Pd', metric: 'AISC_PGM3E_USD_PER_TOZ', basisId: 'VALTERRA_PGM_3E_AISC_SOLD', comparisonEnabled: true,
+    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
     updatedAtUtc: '2026-08-27', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
     sourceUrl: 'https://www.valterraplatinum.com/media_centre/annual-results-2025/',
-    notes: 'Mogalakwena AISC 835 USD per såld 3E oz och uttryckligen första kostnadskvartilen. PGM-basketreferens och endast pass-only.',
+    notes: 'Mogalakwena AISC 835 USD per såld 3E oz och uttryckligen första kostnadskvartilen. Endast ett kompatibelt 3E-oz-sold AISC får jämföras.',
   },
 };
 
