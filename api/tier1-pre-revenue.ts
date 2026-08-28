@@ -17,6 +17,10 @@ import {
   costVintageCompatibility,
   type CanonicalCostResult,
 } from '../src/lib/tier1/cost.ts';
+import {
+  extractReportedCostEvidence,
+  reportedCostWeightInBenchmarkUnits,
+} from '../src/lib/tier1/reportedCost.ts';
 import { assessCompanyProjectReconciliation } from '../src/lib/tier1/reconciliation.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
@@ -73,20 +77,102 @@ async function computeProjectIrrObservations(symbol: string): Promise<ProjectIrr
   return observations;
 }
 
+type ProjectCostObservation = {
+  projectId: string;
+  result: CanonicalCostResult;
+  basisId: Tier1CostBasisId | null;
+  method: 'REPORTED' | 'CANONICAL';
+  sourceId: string | null;
+  pageOrTable: string | null;
+};
+
 type CompanyCanonicalCost = CanonicalCostResult & {
   projectDetails: string[];
   basisId: Tier1CostBasisId | null;
+  method: 'REPORTED_COST' | 'CANONICAL_COST_V1' | 'MIXED_REPORTED_CANONICAL' | 'NOT_VERIFIED';
 };
 
 async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Metal): Promise<CompanyCanonicalCost> {
   const loaded = await loadProjectsForSymbol(symbol);
-  const results: Array<{ projectId: string; result: CanonicalCostResult }> = [];
-  const basisId = canonicalCostBasisForMetal(primaryMetal);
+  const observations: ProjectCostObservation[] = [];
+  const benchmark = TIER1_COST_BENCHMARKS[primaryMetal];
+  const canonicalBasisId = canonicalCostBasisForMetal(primaryMetal);
 
   for (const project of loaded) {
     const parsed = parseProjectJsonV1(project.rawJson);
     const payable = parsed.engineInputWithoutPrices.payableQtyByMetal[primaryMetal] ?? [];
     if (!payable.some((value) => finite(value) && value > 0)) continue;
+
+    const reported = extractReportedCostEvidence(project.rawJson, benchmark.metric);
+    if (reported.status === 'INVALID') {
+      observations.push({
+        projectId: project.projectId,
+        basisId: reported.basisId,
+        method: 'REPORTED',
+        sourceId: reported.sourceId,
+        pageOrTable: reported.pageOrTable,
+        result: {
+          status: 'NOT_VERIFIED', metric: benchmark.metric, value: null, unit: benchmark.unit,
+          numeratorUSD: null, denominator: null, costBaseYear: reported.costBaseYear,
+          reason: reported.reason, diagnostics: [],
+        },
+      });
+      continue;
+    }
+
+    if (reported.status === 'AVAILABLE') {
+      if (reported.unit !== benchmark.unit) {
+        observations.push({
+          projectId: project.projectId,
+          basisId: reported.basisId,
+          method: 'REPORTED',
+          sourceId: reported.sourceId,
+          pageOrTable: reported.pageOrTable,
+          result: {
+            status: 'NOT_VERIFIED', metric: benchmark.metric, value: null, unit: benchmark.unit,
+            numeratorUSD: null, denominator: null, costBaseYear: reported.costBaseYear,
+            reason: `Rapporterad ${benchmark.metric} använder ${reported.unit}, men benchmarken kräver ${benchmark.unit}; ingen implicit enhets-/definitionskonvertering görs.`,
+            diagnostics: [],
+          },
+        });
+        continue;
+      }
+      const payableUnit = parsed.engineInputWithoutPrices.payableQtyUnitByMetal[primaryMetal];
+      const denominator = reportedCostWeightInBenchmarkUnits({
+        payableSeries: payable,
+        payableUnit,
+        benchmarkUnit: benchmark.unit,
+      });
+      if (!finite(denominator) || denominator <= 0 || !finite(reported.value)) {
+        observations.push({
+          projectId: project.projectId,
+          basisId: reported.basisId,
+          method: 'REPORTED',
+          sourceId: reported.sourceId,
+          pageOrTable: reported.pageOrTable,
+          result: {
+            status: 'NOT_VERIFIED', metric: benchmark.metric, value: null, unit: benchmark.unit,
+            numeratorUSD: null, denominator: null, costBaseYear: reported.costBaseYear,
+            reason: `${reported.reason} Payable-vikten kunde inte verifieras i benchmarkens enhet.`,
+            diagnostics: [],
+          },
+        });
+        continue;
+      }
+      observations.push({
+        projectId: project.projectId,
+        basisId: reported.basisId,
+        method: 'REPORTED',
+        sourceId: reported.sourceId,
+        pageOrTable: reported.pageOrTable,
+        result: {
+          status: 'COMPUTABLE', metric: benchmark.metric, value: reported.value, unit: benchmark.unit,
+          numeratorUSD: reported.value * denominator, denominator, costBaseYear: reported.costBaseYear,
+          reason: reported.reason, diagnostics: [],
+        },
+      });
+      continue;
+    }
 
     const input = await resolveProjectPricesToEngineInput({
       parsed,
@@ -111,17 +197,25 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
       revenueByMetalUSD: output.revenue.byMetalRevenueUSD,
       rawJson: project.rawJson,
     });
-    results.push({ projectId: project.projectId, result });
+    observations.push({
+      projectId: project.projectId,
+      result,
+      basisId: canonicalBasisId,
+      method: 'CANONICAL',
+      sourceId: null,
+      pageOrTable: null,
+    });
   }
 
-  if (results.length === 0) {
+  if (observations.length === 0) {
     return {
       status: 'NOT_VERIFIED', metric: null, value: null, unit: null, numeratorUSD: null, denominator: null,
-      costBaseYear: null, reason: `Inget projekt med payable ${primaryMetal} hittades för canonical cost bridge.`, diagnostics: [], projectDetails: [], basisId,
+      costBaseYear: null, reason: `Inget projekt med payable ${primaryMetal} hittades för cost-bedömningen.`, diagnostics: [],
+      projectDetails: [], basisId: canonicalBasisId, method: 'NOT_VERIFIED',
     };
   }
 
-  const unresolved = results.filter(({ result }) => result.status !== 'COMPUTABLE');
+  const unresolved = observations.filter(({ result }) => result.status !== 'COMPUTABLE');
   if (unresolved.length > 0) {
     return {
       status: 'NOT_VERIFIED',
@@ -133,37 +227,64 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
       costBaseYear: unresolved[0].result.costBaseYear,
       reason: unresolved.map(({ projectId, result }) => `${projectId}: ${result.reason}`).join(' · '),
       diagnostics: unresolved.flatMap(({ projectId, result }) => result.diagnostics.map((item) => `${projectId}: ${item}`)),
-      projectDetails: results.map(({ projectId, result }) => `${projectId}: ${result.status}`),
-      basisId,
+      projectDetails: observations.map(({ projectId, result, method, sourceId, pageOrTable }) =>
+        `${projectId}: ${result.status} · ${method}${sourceId ? ` · ${sourceId}${pageOrTable ? `, ${pageOrTable}` : ''}` : ''}`,
+      ),
+      basisId: unresolved[0].basisId,
+      method: 'NOT_VERIFIED',
     };
   }
 
-  const computed = results.map(({ projectId, result }) => ({ projectId, result: result as CanonicalCostResult & { status: 'COMPUTABLE'; value: number; numeratorUSD: number; denominator: number } }));
+  const computed = observations.map((observation) => ({
+    ...observation,
+    result: observation.result as CanonicalCostResult & {
+      status: 'COMPUTABLE'; value: number; numeratorUSD: number; denominator: number;
+    },
+  }));
   const metrics = new Set(computed.map(({ result }) => result.metric));
   const years = new Set(computed.map(({ result }) => result.costBaseYear));
-  if (metrics.size !== 1 || years.size !== 1) {
+  const basisIds = new Set(computed.map(({ basisId }) => basisId));
+  if (metrics.size !== 1 || years.size !== 1 || basisIds.size !== 1 || basisIds.has(null)) {
     return {
       status: 'NOT_VERIFIED', metric: computed[0].result.metric, value: null, unit: computed[0].result.unit,
       numeratorUSD: null, denominator: null, costBaseYear: null,
-      reason: 'Flerprojektsbolaget har inkompatibla canonical cost metrics eller kostnadsbasår; ingen implicit sammanvägning görs.',
-      diagnostics: [], projectDetails: computed.map(({ projectId, result }) => `${projectId}: ${result.metric}, basår ${String(result.costBaseYear)}`), basisId,
+      reason: 'Flerprojektsbolaget har inkompatibla cost metrics, definitionsbaser eller kostnadsbasår; ingen implicit sammanvägning görs.',
+      diagnostics: [],
+      projectDetails: computed.map(({ projectId, result, basisId, method }) =>
+        `${projectId}: ${method} · ${result.metric} · basis ${basisId ?? 'saknas'} · basår ${String(result.costBaseYear)}`,
+      ),
+      basisId: null,
+      method: 'NOT_VERIFIED',
     };
   }
 
   const numeratorUSD = computed.reduce((sum, { result }) => sum + result.numeratorUSD, 0);
   const denominator = computed.reduce((sum, { result }) => sum + result.denominator, 0);
+  const methods = new Set(computed.map(({ method }) => method));
+  const method: CompanyCanonicalCost['method'] = methods.size > 1
+    ? 'MIXED_REPORTED_CANONICAL'
+    : methods.has('REPORTED') ? 'REPORTED_COST' : 'CANONICAL_COST_V1';
+  const basisId = computed[0].basisId;
+  const value = denominator > 0 ? numeratorUSD / denominator : null;
   return {
-    status: 'COMPUTABLE',
+    status: value !== null ? 'COMPUTABLE' : 'NOT_VERIFIED',
     metric: computed[0].result.metric,
-    value: denominator > 0 ? numeratorUSD / denominator : null,
+    value,
     unit: computed[0].result.unit,
     numeratorUSD,
     denominator,
     costBaseYear: computed[0].result.costBaseYear,
-    reason: computed[0].result.reason,
+    reason: method === 'REPORTED_COST'
+      ? 'Rapporterad, definitionslåst kostnadsmetrik används direkt; flerprojekt viktas med payable mängd i benchmarkens enhet.'
+      : method === 'MIXED_REPORTED_CANONICAL'
+        ? 'Rapporterade och canonical-rekonstruerade kostnadsmetrik kombineras endast eftersom metric, basis och kostnadsår matchar exakt.'
+        : computed[0].result.reason,
     diagnostics: computed.flatMap(({ projectId, result }) => result.diagnostics.map((item) => `${projectId}: ${item}`)),
-    projectDetails: computed.map(({ projectId, result }) => `${projectId}: ${result.value.toFixed(4)} ${result.unit ?? ''}`),
+    projectDetails: computed.map(({ projectId, result, method: projectMethod, sourceId, pageOrTable }) =>
+      `${projectId}: ${result.value.toFixed(4)} ${result.unit ?? ''} · ${projectMethod}${sourceId ? ` · ${sourceId}${pageOrTable ? `, ${pageOrTable}` : ''}` : ''}`,
+    ),
     basisId,
+    method,
   };
 }
 
@@ -180,7 +301,7 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
   assessment.support.costBaseYear = cost.costBaseYear;
   assessment.support.costBasisId = cost.basisId;
   assessment.support.costBenchmarkBasisId = benchmark.basisId;
-  assessment.support.costMethod = cost.status === 'COMPUTABLE' ? 'CANONICAL_COST_V1' : 'NOT_VERIFIED';
+  assessment.support.costMethod = cost.method;
   assessment.support.costProjectDetails = cost.projectDetails;
 
   if (!benchmark.comparisonEnabled) {
@@ -204,7 +325,7 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
   }
 
   if (!cost.basisId || cost.basisId !== benchmark.basisId) {
-    const reason = `Canonical cost-basis ${cost.basisId ?? 'saknas'} matchar inte benchmarkens ${benchmark.basisId}. Ingen implicit definitionskonvertering görs.`;
+    const reason = `Cost-basis ${cost.basisId ?? 'saknas'} matchar inte benchmarkens ${benchmark.basisId}. Ingen implicit definitionskonvertering görs.`;
     assessment.gates.cost = {
       status: 'NOT_VERIFIED', tier: null, value: cost.value,
       threshold: benchmark.q1Max, unit: benchmark.unit, reason,
@@ -232,7 +353,7 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
     costMetricValues: values,
     nowUtc: new Date().toISOString(),
   });
-  gate.reason = `${gate.reason} Canonical cost bridge verifierad; basis ${cost.basisId}; ${vintage.reason}`;
+  gate.reason = `${gate.reason} ${cost.method === 'REPORTED_COST' ? 'Rapporterad kostnadsmetrik verifierad' : 'Canonical cost bridge verifierad'}; basis ${cost.basisId}; ${vintage.reason}`;
   assessment.gates.cost = gate;
 }
 
