@@ -14,11 +14,23 @@ export type ProjectReconciliationAssessment = {
   jsonIrr: number | null;
   irrRelativeDiff: number | null;
   toleranceRelative: number;
+  reportStartYear: number | null;
+  reportEndYear: number | null;
+  jsonStartYear: number | null;
+  jsonEndYear: number | null;
+  productionStartPeriod: number | null;
+  reportProductionStartYear: number | null;
+  jsonProductionStartYear: number | null;
+  calendarShiftYears: number | null;
   reason: string;
 };
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function integer(value: unknown): value is number {
+  return finite(value) && Number.isInteger(value);
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -58,32 +70,148 @@ function notVerified(projectId: string, reason: string, partial: Partial<Project
     jsonIrr: null,
     irrRelativeDiff: null,
     toleranceRelative: MAX_PROJECT_RECONCILIATION_RELATIVE_TOLERANCE,
+    reportStartYear: null,
+    reportEndYear: null,
+    jsonStartYear: null,
+    jsonEndYear: null,
+    productionStartPeriod: null,
+    reportProductionStartYear: null,
+    jsonProductionStartYear: null,
+    calendarShiftYears: null,
     reason,
     ...partial,
   };
 }
 
+type TimelineAssessment = {
+  ok: boolean;
+  reason: string;
+  reportStartYear: number | null;
+  reportEndYear: number | null;
+  jsonStartYear: number | null;
+  jsonEndYear: number | null;
+  productionStartPeriod: number | null;
+  reportProductionStartYear: number | null;
+  jsonProductionStartYear: number | null;
+  calendarShiftYears: number | null;
+};
+
+function assessTimeline(root: Record<string, unknown>, reconciliation: Record<string, unknown>, report: Record<string, unknown>): TimelineAssessment {
+  const time = record(root.time);
+  const reportTimeline = record(report.timeline);
+  const jsonMasterN = integer(time.masterN) ? time.masterN : null;
+  const jsonProductionStartPeriod = integer(time.productionStartPeriod) ? time.productionStartPeriod : null;
+  const jsonProductionStartYear = integer(time.productionStartYear) ? time.productionStartYear : null;
+  const declaredShift = integer(reconciliation.calendarShiftYears) ? reconciliation.calendarShiftYears : null;
+  const rawReportYears = reportTimeline.periodYears;
+  const reportProductionStartPeriod = integer(reportTimeline.productionStartPeriod) ? reportTimeline.productionStartPeriod : null;
+
+  const empty = {
+    reportStartYear: null,
+    reportEndYear: null,
+    jsonStartYear: null,
+    jsonEndYear: null,
+    productionStartPeriod: jsonProductionStartPeriod,
+    reportProductionStartYear: null,
+    jsonProductionStartYear,
+    calendarShiftYears: declaredShift,
+  };
+
+  if (jsonMasterN === null || jsonMasterN < 0 || jsonProductionStartPeriod === null || jsonProductionStartYear === null) {
+    return { ok: false, reason: 'project_json.time saknas eller är ogiltig för timeline-reconciliation.', ...empty };
+  }
+  if (jsonProductionStartPeriod < 0 || jsonProductionStartPeriod > jsonMasterN) {
+    return { ok: false, reason: 'project_json.time.productionStartPeriod ligger utanför 0..masterN.', ...empty };
+  }
+  if (!Array.isArray(rawReportYears) || rawReportYears.length !== jsonMasterN + 1) {
+    return {
+      ok: false,
+      reason: `Rapportens timeline måste ange periodYears med exakt masterN+1 (${jsonMasterN + 1}) perioder.`,
+      ...empty,
+    };
+  }
+  if (!rawReportYears.every(integer)) {
+    return { ok: false, reason: 'Rapportens timeline.periodYears måste bestå av explicita heltalsår.', ...empty };
+  }
+  const reportYears = rawReportYears as number[];
+  for (let t = 1; t < reportYears.length; t += 1) {
+    if (reportYears[t] !== reportYears[t - 1] + 1) {
+      return {
+        ok: false,
+        reason: `Rapportens periodYears är inte en sammanhängande årsaxel vid t=${t}; annual project_json kan inte reconcileras genom en enkel kalenderförskjutning.`,
+        ...empty,
+        reportStartYear: reportYears[0],
+        reportEndYear: reportYears[reportYears.length - 1],
+      };
+    }
+  }
+  if (reportProductionStartPeriod === null || reportProductionStartPeriod < 0 || reportProductionStartPeriod > jsonMasterN) {
+    return {
+      ok: false,
+      reason: 'Rapportens timeline.productionStartPeriod saknas eller är ogiltig.',
+      ...empty,
+      reportStartYear: reportYears[0],
+      reportEndYear: reportYears[reportYears.length - 1],
+    };
+  }
+  if (reportProductionStartPeriod !== jsonProductionStartPeriod) {
+    return {
+      ok: false,
+      reason: `productionStartPeriod mismatch: rapport=${reportProductionStartPeriod}, project_json=${jsonProductionStartPeriod}. En kalenderförskjutning får inte ändra relativ projektfas.`,
+      ...empty,
+      reportStartYear: reportYears[0],
+      reportEndYear: reportYears[reportYears.length - 1],
+      reportProductionStartYear: reportYears[reportProductionStartPeriod],
+    };
+  }
+  if (declaredShift === null) {
+    return {
+      ok: false,
+      reason: 'reconciliation.calendarShiftYears måste anges explicit, även när förskjutningen är 0 år.',
+      ...empty,
+      reportStartYear: reportYears[0],
+      reportEndYear: reportYears[reportYears.length - 1],
+      reportProductionStartYear: reportYears[reportProductionStartPeriod],
+    };
+  }
+
+  const jsonYears = Array.from(
+    { length: jsonMasterN + 1 },
+    (_, t) => jsonProductionStartYear + (t - jsonProductionStartPeriod),
+  );
+  const mismatchedPeriod = jsonYears.findIndex((year, t) => year - reportYears[t] !== declaredShift);
+  const completed = {
+    reportStartYear: reportYears[0],
+    reportEndYear: reportYears[reportYears.length - 1],
+    jsonStartYear: jsonYears[0],
+    jsonEndYear: jsonYears[jsonYears.length - 1],
+    productionStartPeriod: jsonProductionStartPeriod,
+    reportProductionStartYear: reportYears[reportProductionStartPeriod],
+    jsonProductionStartYear,
+    calendarShiftYears: declaredShift,
+  };
+  if (mismatchedPeriod >= 0) {
+    return {
+      ok: false,
+      reason: `Timeline är inte en uniform kalenderförskjutning vid t=${mismatchedPeriod}: rapport=${reportYears[mismatchedPeriod]}, project_json=${jsonYears[mismatchedPeriod]}, deklarerad shift=${declaredShift}.`,
+      ...completed,
+    };
+  }
+
+  return {
+    ok: true,
+    reason: declaredShift === 0
+      ? 'Rapport- och project_json-timeline har identiska kalenderår och samma relativa projektfaser.'
+      : `Rapportens timeline är bevarad exakt relativt och project_json är uniformt kalenderförskjuten ${declaredShift > 0 ? '+' : ''}${declaredShift} år.`,
+    ...completed,
+  };
+}
+
 /**
  * Hard evidence contract for saying a project_json has been reconciled to its
- * PEA/PFS/FS economics. The guard derives VERIFIED itself; a user-supplied
- * status flag is deliberately not trusted.
- *
- * Expected raw JSON shape:
- * reconciliation: {
- *   report: {
- *     sourceId, pageOrTable, discountRate, npv, npvCurrency,
- *     irrAfterTax, priceDeckByMetal: { Au: { value, unit }, ... }
- *   },
- *   jsonCheck: { npvAtReportDiscountRate, irrAfterTax },
- *   checks: {
- *     periodMappingVerified,
- *     capexPlacementVerified,
- *     closureWorkingCapitalVerified,
- *     reportPricesAndAssumptionsVerified,
- *     cashFlowDefinitionVerified
- *   },
- *   toleranceRelative?, verifiedAtUtc?
- * }
+ * PEA/PFS/FS economics. The report timeline is stored explicitly and may be
+ * shifted uniformly in the planning model, but masterN, period order and
+ * productionStartPeriod must remain identical.
  */
 export function assessProjectReconciliation(rawJson: unknown, projectId: string): ProjectReconciliationAssessment {
   const root = parseRaw(rawJson);
@@ -108,6 +236,7 @@ export function assessProjectReconciliation(rawJson: unknown, projectId: string)
   const tolerance = requestedTolerance > 0 && requestedTolerance <= MAX_PROJECT_RECONCILIATION_RELATIVE_TOLERANCE
     ? requestedTolerance
     : MAX_PROJECT_RECONCILIATION_RELATIVE_TOLERANCE;
+  const timeline = assessTimeline(root, reconciliation, report);
 
   const partial = {
     reportSourceId: sourceId,
@@ -119,10 +248,21 @@ export function assessProjectReconciliation(rawJson: unknown, projectId: string)
     reportIrr,
     jsonIrr,
     toleranceRelative: tolerance,
+    reportStartYear: timeline.reportStartYear,
+    reportEndYear: timeline.reportEndYear,
+    jsonStartYear: timeline.jsonStartYear,
+    jsonEndYear: timeline.jsonEndYear,
+    productionStartPeriod: timeline.productionStartPeriod,
+    reportProductionStartYear: timeline.reportProductionStartYear,
+    jsonProductionStartYear: timeline.jsonProductionStartYear,
+    calendarShiftYears: timeline.calendarShiftYears,
   };
 
   if (!sourceId || !pageOrTable) {
     return notVerified(projectId, 'Rapportkälla och exakt sida/tabell för ekonomin måste anges.', partial);
+  }
+  if (!timeline.ok) {
+    return notVerified(projectId, timeline.reason, partial);
   }
   if (discountRate === null || discountRate < 0 || discountRate >= 1) {
     return notVerified(projectId, 'Rapportens diskonteringsränta saknas eller är ogiltig.', partial);
@@ -147,7 +287,6 @@ export function assessProjectReconciliation(rawJson: unknown, projectId: string)
   }
 
   const requiredChecks = [
-    'periodMappingVerified',
     'capexPlacementVerified',
     'closureWorkingCapitalVerified',
     'reportPricesAndAssumptionsVerified',
@@ -187,7 +326,15 @@ export function assessProjectReconciliation(rawJson: unknown, projectId: string)
     jsonIrr,
     irrRelativeDiff: irrDiff,
     toleranceRelative: tolerance,
-    reason: `Rapportavstämning verifierad inom ${(tolerance * 100).toFixed(2)} % relativ tolerans för både NPV och IRR.`,
+    reportStartYear: timeline.reportStartYear,
+    reportEndYear: timeline.reportEndYear,
+    jsonStartYear: timeline.jsonStartYear,
+    jsonEndYear: timeline.jsonEndYear,
+    productionStartPeriod: timeline.productionStartPeriod,
+    reportProductionStartYear: timeline.reportProductionStartYear,
+    jsonProductionStartYear: timeline.jsonProductionStartYear,
+    calendarShiftYears: timeline.calendarShiftYears,
+    reason: `${timeline.reason} Rapportavstämning verifierad inom ${(tolerance * 100).toFixed(2)} % relativ tolerans för både NPV och IRR.`,
   };
 }
 
