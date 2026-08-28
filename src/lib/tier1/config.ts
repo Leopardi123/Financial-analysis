@@ -86,11 +86,11 @@ export const TIER1_PRODUCTION_THRESHOLDS: Record<Tier1Metal, Tier1ProductionThre
 export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   Au: {
     metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', comparisonEnabled: true,
-    benchmarkKind: 'EXACT_Q1_BOUNDARY', q1Max: 1_228, p50Max: null, p75Max: null, boundaryUncertaintyAbs: 0, unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27', dataPeriod: '2025E',
+    benchmarkKind: 'FULL_QUARTILE_CURVE', q1Max: 1_228, p50Max: 1_501, p75Max: 1_840, boundaryUncertaintyAbs: 0, unit: 'USD/toz',
+    updatedAtUtc: '2026-08-28', dataPeriod: '2025E',
     sourceLabel: 'S&P Capital IQ / G2 Goldfields global gold AISC curve',
     sourceUrl: 'https://g2goldfields.com/wp-content/uploads/2026/03/G2-Goldfields-Investor-Presentation-March-2026-Public.pdf',
-    notes: 'Publicerad 2025E Q1-gräns <1 228 USD/oz Au. Global mines >25 koz; S&P AISC på co-product basis. P50/P75 är ännu inte inlagda; värden över Q1 kan därför inte klassificeras som Tier 2 eller Tier 3 ännu.',
+    notes: '2025E global gold AISC curve, co-product basis, mines >25 koz Au. Publicerade kvartilband: Q1 <1 228; Q2 1 228–1 501; Q3 1 501–1 840; Q4 >1 840 USD/oz Au. Gränserna är explicit utskrivna i källan, därför boundaryUncertaintyAbs=0.',
   },
   Ag: {
     metal: 'Ag', metric: 'AISC_AGEQ_USD_PER_TOZ', basisId: 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE', comparisonEnabled: false,
