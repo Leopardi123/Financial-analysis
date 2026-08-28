@@ -174,6 +174,19 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
     return notVerified(metric, 'Både kombinerad och splittrad TC/RC förekommer; C1 skulle riskera dubbelräkning.', diagnostics, costBaseYear);
   }
 
+  const secondaryMetalNames = Object.entries(input.revenueByMetalUSD)
+    .filter(([metal, revenue]) => metal !== input.primaryMetal && indices.some((t) => finite(revenue[t]) && (revenue[t] as number) > 0))
+    .map(([metal]) => metal);
+  const hasExplicitCredits = indices.some((t) => (input.byproductCreditsUSD[t] as number) !== 0);
+  if (hasExplicitCredits && secondaryMetalNames.length > 0) {
+    return notVerified(
+      metric,
+      `Både separata byproductCreditsUSD och sekundära metallintäkter (${secondaryMetalNames.join(', ')}) finns. Nuvarande schema anger inte om de överlappar; C1 får därför inte dubbelkreditera dem.`,
+      diagnostics,
+      costBaseYear,
+    );
+  }
+
   let numeratorUSD = 0;
   let denominatorLb = 0;
   for (const t of indices) {
@@ -199,12 +212,12 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
       secondaryMetalCredits += value;
     }
 
+    const credits = secondaryMetalNames.length > 0 ? secondaryMetalCredits : explicitCredits;
     numeratorUSD += (input.operatingCostsUSD[t] as number)
       + (input.siteGandA_USD[t] as number)
       + tcRc
       + transport
-      - explicitCredits
-      - secondaryMetalCredits;
+      - credits;
     denominatorLb += qtyLb;
   }
 
@@ -220,7 +233,7 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
     numeratorUSD,
     denominator: denominatorLb,
     costBaseYear,
-    reason: 'Canonical C1 = mine-site operating costs + site G&A + freight/transport + TC/RC − by-product credits, per payable lb. Royalties, sustaining CAPEX, depreciation och skatt ingår inte.',
+    reason: 'Canonical C1 = mine-site operating costs + site G&A + freight/transport + TC/RC − verifierade by-product credits, per payable lb. Royalties, sustaining CAPEX, depreciation och skatt ingår inte.',
     diagnostics,
   };
 }
