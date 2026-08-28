@@ -38,7 +38,7 @@ async function check(priceKey: (typeof ALLOWED)[number], from: string, to: strin
   }
 }
 
-export default async function handler(req: any, res: any): Promise<void> {
+export default async function handler(_req: any, res: any): Promise<void> {
   const from = dateYearsAgo(25);
   const to = new Date().toISOString().slice(0, 10);
   const results = await Promise.all(ALLOWED.map((key) => check(key, from, to)));
