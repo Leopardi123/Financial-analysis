@@ -246,6 +246,7 @@ export function assessCycle(cycleNpv10Usd: number | null, reasonIfUnavailable?: 
 
 const COST_METRIC_LABELS: Record<Tier1CostMetric, string> = {
   AISC_AU_USD_PER_TOZ: 'Au AISC',
+  AISC_AG_CO_PRODUCT_USD_PER_TOZ: 'Ag co-product AISC',
   AISC_AGEQ_USD_PER_TOZ: 'AgEq AISC',
   C1_CU_USD_PER_LB: 'Cu C1 cash cost',
   AISC_ZNEQ_USD_PER_LB: 'ZnEq AISC',
@@ -322,17 +323,22 @@ export function assessCost(args: {
     return {
       status: 'NOT_VERIFIED', tier: null, value: finite(value) ? value : null,
       threshold: benchmark.q1Max, unit: benchmark.unit,
-      reason: `Kostnadsreferensen för ${args.primaryMetal} har inte en definitionshomogen benchmark och får därför inte klassificera Cost Tier.`,
+      reason: benchmark.q1Max === null
+        ? `Kostnadskurvan för ${args.primaryMetal} är identifierad men P25/P50/P75 är ännu inte verifierade. Ingen kostnads-Tier antas.`
+        : `Kostnadsreferensen för ${args.primaryMetal} har inte en definitionshomogen benchmark och får därför inte klassificera Cost Tier.`,
     };
   }
   if (tier1CostBenchmarkNeedsUpdate(benchmark, args.nowUtc)) {
     return { status: 'NOT_VERIFIED', tier: null, value: finite(value) ? value : null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Den statiska kostnadskurvan för ${args.primaryMetal} är äldre än ${TIER1_POLICY.costBenchmarkMaxAgeDays} dagar och ska uppdateras.` };
   }
   if (args.primaryMetal === 'Au' && (!finite(args.primaryMetalRevenueShare) || args.primaryMetalRevenueShare < TIER1_POLICY.goldCostDominanceMinimumRevenueShare)) {
-    return { status: 'NOT_VERIFIED', tier: null, value: finite(value) ? value : null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Au står för mindre än ${Math.round(TIER1_POLICY.goldCostDominanceMinimumRevenueShare * 100)} % av metallintäkten vid Tier-decket; AuEq AISC används därför inte som ren Au-AISC.` };
+    return { status: 'NOT_VERIFIED', tier: null, value: finite(value) ? value : null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `Au står för mindre än ${Math.round(TIER1_POLICY.goldCostDominanceMinimumRevenueShare * 100)} % av metallintäkten vid Tier-decket; ren Au AISC-benchmark används därför inte.` };
   }
   if (!finite(value)) {
     return { status: 'NOT_VERIFIED', tier: null, value: null, threshold: benchmark.q1Max, unit: benchmark.unit, reason: `${metricLabel} kan ännu inte beräknas definitionskompatibelt från projektmodellen. Inget kostnadsvärde antas.` };
+  }
+  if (!finite(benchmark.q1Max)) {
+    return { status: 'NOT_VERIFIED', tier: null, value, threshold: null, unit: benchmark.unit, reason: `${metricLabel} finns, men P25-gränsen för benchmarken är Ej verifierad. Ingen kostnads-Tier antas.` };
   }
 
   if (benchmark.benchmarkKind !== 'FULL_QUARTILE_CURVE' || !finite(benchmark.p50Max)) {
