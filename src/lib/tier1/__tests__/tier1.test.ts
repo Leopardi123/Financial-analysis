@@ -206,7 +206,7 @@ for (const copperPriceKey of ['CU_USD_LB', 'CU_USD_TONNE']) {
 }
 
 assert.equal(getTier1CostBenchmarkTodos('2027-08-26T00:00:00Z').length, 0);
-const staleTodos = getTier1CostBenchmarkTodos('2027-08-27T00:00:00Z');
+const staleTodos = getTier1CostBenchmarkTodos('2027-08-28T00:00:00Z');
 assert.equal(staleTodos.length, 8);
 assert.ok(staleTodos.every((todo) => todo.includes('uppdatera statisk Q1-kostnadsreferens')));
 
