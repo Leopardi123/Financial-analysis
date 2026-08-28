@@ -57,6 +57,16 @@ function formatDate(value: string | null | undefined): string {
   return date.toLocaleDateString('sv-SE');
 }
 
+function displayDiagnostics(items: string[]): string[] {
+  const hasResolvedCuFallback = items.some((item) => /price_diagnostic metal=Cu\b/.test(item) && /derived=true\b/.test(item));
+  if (!hasResolvedCuFallback) return items;
+  return items.filter((item) => {
+    if (item.includes('Unknown commodity provider mapping for metal=Cu')) return false;
+    if (/Spot resolver failed for CU_USD_(?:LB|TONNE)/.test(item)) return false;
+    return true;
+  });
+}
+
 function GateRow({ label, gate }: { label: string; gate: Tier1Gate }) {
   const state = gate.status === 'NOT_VERIFIED' ? 'not-verified' : gate.status === 'FAIL' && gate.tier === null ? 'fail' : `tier-${gate.tier ?? 1}`;
   return <div className={`tier1-modal__gate tier1-modal__gate--${state}`}>
@@ -102,6 +112,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
   const scaleWindow = assessment?.support.scaleWindowStartYear && assessment.support.scaleWindowEndYear
     ? `${assessment.support.scaleWindowStartYear}–${assessment.support.scaleWindowEndYear}`
     : '—';
+  const diagnostics = assessment ? displayDiagnostics(assessment.diagnostics) : [];
 
   return <>
     <button
@@ -174,9 +185,9 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <a href={benchmark.sourceUrl} target="_blank" rel="noreferrer">Källa</a>{benchmark.evidenceUrl && <> · <a href={benchmark.evidenceUrl} target="_blank" rel="noreferrer">Q1-evidens</a></>}
           </div>}
 
-          {assessment.diagnostics.length > 0 && <details className="tier1-modal__section tier1-modal__diagnostics">
+          {diagnostics.length > 0 && <details className="tier1-modal__section tier1-modal__diagnostics">
             <summary>Teknisk diagnostik / Ej verifierat</summary>
-            <ul>{assessment.diagnostics.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
+            <ul>{diagnostics.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
           </details>}
         </>}
       </section>
