@@ -170,7 +170,7 @@ export function reportedCostWeightInBenchmarkUnits(args: {
   let total = 0;
   for (const value of args.payableSeries) {
     if (!finite(value) || value <= 0) continue;
-    let converted: number;
+    let converted: number | null;
     try {
       if (args.benchmarkUnit === 'USD/lb') {
         if (args.payableUnit !== 'lb' && args.payableUnit !== 'kg' && args.payableUnit !== 'tonne' && args.payableUnit !== 'short_ton' && args.payableUnit !== 'long_ton') return null;
