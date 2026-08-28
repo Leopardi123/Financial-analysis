@@ -14,6 +14,30 @@ type CyclePriceDisplayRow = {
   projectIds: string[];
 };
 
+type ProjectReconciliationDisplay = {
+  projectId: string;
+  status: 'VERIFIED' | 'NOT_VERIFIED';
+  reportSourceId: string | null;
+  reportPageOrTable: string | null;
+  discountRate: number | null;
+  npvCurrency: string | null;
+  reportNpv: number | null;
+  jsonNpv: number | null;
+  npvRelativeDiff: number | null;
+  reportIrr: number | null;
+  jsonIrr: number | null;
+  irrRelativeDiff: number | null;
+  toleranceRelative: number;
+  reason: string;
+};
+
+type ExtendedTierSupport = Tier1PreRevenueAssessment['support'] & {
+  cyclePrices?: CyclePriceDisplayRow[];
+  reconciliationVerified?: boolean;
+  projectReconciliation?: ProjectReconciliationDisplay[];
+  preReconciliationTierStatus?: string;
+};
+
 function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | null> {
   const key = symbol.trim().toUpperCase();
   const cached = assessmentPromiseCache.get(key);
@@ -35,6 +59,14 @@ function overallText(assessment: Tier1PreRevenueAssessment | null): string {
   if (assessment.status === 'TIER_2') return 'Tier 2';
   if (assessment.status === 'TIER_3') return 'Tier 3';
   if (assessment.status === 'NOT_QUALIFIED') return 'Ej kvalificerad';
+  return 'Ej verifierad';
+}
+
+function tierStatusText(status: string | null | undefined): string {
+  if (status === 'TIER_1') return 'Tier 1';
+  if (status === 'TIER_2') return 'Tier 2';
+  if (status === 'TIER_3') return 'Tier 3';
+  if (status === 'NOT_QUALIFIED') return 'Ej kvalificerad';
   return 'Ej verifierad';
 }
 
@@ -60,6 +92,20 @@ function formatUsd(value: number | null | undefined): string {
   return `${value.toLocaleString('sv-SE', { maximumFractionDigits: 0 })} USD`;
 }
 
+function formatReportMoney(value: number | null | undefined, currency: string | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  const unit = currency || '';
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toLocaleString('sv-SE', { maximumFractionDigits: 2 })} md ${unit}`.trim();
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toLocaleString('sv-SE', { maximumFractionDigits: 2 })} M ${unit}`.trim();
+  return `${value.toLocaleString('sv-SE', { maximumFractionDigits: 0 })} ${unit}`.trim();
+}
+
+function formatPercentFraction(value: number | null | undefined, digits = 2): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `${(value * 100).toLocaleString('sv-SE', { maximumFractionDigits: digits })} %`;
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -72,12 +118,20 @@ function formatCyclePrice(value: number, unit: CyclePriceDisplayRow['unit']): st
   return `${value.toLocaleString('sv-SE', { maximumFractionDigits: digits })} ${unit}`;
 }
 
+function extendedSupport(assessment: Tier1PreRevenueAssessment | null): ExtendedTierSupport | null {
+  return assessment ? assessment.support as ExtendedTierSupport : null;
+}
+
 function cyclePriceRows(assessment: Tier1PreRevenueAssessment | null): CyclePriceDisplayRow[] {
-  if (!assessment) return [];
-  const support = assessment.support as Tier1PreRevenueAssessment['support'] & { cyclePrices?: CyclePriceDisplayRow[] };
-  return Array.isArray(support.cyclePrices)
+  const support = extendedSupport(assessment);
+  return Array.isArray(support?.cyclePrices)
     ? support.cyclePrices.filter((row) => row && typeof row.metal === 'string' && Number.isFinite(row.spotPrice) && Number.isFinite(row.bearPrice) && Number.isFinite(row.multiplier))
     : [];
+}
+
+function reconciliationRows(assessment: Tier1PreRevenueAssessment | null): ProjectReconciliationDisplay[] {
+  const support = extendedSupport(assessment);
+  return Array.isArray(support?.projectReconciliation) ? support.projectReconciliation : [];
 }
 
 function displayDiagnostics(items: string[]): string[] {
@@ -137,6 +191,8 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
     : '—';
   const diagnostics = assessment ? displayDiagnostics(assessment.diagnostics) : [];
   const cyclePrices = cyclePriceRows(assessment);
+  const support = extendedSupport(assessment);
+  const reconciliation = reconciliationRows(assessment);
 
   return <>
     <button
@@ -171,6 +227,8 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <div><span>Skalfönster</span><strong>{scaleWindow}</strong></div>
             <div><span>Tier-IRR · spot</span><strong>{typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : '—'}</strong></div>
             <div><span>Spotdatum</span><strong>{formatDate(assessment.support.tierBasePriceAsOfUtc)}</strong></div>
+            <div><span>Rapportavstämning</span><strong>{support?.reconciliationVerified === true ? 'Verifierad' : 'Ej verifierad'}</strong></div>
+            {support?.preReconciliationTierStatus && <div><span>Provisorisk Tier före guard</span><strong>{tierStatusText(support.preReconciliationTierStatus)}</strong></div>}
           </div>
 
           <div className="tier1-modal__gates">
@@ -210,10 +268,34 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             {Object.keys(assessment.support.cycleMultipliersByMetal).length > 0 && <p><strong>Bear-multipliers:</strong> {Object.entries(assessment.support.cycleMultipliersByMetal).map(([metal, value]) => `${metal} ${formatNumber(value)}x`).join(' · ')}</p>}
           </div>
 
+          <div className="tier1-modal__section">
+            <h4>Rapportavstämning · hard guard</h4>
+            {reconciliation.length === 0 ? <p><strong>Ej verifierad.</strong> Ingen reconciliation-evidens finns i project_json.</p> : <>
+              <p>En fullt verifierad Tier kräver samma periodmappning, CAPEX/closure/WC, rapportpriser och huvudantaganden samt kontrollräkning mot rapportens after-tax NPV/IRR. Maximal relativ tolerans är 2 %.</p>
+              {reconciliation.map((row) => <div key={row.projectId} className="tier1-modal__gate">
+                <div className="tier1-modal__gate-head"><strong>{row.projectId}</strong><span>{row.status === 'VERIFIED' ? 'VERIFIERAD' : 'EJ VERIFIERAD'}</span></div>
+                <div className="tier1-modal__gate-reason">{row.reason}</div>
+                {row.reportPageOrTable && <dl className="tier1-modal__facts">
+                  <div><dt>Rapportkälla</dt><dd>{row.reportSourceId ?? '—'}</dd></div>
+                  <div><dt>Sida / tabell</dt><dd>{row.reportPageOrTable}</dd></div>
+                  <div><dt>Diskonteringsränta</dt><dd>{formatPercentFraction(row.discountRate)}</dd></div>
+                  <div><dt>NPV_report</dt><dd>{formatReportMoney(row.reportNpv, row.npvCurrency)}</dd></div>
+                  <div><dt>NPV_json</dt><dd>{formatReportMoney(row.jsonNpv, row.npvCurrency)}</dd></div>
+                  <div><dt>NPV-skillnad</dt><dd>{formatPercentFraction(row.npvRelativeDiff)}</dd></div>
+                  <div><dt>IRR_report</dt><dd>{formatPercentFraction(row.reportIrr)}</dd></div>
+                  <div><dt>IRR_json</dt><dd>{formatPercentFraction(row.jsonIrr)}</dd></div>
+                  <div><dt>IRR-skillnad</dt><dd>{formatPercentFraction(row.irrRelativeDiff)}</dd></div>
+                  <div><dt>Tolerans</dt><dd>{formatPercentFraction(row.toleranceRelative)}</dd></div>
+                </dl>}
+              </div>)}
+            </>}
+          </div>
+
           {benchmark && <div className="tier1-modal__section">
             <h4>Statisk kostnadsreferens · {benchmark.metal}</h4>
-            <p><strong>{benchmark.q1Max} {benchmark.unit}</strong> · {benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'publicerad Q1-gräns' : 'konservativ Q1-referens'}</p>
+            <p><strong>{benchmark.q1Max} {benchmark.unit}</strong> · {benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'publicerad Q1-gräns' : 'konservativ Q1-referens'} · {benchmark.comparisonEnabled ? 'jämförelse aktiverad' : 'endast informativ'}</p>
             <p>{benchmark.notes}</p>
+            <p><strong>Definitionsbasis:</strong> {benchmark.basisId}</p>
             <p><strong>Verifierad:</strong> {benchmark.updatedAtUtc} · <strong>dataperiod:</strong> {benchmark.dataPeriod}</p>
             <a href={benchmark.sourceUrl} target="_blank" rel="noreferrer">Källa</a>{benchmark.evidenceUrl && <> · <a href={benchmark.evidenceUrl} target="_blank" rel="noreferrer">Q1-evidens</a></>}
           </div>}
