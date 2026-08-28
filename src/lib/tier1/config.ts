@@ -45,6 +45,12 @@ export type Tier1CostBenchmark = {
   notes: string;
 };
 
+/**
+ * Instrumentbrädan policy thresholds for sustained physical production scale.
+ * They are deliberately price-independent and are not presented as universal
+ * mining-industry definitions of “Tier 1”. Change only as an explicit policy
+ * decision, never as a side effect of metal prices or an individual project.
+ */
 export const TIER1_PRODUCTION_THRESHOLDS: Record<Tier1Metal, Tier1ProductionThreshold> = {
   Au: { metal: 'Au', minimumAnnualPayable: 300_000, unit: 'toz', label: '300 koz Au/år' },
   Ag: { metal: 'Ag', minimumAnnualPayable: 15_000_000, unit: 'toz', label: '15 Moz Ag/år' },
@@ -104,23 +110,26 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   Ni: {
     metal: 'Ni', metric: 'C1_NI_USD_PER_LB', basisId: 'JAGUAR_NI_C1_MINE_SITE_GA', comparisonEnabled: true,
     benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 3.34, unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27', dataPeriod: '2025 project update', sourceLabel: 'Centaurus Metals Jaguar nickel project',
-    sourceUrl: 'https://centaurusmetals.com/pdf/b2bc4fc8-f0c0-4704-8d19-6cb756e7a057/Quarterly-ActivitiesAppendix-5B-Cash-Flow-Report.pdf?Platform=ListPage',
-    notes: 'Jaguar LOM C1 3,34 USD/lb payable Ni och uttryckligen första kostnadskvartilen. Disclosed bridge: mining + processing + G&A; product logistics, royalties och by-product credit visas utanför C1.',
+    updatedAtUtc: '2026-08-28', dataPeriod: '2025 JVEP / Annual Report 2025', sourceLabel: 'Centaurus Metals Jaguar JVEP / Annual Report 2025',
+    sourceUrl: 'https://centaurusmetals.com/PDF/0c610073-19a9-4383-b302-aca60cfa61ad/AnnualReporttoshareholders',
+    evidenceUrl: 'https://centaurusmetals.com/PDF/3c949469-bb3f-4761-a55a-54034f831ab2/JaguarValueEngineeringEnhancesProjectEconomics',
+    notes: 'Jaguar redovisas uttryckligen i första kvartilen. JVEP-bryggan visar mine-site C1 = mining + processing + G&A: 2,67 USD/lb nickel in concentrate/contained basis. Årsrapporten redovisar motsvarande första-kvartil C1 som 3,34 USD/lb på payable nickel basis. Tier-benchmarken använder 3,34 eftersom C1_NI-denominatorn är payable Ni; logistik, royalties, by-product credit och sustaining/deferred capital ligger utanför C1.',
   },
   Pt: {
     metal: 'Pt', metric: 'AISC_PGM3E_USD_PER_TOZ', basisId: 'VALTERRA_PGM_3E_AISC_SOLD', comparisonEnabled: true,
     benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
+    updatedAtUtc: '2026-08-28', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
     sourceUrl: 'https://www.valterraplatinum.com/media_centre/annual-results-2025/',
-    notes: 'Mogalakwena AISC 835 USD per såld 3E oz och uttryckligen första kostnadskvartilen. Endast ett kompatibelt 3E-oz-sold AISC får jämföras.',
+    evidenceUrl: 'https://www.valterraplatinum.com/~/media/Files/V/Valterra-Platinum/Platinum/report-archive/2025/integrated-report-2025.pdf',
+    notes: 'Mogalakwena 2025 AISC 835 USD per såld 3E oz. Valterras Integrated Report 2025 anger uttryckligen att detta placerar Mogalakwena tydligt i första kvartilen av industry cost curve. PGM-basketreferens och endast pass-only; endast kompatibelt 3E-oz-sold AISC får jämföras.',
   },
   Pd: {
     metal: 'Pd', metric: 'AISC_PGM3E_USD_PER_TOZ', basisId: 'VALTERRA_PGM_3E_AISC_SOLD', comparisonEnabled: true,
     benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 835, unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
+    updatedAtUtc: '2026-08-28', dataPeriod: '2025', sourceLabel: 'Valterra Platinum Mogalakwena 2025',
     sourceUrl: 'https://www.valterraplatinum.com/media_centre/annual-results-2025/',
-    notes: 'Mogalakwena AISC 835 USD per såld 3E oz och uttryckligen första kostnadskvartilen. Endast ett kompatibelt 3E-oz-sold AISC får jämföras.',
+    evidenceUrl: 'https://www.valterraplatinum.com/~/media/Files/V/Valterra-Platinum/Platinum/report-archive/2025/integrated-report-2025.pdf',
+    notes: 'Mogalakwena 2025 AISC 835 USD per såld 3E oz. Valterras Integrated Report 2025 anger uttryckligen att detta placerar Mogalakwena tydligt i första kvartilen av industry cost curve. PGM-basketreferens och endast pass-only; endast kompatibelt 3E-oz-sold AISC får jämföras.',
   },
 };
 
