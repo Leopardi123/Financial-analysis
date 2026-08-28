@@ -10,6 +10,7 @@ export type Tier1ProductionThreshold = {
 
 export type Tier1CostMetric =
   | 'AISC_AU_USD_PER_TOZ'
+  | 'AISC_AG_CO_PRODUCT_USD_PER_TOZ'
   | 'AISC_AGEQ_USD_PER_TOZ'
   | 'C1_CU_USD_PER_LB'
   | 'AISC_ZNEQ_USD_PER_LB'
@@ -20,28 +21,56 @@ export type Tier1CostMetric =
 /** Exact cost-definition family required for benchmark compatibility. */
 export type Tier1CostBasisId =
   | 'S_AND_P_CO_PRODUCT_AISC_AU'
+  | 'S_AND_P_CO_PRODUCT_AISC_AG'
   | 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE'
   | 'S_AND_P_CO_PRODUCT_C1_CU'
   | 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS'
   | 'JAGUAR_NI_C1_MINE_SITE_GA'
   | 'VALTERRA_PGM_3E_AISC_SOLD';
 
-export type Tier1CostBenchmarkKind = 'FULL_QUARTILE_CURVE' | 'EXACT_Q1_BOUNDARY' | 'Q1_REFERENCE_CEILING';
+/** All schema-supported cost metrics, including legacy evidence metrics that are not preferred benchmarks. */
+export const TIER1_COST_METRIC_IDS: readonly Tier1CostMetric[] = [
+  'AISC_AU_USD_PER_TOZ',
+  'AISC_AG_CO_PRODUCT_USD_PER_TOZ',
+  'AISC_AGEQ_USD_PER_TOZ',
+  'C1_CU_USD_PER_LB',
+  'AISC_ZNEQ_USD_PER_LB',
+  'C1_NI_USD_PER_LB',
+  'AISC_NI_USD_PER_LB',
+  'AISC_PGM3E_USD_PER_TOZ',
+];
+
+/** All schema-supported cost bases. Validation must not depend only on the current preferred benchmark per metal. */
+export const TIER1_COST_BASIS_IDS: readonly Tier1CostBasisId[] = [
+  'S_AND_P_CO_PRODUCT_AISC_AU',
+  'S_AND_P_CO_PRODUCT_AISC_AG',
+  'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE',
+  'S_AND_P_CO_PRODUCT_C1_CU',
+  'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS',
+  'JAGUAR_NI_C1_MINE_SITE_GA',
+  'VALTERRA_PGM_3E_AISC_SOLD',
+];
+
+export type Tier1CostBenchmarkKind =
+  | 'FULL_QUARTILE_CURVE'
+  | 'EXACT_Q1_BOUNDARY'
+  | 'Q1_REFERENCE_CEILING'
+  | 'CURVE_IDENTIFIED_NO_BOUNDARIES';
 
 export type Tier1CostBenchmark = {
   metal: Tier1Metal;
   metric: Tier1CostMetric;
   basisId: Tier1CostBasisId;
-  /** False means the cited value is retained as evidence but may not classify Tier cost. */
+  /** False means the cited source is retained as evidence but may not classify Tier cost. */
   comparisonEnabled: boolean;
   benchmarkKind: Tier1CostBenchmarkKind;
   /**
-   * Maximum cost for the first quartile / P25 boundary when exact. For a
-   * Q1_REFERENCE_CEILING this is only the cost of a cited first-quartile asset:
-   * values at or below it can prove Tier 1, values above it remain unknown.
+   * Maximum cost for the first quartile / P25 boundary when verified. Null is
+   * required when the curve is identified but the boundary itself has not yet
+   * been extracted/verified; never substitute a peer asset or zero.
    */
-  q1Max: number;
-  /** P50 and P75 cost-curve boundaries. Null until a definition-compatible value is verified. */
+  q1Max: number | null;
+  /** P50 and P75 cost-curve boundaries. Null until definition-compatible values are verified. */
   p50Max: number | null;
   p75Max: number | null;
   /**
@@ -94,13 +123,12 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
     notes: '2025E global gold AISC curve, co-product basis, mines >25 koz Au. Publicerade kvartilband: Q1 <1 228; Q2 1 228–1 501; Q3 1 501–1 840; Q4 >1 840 USD/oz Au. Gränserna är explicit utskrivna i källan, därför boundaryUncertaintyAbs=0.',
   },
   Ag: {
-    metal: 'Ag', metric: 'AISC_AGEQ_USD_PER_TOZ', basisId: 'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE', comparisonEnabled: false,
-    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 12.9, p50Max: null, p75Max: null, boundaryUncertaintyAbs: 0, unit: 'USD/toz',
-    updatedAtUtc: '2026-08-27', dataPeriod: '2025',
-    sourceLabel: 'Juanicipio reported AgEq AISC + Pan American/S&P first-quartile evidence',
-    sourceUrl: 'https://www.fresnilloplc.com/media/wfzesgc1/030326-fres-fy25-prelim-presentation-final.pdf',
-    evidenceUrl: 'https://panamericansilver.com/wp-content/uploads/2026/06/PAAS-Investor-Presentation_June_2026_vF.pdf',
-    notes: '12,9 USD/AgEq oz är ett rapporterat Juanicipio-mått, medan Pan Americans kostnadskurva använder S&P modellerad co-product silver AISC. Definitionerna är inte samma. Nästa steg är en separat co-product Ag-metrik/basis; ingen kvartil klassificeras från denna blandade referens.',
+    metal: 'Ag', metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AG', comparisonEnabled: false,
+    benchmarkKind: 'CURVE_IDENTIFIED_NO_BOUNDARIES', q1Max: null, p50Max: null, p75Max: null, boundaryUncertaintyAbs: 0, unit: 'USD/toz',
+    updatedAtUtc: '2026-08-28', dataPeriod: '2024 actual',
+    sourceLabel: 'S&P Global Market Intelligence global co-product silver AISC curve / Sunshine Silver SEC filing',
+    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/2091017/000114036126013160/filename1.htm',
+    notes: 'Global 2024 actual co-product silver AISC curve, excluding Russia and mines below 500 koz Ag. Co-product cost allocation is based on revenue-value split. The public source verifies the curve definition and that Sunshine base-case AISC 18.81 USD/oz is in Q2, but it does not print exact P25/P50/P75 values. Those boundaries therefore remain null and silver Cost Tier is fail-closed until they are independently extracted and assigned an explicit digitisation uncertainty.',
   },
   Cu: {
     metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', comparisonEnabled: true,
