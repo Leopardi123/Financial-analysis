@@ -12,6 +12,7 @@ import {
   costVintageCompatibility,
   type CanonicalCostResult,
 } from '../src/lib/tier1/cost.ts';
+import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -234,6 +235,14 @@ export default async function handler(req: any, res: any): Promise<void> {
         const canonicalCost = await computeCanonicalCompanyCost(symbol, assessment.primaryMetal as Tier1Metal);
         applyCanonicalCostGate(assessment, canonicalCost);
       }
+
+      const cyclePriceDisplay = await buildTierCyclePriceDisplay(
+        symbol,
+        assessment.support?.cycleMultipliersByMetal ?? {},
+      );
+      assessment.support.cyclePrices = cyclePriceDisplay.rows;
+      assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
+      assessment.diagnostics.push(...cyclePriceDisplay.diagnostics);
 
       const classification = classifyTier(assessment.gates);
       assessment.status = classification.status;
