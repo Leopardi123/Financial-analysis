@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { computeTier1CycleMultiplier } from '../cycle.ts';
 import { getTier1CostBenchmarkTodos } from '../config.ts';
-import { assessCapitalReturns, assessCombinedScale, assessLom, classifyTier, type Tier1Gate } from '../preRevenue.ts';
+import { assessCapitalReturns, assessCombinedScale, assessLom, classifyCostAgainstPercentiles, classifyTier, type Tier1Gate } from '../preRevenue.ts';
 import { selectConservativeProjectIrr } from '../projectIrr.ts';
 import { canonicalCostMetricForPrimaryMetal, computeCanonicalC1ForProject, costVintageCompatibility } from '../cost.ts';
 import { getFredCommodityPriceMapping, getFredHistoryCommodityPriceMapping, isFredHistoryOnlyCommodityPriceKey } from '../../prices/providers/fred.ts';
@@ -182,12 +182,37 @@ const goldAiscNotYetCanonical = canonicalCostMetricForPrimaryMetal({
 assert.equal(goldAiscNotYetCanonical.status, 'NOT_VERIFIED');
 assert.ok(goldAiscNotYetCanonical.reason.includes('Full canonical AISC'));
 
+// Cost-curve policy: Q1 => Tier 1, Q2 => Tier 2, upper half => Tier 3.
+const costTier1 = classifyCostAgainstPercentiles({ value: 90, p25Max: 100, p50Max: 150, p75Max: 200 });
+const costTier2 = classifyCostAgainstPercentiles({ value: 125, p25Max: 100, p50Max: 150, p75Max: 200 });
+const costTier3Q3 = classifyCostAgainstPercentiles({ value: 175, p25Max: 100, p50Max: 150, p75Max: 200 });
+const costTier3Q4 = classifyCostAgainstPercentiles({ value: 225, p25Max: 100, p50Max: 150, p75Max: 200 });
+assert.equal(costTier1.tier, 1);
+assert.equal(costTier2.tier, 2);
+assert.equal(costTier3Q3.tier, 3);
+assert.equal(costTier3Q4.tier, 3);
+assert.ok(costTier3Q4.reason.includes('fjärde kvartilen'));
+
+const uncertainP25 = classifyCostAgainstPercentiles({ value: 102, p25Max: 100, p50Max: 150, p75Max: 200, uncertaintyAbs: 5 });
+const uncertainP50 = classifyCostAgainstPercentiles({ value: 147, p25Max: 100, p50Max: 150, p75Max: 200, uncertaintyAbs: 5 });
+assert.equal(uncertainP25.tier, null);
+assert.equal(uncertainP50.tier, null);
+assert.ok(uncertainP25.reason.includes('P25'));
+assert.ok(uncertainP50.reason.includes('P50'));
+
+const invalidCostCurve = classifyCostAgainstPercentiles({ value: 100, p25Max: 150, p50Max: 140 });
+assert.equal(invalidCostCurve.tier, null);
+
 const gate = (tier: 1 | 2 | 3 | null, status: Tier1Gate['status'] = tier === 1 ? 'PASS' : tier === null ? 'NOT_VERIFIED' : 'FAIL'): Tier1Gate => ({
   status, tier, value: 1, threshold: 1, unit: null, reason: '',
 });
 
 assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_1');
+assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(2), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_2');
+assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(3), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_3');
 assert.equal(classifyTier({ lom: gate(1), scale: gate(2), cost: gate(null), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_2');
+assert.ok(classifyTier({ lom: gate(1), scale: gate(2), cost: gate(null), cycle: gate(1), capitalReturns: gate(1) }).reason.includes('provisoriska'));
+assert.equal(classifyTier({ lom: gate(1), scale: gate(2), cost: gate(3), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_3');
 assert.equal(classifyTier({ lom: gate(1), scale: gate(3), cost: gate(null), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_3');
 assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(null), capitalReturns: gate(1) }).status, 'NOT_VERIFIED');
 assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(1), capitalReturns: gate(null, 'FAIL') }).status, 'NOT_QUALIFIED');
@@ -208,6 +233,6 @@ for (const copperPriceKey of ['CU_USD_LB', 'CU_USD_TONNE']) {
 assert.equal(getTier1CostBenchmarkTodos('2027-08-26T00:00:00Z').length, 0);
 const staleTodos = getTier1CostBenchmarkTodos('2027-08-28T00:00:00Z');
 assert.equal(staleTodos.length, 8);
-assert.ok(staleTodos.every((todo) => todo.includes('uppdatera statisk Q1-kostnadsreferens')));
+assert.ok(staleTodos.every((todo) => todo.includes('uppdatera statisk kostnadskurva')));
 
 console.log('tier1.test.ts passed');
