@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { TIER1_COST_BENCHMARKS, TIER1_PRODUCTION_THRESHOLDS } from '../config.ts';
+import {
+  TIER1_COST_BENCHMARKS,
+  TIER1_COST_BENCHMARK_SNAPSHOTS,
+  TIER1_PRODUCTION_THRESHOLDS,
+  costBenchmarkDataYear,
+  getCompatibleTier1CostBenchmark,
+} from '../config.ts';
 
 assert.deepEqual(
   Object.fromEntries(Object.entries(TIER1_PRODUCTION_THRESHOLDS).map(([metal, row]) => [metal, [row.minimumAnnualPayable, row.unit]])),
@@ -22,6 +28,7 @@ assert.equal(TIER1_COST_BENCHMARKS.Au.q1Max, 1_228);
 assert.equal(TIER1_COST_BENCHMARKS.Au.p50Max, 1_501);
 assert.equal(TIER1_COST_BENCHMARKS.Au.p75Max, 1_840);
 assert.equal(TIER1_COST_BENCHMARKS.Au.boundaryUncertaintyAbs, 0);
+assert.equal(TIER1_COST_BENCHMARKS.Au.sourcePageOrTable, 'slide 27');
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q2 1 228–1 501'));
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q3 1 501–1 840'));
 
@@ -61,5 +68,29 @@ for (const benchmark of Object.values(TIER1_COST_BENCHMARKS)) {
     assert.ok(benchmark.p50Max < benchmark.p75Max);
   }
 }
+
+// Cost-year selection is exact and definition-locked. A 2024 project must not
+// silently use the verified 2025E Au curve; historical snapshots are added only
+// when independently sourced.
+assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Au.dataPeriod), 2025);
+assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Au.length, 1);
+assert.equal(
+  getCompatibleTier1CostBenchmark({
+    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2025,
+  }),
+  TIER1_COST_BENCHMARKS.Au,
+);
+assert.equal(
+  getCompatibleTier1CostBenchmark({
+    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2024,
+  }),
+  null,
+);
+assert.equal(
+  getCompatibleTier1CostBenchmark({
+    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'JAGUAR_NI_C1_MINE_SITE_GA', costBaseYear: 2025,
+  }),
+  null,
+);
 
 console.log('costBenchmarkBasis.test.ts passed');
