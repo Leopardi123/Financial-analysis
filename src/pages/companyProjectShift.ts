@@ -9,6 +9,32 @@ export type ShiftForwardResult = {
   tpEff: number;
 };
 
+function readCostBaseYear(projectRaw: Record<string, unknown>): number | null {
+  const breakdown = projectRaw.economicsBreakdown;
+  if (typeof breakdown !== 'object' || breakdown === null || Array.isArray(breakdown)) return null;
+  const meta = (breakdown as Record<string, unknown>).meta;
+  if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return null;
+  const value = (meta as Record<string, unknown>).costBaseYear;
+  return Number.isInteger(value) && (value as number) >= 1900 && (value as number) <= 2100
+    ? value as number
+    : null;
+}
+
+function restoreCostBaseYear(projectRaw: Record<string, unknown>, costBaseYear: number | null): void {
+  if (costBaseYear === null) return;
+  const breakdown = typeof projectRaw.economicsBreakdown === 'object'
+    && projectRaw.economicsBreakdown !== null
+    && !Array.isArray(projectRaw.economicsBreakdown)
+    ? projectRaw.economicsBreakdown as Record<string, unknown>
+    : {};
+  const meta = typeof breakdown.meta === 'object' && breakdown.meta !== null && !Array.isArray(breakdown.meta)
+    ? breakdown.meta as Record<string, unknown>
+    : {};
+  meta.costBaseYear = costBaseYear;
+  breakdown.meta = meta;
+  projectRaw.economicsBreakdown = breakdown;
+}
+
 function shiftPerPeriodArraysDeep(value: unknown, expectedLength: number, k: number): { value: unknown; shiftedSeriesCount: number } {
   if (Array.isArray(value)) {
     const isPerPeriodSeries = value.length === expectedLength && value.every((entry) => entry === null || entry === undefined || typeof entry === 'number');
@@ -48,7 +74,13 @@ function shiftPerPeriodArraysDeep(value: unknown, expectedLength: number, k: num
 }
 
 export function shiftProjectToTargetProductionYear(projectRaw: Record<string, unknown>, targetYear: number): ShiftForwardResult {
+  const costBaseYear = readCostBaseYear(projectRaw);
   const normalizedProjectRaw = buildProjectJsonV1Template(projectRaw as never) as Record<string, unknown>;
+  // buildProjectJsonV1Template predates costBaseYear and currently strips unknown
+  // economicsBreakdown.meta keys. Preserve this non-time-series cost provenance
+  // explicitly so delaying a project cannot silently erase its cost vintage.
+  restoreCostBaseYear(normalizedProjectRaw, costBaseYear);
+
   const time = normalizedProjectRaw.time;
   if (typeof time !== 'object' || time === null || Array.isArray(time)) {
     throw new Error('Kan inte förskjuta: time saknas i JSON.');
