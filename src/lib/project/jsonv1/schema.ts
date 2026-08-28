@@ -21,6 +21,7 @@ export type ProjectReportedCostBasis =
   | 'S_AND_P_CO_PRODUCT_C1_CU'
   | 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS'
   | 'JAGUAR_NI_C1_MINE_SITE_GA'
+  | 'BMI_PAYABLE_NI_C1_BYPRODUCT_SALES'
   | 'VALTERRA_PGM_3E_AISC_SOLD';
 
 export type ProjectJsonV1 = {

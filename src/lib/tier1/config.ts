@@ -26,6 +26,7 @@ export type Tier1CostBasisId =
   | 'S_AND_P_CO_PRODUCT_C1_CU'
   | 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS'
   | 'JAGUAR_NI_C1_MINE_SITE_GA'
+  | 'BMI_PAYABLE_NI_C1_BYPRODUCT_SALES'
   | 'VALTERRA_PGM_3E_AISC_SOLD';
 
 /** All schema-supported cost metrics, including legacy evidence metrics that are not preferred benchmarks. */
@@ -48,6 +49,7 @@ export const TIER1_COST_BASIS_IDS: readonly Tier1CostBasisId[] = [
   'S_AND_P_CO_PRODUCT_C1_CU',
   'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS',
   'JAGUAR_NI_C1_MINE_SITE_GA',
+  'BMI_PAYABLE_NI_C1_BYPRODUCT_SALES',
   'VALTERRA_PGM_3E_AISC_SOLD',
 ];
 
@@ -181,6 +183,30 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
 };
 
 /**
+ * Full Nickel C1 curve retained as a second, definition-locked 2025 snapshot.
+ * The preferred Jaguar bridge remains available for projects that report that
+ * exact basis; no implicit conversion between the two Ni definitions is made.
+ */
+export const TIER1_NI_BMI_2025_COST_BENCHMARK: Tier1CostBenchmark = {
+  metal: 'Ni',
+  metric: 'C1_NI_USD_PER_LB',
+  basisId: 'BMI_PAYABLE_NI_C1_BYPRODUCT_SALES',
+  comparisonEnabled: true,
+  benchmarkKind: 'FULL_QUARTILE_CURVE',
+  q1Max: 4.95,
+  p50Max: 6.45,
+  p75Max: 6.95,
+  boundaryUncertaintyAbs: 0.15,
+  unit: 'USD/lb',
+  updatedAtUtc: '2026-08-28',
+  dataPeriod: '2025 forecast (BMI Q2 2025)',
+  sourceLabel: 'Benchmark Mineral Intelligence Nickel Forecast Q2 2025 / The Metals Company',
+  sourceUrl: 'https://investors.metals.co/static-files/f36f6850-3baa-4591-a902-dc3c884391e6',
+  sourcePageOrTable: 'slide 17, Nickel C1 Cost Curve 2025',
+  notes: 'BMI-kurvan är korrigerad för payable metal med BMI-metodik och kostnaderna inkluderar by-product sales. P25≈4,95, P50≈6,45 och P75≈6,95 USD/lb är digitaliserade från diagrammet (ungefär 10,9/14,2/15,3 kUSD/t Ni), inte publicerade tabellvärden. boundaryUncertaintyAbs=0,15 USD/lb gör bedömningen fail-closed nära P25/P50. TMC:s markerade 1 065 USD/t C1 har lagts till av TMC och är inte ett BMI-estimat.',
+};
+
+/**
  * Exact-year benchmark registry. Add a historical snapshot only when its
  * percentile values, metric, basis and cost year are independently verified.
  * Current entries seed the registry; no synthetic inflation backcasts exist.
@@ -191,7 +217,7 @@ export const TIER1_COST_BENCHMARK_SNAPSHOTS: Record<Tier1Metal, Tier1CostBenchma
   Cu: [TIER1_COST_BENCHMARKS.Cu],
   Zn: [TIER1_COST_BENCHMARKS.Zn],
   Pb: [TIER1_COST_BENCHMARKS.Pb],
-  Ni: [TIER1_COST_BENCHMARKS.Ni],
+  Ni: [TIER1_COST_BENCHMARKS.Ni, TIER1_NI_BMI_2025_COST_BENCHMARK],
   Pt: [TIER1_COST_BENCHMARKS.Pt],
   Pd: [TIER1_COST_BENCHMARKS.Pd],
 };
