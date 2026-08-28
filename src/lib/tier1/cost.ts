@@ -108,36 +108,17 @@ function productionIndices(input: CanonicalCostProjectInput): number[] {
   return out;
 }
 
-/**
- * Copper-specific canonical C1 bridge.
- *
- * This deliberately does NOT handle nickel. The current Cu benchmark convention
- * includes verified mine-site cash costs plus offsite freight/transport and
- * TC/RC, net of verified by-product credits. The Jaguar nickel benchmark uses a
- * materially different disclosed C1 bridge (mining + processing + G&A, with
- * logistics/royalties/by-product credit shown outside C1), so sharing one generic
- * "C1" formula would create false definition compatibility.
- */
-export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): CanonicalCostResult {
-  const metric: Tier1CostMetric | null = input.primaryMetal === 'Cu' ? 'C1_CU_USD_PER_LB' : null;
-  const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
-  if (!metric) return notVerified(null, `${input.primaryMetal} använder inte Cu-C1-bryggan i Tier-motorn.`, [], costBaseYear);
-
-  const indices = productionIndices(input);
-  if (indices.length === 0) return notVerified(metric, `Ingen positiv payable ${input.primaryMetal}-produktion finns för C1-denominatorn.`, [], costBaseYear);
-
-  const payable = input.payableQtyByMetal[input.primaryMetal];
-  const payableUnit = input.payableQtyUnitByMetal[input.primaryMetal];
-  if (!payableUnit) return notVerified(metric, `Payable-enhet saknas för ${input.primaryMetal}.`, [], costBaseYear);
-
+function reconciledMineSiteCogs(
+  input: CanonicalCostProjectInput,
+  metric: Tier1CostMetric,
+  indices: number[],
+  costBaseYear: number | null,
+): { diagnostics: string[] } | CanonicalCostResult {
   if (!seriesComplete(input.operatingCostsUSD, indices)) {
     return notVerified(metric, 'operatingCostsUSD är inte komplett över producerande perioder.', [], costBaseYear);
   }
   if (!seriesComplete(input.siteGandA_USD, indices)) {
     return notVerified(metric, 'siteGandA_USD är inte komplett över producerande perioder; noll måste anges explicit om posten inte finns.', [], costBaseYear);
-  }
-  if (!seriesComplete(input.byproductCreditsUSD, indices)) {
-    return notVerified(metric, 'byproductCreditsUSD är inte komplett över producerande perioder; noll måste anges explicit om inga separata credits finns.', [], costBaseYear);
   }
 
   const cogs = input.economicsBreakdown?.cogs;
@@ -162,13 +143,33 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
     }
   }
   diagnostics.push('COGS-breakdown reconcilerar mot operatingCostsUSD inom 1 % / 1 000 USD tolerans.');
+  return { diagnostics };
+}
+
+/** Copper-specific C1: mine-site costs + site G&A + offsite TC/RC/freight, net by-product credits. */
+export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): CanonicalCostResult {
+  const metric: Tier1CostMetric | null = input.primaryMetal === 'Cu' ? 'C1_CU_USD_PER_LB' : null;
+  const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
+  if (!metric) return notVerified(null, `${input.primaryMetal} använder inte Cu-C1-bryggan i Tier-motorn.`, [], costBaseYear);
+
+  const indices = productionIndices(input);
+  if (indices.length === 0) return notVerified(metric, 'Ingen positiv payable Cu-produktion finns för C1-denominatorn.', [], costBaseYear);
+  const payable = input.payableQtyByMetal.Cu;
+  const payableUnit = input.payableQtyUnitByMetal.Cu;
+  if (!payableUnit) return notVerified(metric, 'Payable-enhet saknas för Cu.', [], costBaseYear);
+  if (!seriesComplete(input.byproductCreditsUSD, indices)) {
+    return notVerified(metric, 'byproductCreditsUSD är inte komplett över producerande perioder; noll måste anges explicit om inga separata credits finns.', [], costBaseYear);
+  }
+
+  const reconciled = reconciledMineSiteCogs(input, metric, indices, costBaseYear);
+  if ('status' in reconciled) return reconciled;
+  const diagnostics = reconciled.diagnostics;
 
   const selling = input.economicsBreakdown?.selling;
   if (!selling) return notVerified(metric, 'Selling/offsite-breakdown saknas; transport och TC/RC kan inte verifieras.', diagnostics, costBaseYear);
   if (!seriesComplete(selling.transportUSD, indices)) {
     return notVerified(metric, 'transportUSD är inte komplett över producerande perioder; noll måste anges explicit om posten inte finns.', diagnostics, costBaseYear);
   }
-
   const useCombinedTcRc = seriesComplete(selling.tcRcUSD, indices);
   const splitTcRcComplete = seriesComplete(selling.treatmentChargesUSD, indices) && seriesComplete(selling.refiningChargesUSD, indices);
   if (!useCombinedTcRc && !splitTcRcComplete) {
@@ -179,7 +180,7 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
   }
 
   const secondaryMetalNames = Object.entries(input.revenueByMetalUSD)
-    .filter(([metal, revenue]) => metal !== input.primaryMetal && indices.some((t) => finite(revenue[t]) && (revenue[t] as number) > 0))
+    .filter(([metal, revenue]) => metal !== 'Cu' && indices.some((t) => finite(revenue[t]) && (revenue[t] as number) > 0))
     .map(([metal]) => metal);
   const hasExplicitCredits = indices.some((t) => (input.byproductCreditsUSD[t] as number) !== 0);
   if (hasExplicitCredits && secondaryMetalNames.length > 0) {
@@ -198,9 +199,8 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
     if (!finite(qty) || qty <= 0) continue;
     const qtyLb = payableLb(qty, payableUnit);
     if (!finite(qtyLb) || qtyLb <= 0) {
-      return notVerified(metric, `Payable-enheten ${payableUnit} kan inte konverteras definitionssäkert till lb för C1.`, diagnostics, costBaseYear);
+      return notVerified(metric, `Payable-enheten ${payableUnit} kan inte konverteras definitionssäkert till lb för Cu C1.`, diagnostics, costBaseYear);
     }
-
     const tcRc = useCombinedTcRc
       ? (selling.tcRcUSD![t] as number)
       : (selling.treatmentChargesUSD![t] as number) + (selling.refiningChargesUSD![t] as number);
@@ -208,53 +208,81 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
     const explicitCredits = input.byproductCreditsUSD[t] as number;
     let secondaryMetalCredits = 0;
     for (const [metal, revenue] of Object.entries(input.revenueByMetalUSD)) {
-      if (metal === input.primaryMetal) continue;
+      if (metal === 'Cu') continue;
       const value = revenue[t];
       if (!finite(value)) {
         return notVerified(metric, `Metallintäkt för ${metal} är inte komplett i period ${t}; by-product credits kan inte verifieras.`, diagnostics, costBaseYear);
       }
       secondaryMetalCredits += value;
     }
-
     const credits = secondaryMetalNames.length > 0 ? secondaryMetalCredits : explicitCredits;
-    numeratorUSD += (input.operatingCostsUSD[t] as number)
-      + (input.siteGandA_USD[t] as number)
-      + tcRc
-      + transport
-      - credits;
+    numeratorUSD += (input.operatingCostsUSD[t] as number) + (input.siteGandA_USD[t] as number) + tcRc + transport - credits;
     denominatorLb += qtyLb;
   }
 
-  if (!(denominatorLb > 0) || !finite(numeratorUSD)) {
-    return notVerified(metric, 'C1 numerator eller denominator blev ogiltig.', diagnostics, costBaseYear);
+  if (!(denominatorLb > 0) || !finite(numeratorUSD)) return notVerified(metric, 'Cu C1 numerator eller denominator blev ogiltig.', diagnostics, costBaseYear);
+  return {
+    status: 'COMPUTABLE', metric, value: numeratorUSD / denominatorLb, unit: 'USD/lb',
+    numeratorUSD, denominator: denominatorLb, costBaseYear,
+    reason: 'Canonical Cu C1 = mine-site operating costs + site G&A + freight/transport + TC/RC − verifierade by-product credits, per payable lb. Royalties, sustaining CAPEX, depreciation och skatt ingår inte.',
+    diagnostics,
+  };
+}
+
+/** Nickel-specific C1 matching the disclosed Jaguar first-quartile bridge. */
+export function computeCanonicalNickelC1ForProject(input: CanonicalCostProjectInput): CanonicalCostResult {
+  const metric: Tier1CostMetric = 'C1_NI_USD_PER_LB';
+  const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
+  if (input.primaryMetal !== 'Ni') return notVerified(metric, `${input.primaryMetal} använder inte Ni-C1-bryggan.`, [], costBaseYear);
+
+  const indices = productionIndices(input);
+  if (indices.length === 0) return notVerified(metric, 'Ingen positiv payable Ni-produktion finns för C1-denominatorn.', [], costBaseYear);
+  const payable = input.payableQtyByMetal.Ni;
+  const payableUnit = input.payableQtyUnitByMetal.Ni;
+  if (!payableUnit) return notVerified(metric, 'Payable-enhet saknas för Ni.', [], costBaseYear);
+  if (!seriesComplete(input.byproductCreditsUSD, indices)) {
+    return notVerified(metric, 'byproductCreditsUSD är inte komplett; Jaguar-kompatibel Ni C1 kräver explicit 0 eftersom by-product credit ligger utanför C1-bryggan.', [], costBaseYear);
   }
 
+  const reconciled = reconciledMineSiteCogs(input, metric, indices, costBaseYear);
+  if ('status' in reconciled) return reconciled;
+  const diagnostics = reconciled.diagnostics;
+
+  const secondaryMetalNames = Object.entries(input.revenueByMetalUSD)
+    .filter(([metal, revenue]) => metal !== 'Ni' && indices.some((t) => finite(revenue[t]) && (revenue[t] as number) > 0))
+    .map(([metal]) => metal);
+  if (secondaryMetalNames.length > 0) {
+    return notVerified(metric, `Sekundära metallintäkter (${secondaryMetalNames.join(', ')}) finns. Jaguar-referensens Ni C1 redovisar by-product credit utanför C1; ingen implicit kredit eller kostnadsallokering görs.`, diagnostics, costBaseYear);
+  }
+  if (indices.some((t) => (input.byproductCreditsUSD[t] as number) !== 0)) {
+    return notVerified(metric, 'byproductCreditsUSD är inte noll. Jaguar-referensens Ni C1 placerar by-product credit utanför C1 och värdet kan därför inte jämföras definitionssäkert.', diagnostics, costBaseYear);
+  }
+
+  let numeratorUSD = 0;
+  let denominatorLb = 0;
+  for (const t of indices) {
+    const qty = payable[t];
+    if (!finite(qty) || qty <= 0) continue;
+    const qtyLb = payableLb(qty, payableUnit);
+    if (!finite(qtyLb) || qtyLb <= 0) return notVerified(metric, `Payable-enheten ${payableUnit} kan inte konverteras till lb för Ni C1.`, diagnostics, costBaseYear);
+    numeratorUSD += (input.operatingCostsUSD[t] as number) + (input.siteGandA_USD[t] as number);
+    denominatorLb += qtyLb;
+  }
+  if (!(denominatorLb > 0) || !finite(numeratorUSD)) return notVerified(metric, 'Ni C1 numerator eller denominator blev ogiltig.', diagnostics, costBaseYear);
+
   return {
-    status: 'COMPUTABLE',
-    metric,
-    value: numeratorUSD / denominatorLb,
-    unit: 'USD/lb',
-    numeratorUSD,
-    denominator: denominatorLb,
-    costBaseYear,
-    reason: 'Canonical Cu C1 = mine-site operating costs + site G&A + freight/transport + TC/RC − verifierade by-product credits, per payable lb. Royalties, sustaining CAPEX, depreciation och skatt ingår inte.',
+    status: 'COMPUTABLE', metric, value: numeratorUSD / denominatorLb, unit: 'USD/lb',
+    numeratorUSD, denominator: denominatorLb, costBaseYear,
+    reason: 'Canonical Ni C1 (Jaguar-kompatibel) = mine-site operating costs + site G&A per payable Ni-lb. Produktlogistik, royalties, by-product credits och sustaining CAPEX ligger utanför denna C1-definition.',
     diagnostics,
   };
 }
 
 export function canonicalCostMetricForPrimaryMetal(input: CanonicalCostProjectInput): CanonicalCostResult {
   if (input.primaryMetal === 'Cu') return computeCanonicalC1ForProject(input);
+  if (input.primaryMetal === 'Ni') return computeCanonicalNickelC1ForProject(input);
 
   const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
-  if (input.primaryMetal === 'Ni') {
-    return notVerified(
-      'C1_NI_USD_PER_LB',
-      'Ni C1 hålls separat från Cu-C1. Jaguar-referensen 3,34 USD/lb definierar C1 som mining + processing + G&A; produktlogistik, royalties och by-product credit ligger utanför den redovisade C1-bryggan. Ingen Cu-formel återanvänds för Ni.',
-      [],
-      costBaseYear,
-    );
-  }
-
   const metricByMetal: Partial<Record<Tier1Metal, Tier1CostMetric>> = {
     Au: 'AISC_AU_USD_PER_TOZ',
     Ag: 'AISC_AGEQ_USD_PER_TOZ',
