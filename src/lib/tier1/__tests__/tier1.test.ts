@@ -65,8 +65,9 @@ const unresolvedInvestmentProject = selectConservativeProjectIrr([
 assert.equal(unresolvedInvestmentProject.irr, null);
 assert.deepEqual(unresolvedInvestmentProject.unresolvedProjectIds, ['p2']);
 
-// Canonical Cu C1 is only computable when mine-site COGS reconciles to OPEX,
-// offsite costs are explicit, and credits cannot be double-counted.
+// Santa Cruz-compatible Cu C1 is mine-site operating cost + site G&A per
+// payable Cu-lb. Offsite selling costs, royalties and sustaining capital are
+// outside this disclosed C1. Polymetallic Cu needs explicit co-product allocation.
 const canonicalCuInput = {
   projectId: 'cu-test',
   primaryMetal: 'Cu' as const,
@@ -99,9 +100,10 @@ const canonicalCu = computeCanonicalC1ForProject(canonicalCuInput);
 assert.equal(canonicalCu.status, 'COMPUTABLE');
 assert.equal(canonicalCu.metric, 'C1_CU_USD_PER_LB');
 assert.equal(canonicalCu.costBaseYear, 2025);
-assert.ok(canonicalCu.value !== null && Math.abs(canonicalCu.value - 0.67) < 1e-12);
-assert.equal(canonicalCu.numeratorUSD, 134);
+assert.ok(canonicalCu.value !== null && Math.abs(canonicalCu.value - 0.60) < 1e-12);
+assert.equal(canonicalCu.numeratorUSD, 120);
 assert.equal(canonicalCu.denominator, 200);
+assert.ok(canonicalCu.reason.includes('Santa Cruz/S&P-kompatibel'));
 
 // Nickel uses a separate Jaguar-compatible C1 bridge. It deliberately excludes
 // product logistics, royalties and by-product credits from the C1 numerator.
@@ -142,23 +144,29 @@ const cogsMismatch = computeCanonicalC1ForProject({
 assert.equal(cogsMismatch.status, 'NOT_VERIFIED');
 assert.ok(cogsMismatch.reason.includes('reconcilerar inte'));
 
-const missingOffsite = computeCanonicalC1ForProject({
+const offsiteDoesNotEnterCuC1 = computeCanonicalC1ForProject({
   ...canonicalCuInput,
   economicsBreakdown: {
     ...canonicalCuInput.economicsBreakdown,
-    selling: { transportUSD: [0, 2, 2] },
+    selling: { treatmentChargesUSD: [0, 500, 500], refiningChargesUSD: [0, 500, 500], transportUSD: [0, 500, 500] },
   },
 });
-assert.equal(missingOffsite.status, 'NOT_VERIFIED');
-assert.ok(missingOffsite.reason.includes('TC/RC'));
+assert.equal(offsiteDoesNotEnterCuC1.status, 'COMPUTABLE');
+assert.equal(offsiteDoesNotEnterCuC1.value, canonicalCu.value);
 
-const ambiguousCredits = computeCanonicalC1ForProject({
+const copperWithSecondaryMetal = computeCanonicalC1ForProject({
   ...canonicalCuInput,
-  byproductCreditsUSD: [0, 4, 4],
   revenueByMetalUSD: { Cu: [0, 1_000, 1_000], Au: [0, 10, 10] },
 });
-assert.equal(ambiguousCredits.status, 'NOT_VERIFIED');
-assert.ok(ambiguousCredits.reason.includes('dubbelkreditera'));
+assert.equal(copperWithSecondaryMetal.status, 'NOT_VERIFIED');
+assert.ok(copperWithSecondaryMetal.reason.includes('co-product'));
+
+const copperWithUnallocatedCredit = computeCanonicalC1ForProject({
+  ...canonicalCuInput,
+  byproductCreditsUSD: [0, 4, 4],
+});
+assert.equal(copperWithUnallocatedCredit.status, 'NOT_VERIFIED');
+assert.ok(copperWithUnallocatedCredit.reason.includes('byproductCreditsUSD'));
 
 assert.equal(costVintageCompatibility(2025, '2025 PFS').compatible, true);
 assert.equal(costVintageCompatibility(2024, '2025 PFS').compatible, false);
