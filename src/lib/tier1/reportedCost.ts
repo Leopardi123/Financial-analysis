@@ -1,5 +1,5 @@
 import type { Tier1CostBasisId, Tier1CostMetric } from './config.ts';
-import { TIER1_COST_BENCHMARKS } from './config.ts';
+import { TIER1_COST_BASIS_IDS, TIER1_COST_METRIC_IDS } from './config.ts';
 import { convertMass, convertPreciousQuantity } from '../prices/units.ts';
 
 export type ReportedCostEvidence = {
@@ -14,12 +14,8 @@ export type ReportedCostEvidence = {
   reason: string;
 };
 
-const VALID_METRICS = new Set<Tier1CostMetric>(
-  Object.values(TIER1_COST_BENCHMARKS).map((benchmark) => benchmark.metric),
-);
-const VALID_BASIS_IDS = new Set<Tier1CostBasisId>(
-  Object.values(TIER1_COST_BENCHMARKS).map((benchmark) => benchmark.basisId),
-);
+const VALID_METRICS = new Set<Tier1CostMetric>(TIER1_COST_METRIC_IDS);
+const VALID_BASIS_IDS = new Set<Tier1CostBasisId>(TIER1_COST_BASIS_IDS);
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
