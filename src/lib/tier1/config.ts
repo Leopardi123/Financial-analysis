@@ -132,10 +132,13 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   },
   Cu: {
     metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', comparisonEnabled: true,
-    benchmarkKind: 'Q1_REFERENCE_CEILING', q1Max: 1.32, p50Max: null, p75Max: null, boundaryUncertaintyAbs: 0, unit: 'USD/lb',
-    updatedAtUtc: '2026-08-27', dataPeriod: '2025 PFS', sourceLabel: 'Ivanhoe Electric Santa Cruz PFS / S&P co-product C1 curve',
-    sourceUrl: 'https://ivanhoeelectric.com/news/ivanhoe-electrics-preliminary-feasibility-study-for-the-santa-cruz-copper-project-in-arizona-defines-a-high-quality-underground/',
-    notes: 'Santa Cruz LOM C1 1,32 USD/lb jämförs uttryckligen mot S&P Global Market Intelligence co-product C1 copper cash cost curve. Referensen bevisar Q1 vid eller under 1,32 men är inte den exakta P25/P50/P75-tabellen. Polymetallisk Cu kräver verifierad co-product-allokering eller kompatibelt rapporterat C1.',
+    benchmarkKind: 'FULL_QUARTILE_CURVE', q1Max: 1.40, p50Max: 1.76, p75Max: 2.18, boundaryUncertaintyAbs: 0.05, unit: 'USD/lb',
+    updatedAtUtc: '2026-08-28', dataPeriod: '2024 actual (Q4 2024 dataset)',
+    sourceLabel: 'S&P Global Market Intelligence / Ivanhoe Electric Santa Cruz PFS global copper C1 curve',
+    sourceUrl: 'https://ivanhoeelectric.com/site/assets/files/10951/sc_pfs_investor_presentation_vfinal_v2.pdf',
+    sourcePageOrTable: 'slide 10, First Quartile Unit Cash Costs',
+    evidenceUrl: 'https://ivanhoeelectric.com/news/ivanhoe-electrics-preliminary-feasibility-study-for-the-santa-cruz-copper-project-in-arizona-defines-a-high-quality-underground/',
+    notes: 'S&P Global Market Intelligence 2024 actual C1 cash operating cost curve on a co-product basis for global copper mines, excluding processing facilities. P25≈1.40, P50≈1.76 and P75≈2.18 USD/lb are digitised from the plotted curve, not published tabular values; boundaryUncertaintyAbs=0.05 USD/lb prevents classification inside the read-off uncertainty bands. Ivanhoe separately states that Santa Cruz C1 1.32 USD/lb is global first quartile against the Q4 2024 S&P dataset; 1.32 is therefore an independent Q1 sanity check, not the P25 value.',
   },
   Zn: {
     metal: 'Zn', metric: 'AISC_ZNEQ_USD_PER_LB', basisId: 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS', comparisonEnabled: false,

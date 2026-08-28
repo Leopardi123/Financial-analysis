@@ -45,9 +45,20 @@ assert.equal(TIER1_COST_BENCHMARKS.Ag.p75Max, null);
 assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Ag.dataPeriod), 2024);
 assert.ok(!TIER1_COST_BENCHMARKS.Ag.notes.includes('12,9'));
 
+// Copper now uses the full 2024 actual S&P co-product C1 curve digitised from
+// Ivanhoe Electric slide 10. The plotted values carry an explicit read-off
+// uncertainty and are not represented as published exact tabular percentiles.
 assert.equal(TIER1_COST_BENCHMARKS.Cu.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Cu.basisId, 'S_AND_P_CO_PRODUCT_C1_CU');
-assert.equal(TIER1_COST_BENCHMARKS.Cu.p50Max, null);
+assert.equal(TIER1_COST_BENCHMARKS.Cu.benchmarkKind, 'FULL_QUARTILE_CURVE');
+assert.equal(TIER1_COST_BENCHMARKS.Cu.q1Max, 1.40);
+assert.equal(TIER1_COST_BENCHMARKS.Cu.p50Max, 1.76);
+assert.equal(TIER1_COST_BENCHMARKS.Cu.p75Max, 2.18);
+assert.equal(TIER1_COST_BENCHMARKS.Cu.boundaryUncertaintyAbs, 0.05);
+assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Cu.dataPeriod), 2024);
+assert.equal(TIER1_COST_BENCHMARKS.Cu.sourcePageOrTable, 'slide 10, First Quartile Unit Cash Costs');
+assert.ok(TIER1_COST_BENCHMARKS.Cu.notes.includes('digitised'));
+assert.ok(TIER1_COST_BENCHMARKS.Cu.notes.includes('Santa Cruz C1 1.32'));
 
 assert.equal(TIER1_COST_BENCHMARKS.Zn.comparisonEnabled, false);
 assert.equal(TIER1_COST_BENCHMARKS.Pb.comparisonEnabled, false);
@@ -106,6 +117,20 @@ assert.equal(
 assert.equal(
   getCompatibleTier1CostBenchmark({
     metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'JAGUAR_NI_C1_MINE_SITE_GA', costBaseYear: 2025,
+  }),
+  null,
+);
+
+assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Cu.length, 1);
+assert.equal(
+  getCompatibleTier1CostBenchmark({
+    metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2024,
+  }),
+  TIER1_COST_BENCHMARKS.Cu,
+);
+assert.equal(
+  getCompatibleTier1CostBenchmark({
+    metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2025,
   }),
   null,
 );
