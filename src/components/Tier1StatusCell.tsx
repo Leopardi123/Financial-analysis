@@ -338,17 +338,17 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           {benchmark && <div className="tier1-modal__section">
             <h4>Kostnadskurva · {benchmark.metal}</h4>
             <dl className="tier1-modal__facts">
-              <div><dt>P25 / Q1 max</dt><dd>{formatNumber(benchmark.q1Max)} {benchmark.unit}</dd></div>
+              <div><dt>P25 / Q1 max</dt><dd>{benchmark.q1Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.q1Max)} ${benchmark.unit}`}</dd></div>
               <div><dt>P50 / median</dt><dd>{benchmark.p50Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.p50Max)} ${benchmark.unit}`}</dd></div>
               <div><dt>P75</dt><dd>{benchmark.p75Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.p75Max)} ${benchmark.unit}`}</dd></div>
-              <div><dt>Kurvtyp</dt><dd>{benchmark.benchmarkKind === 'FULL_QUARTILE_CURVE' ? 'Full P25/P50/P75' : benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'Exakt Q1-gräns' : 'Q1-referens · pass-only'}</dd></div>
-              <div><dt>Jämförelse</dt><dd>{benchmark.comparisonEnabled ? 'Aktiverad' : 'Endast informativ'}</dd></div>
+              <div><dt>Kurvtyp</dt><dd>{benchmark.benchmarkKind === 'FULL_QUARTILE_CURVE' ? 'Full P25/P50/P75' : benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'Exakt Q1-gräns' : benchmark.benchmarkKind === 'CURVE_IDENTIFIED_NO_BOUNDARIES' ? 'Kurva identifierad · gränser saknas' : 'Q1-referens · pass-only'}</dd></div>
+              <div><dt>Jämförelse</dt><dd>{benchmark.comparisonEnabled ? 'Aktiverad' : 'Ej aktiverad'}</dd></div>
               <div><dt>Gränsosäkerhet</dt><dd>{benchmark.boundaryUncertaintyAbs > 0 ? `±${formatNumber(benchmark.boundaryUncertaintyAbs)} ${benchmark.unit}` : 'Ingen angiven'}</dd></div>
             </dl>
             <p>Cost Tier-policy: Q1 = Tier 1, Q2 = Tier 2, övre halvan (Q3/Q4) = Tier 3. Om en digitaliserad gräns har osäkerhet och projektkostnaden ligger inom osäkerhetsbandet lämnas Cost Tier Ej verifierad.</p>
             <p>{benchmark.notes}</p>
             <p><strong>Definitionsbasis:</strong> {benchmark.basisId}</p>
-            <p><strong>Verifierad:</strong> {benchmark.updatedAtUtc} · <strong>dataperiod:</strong> {benchmark.dataPeriod}</p>
+            <p><strong>Verifierad:</strong> {benchmark.updatedAtUtc} · <strong>dataperiod:</strong> {benchmark.dataPeriod}{benchmark.sourcePageOrTable ? ` · ${benchmark.sourcePageOrTable}` : ''}</p>
             <a href={benchmark.sourceUrl} target="_blank" rel="noreferrer">Källa</a>{benchmark.evidenceUrl && <> · <a href={benchmark.evidenceUrl} target="_blank" rel="noreferrer">Evidens</a></>}
           </div>}
 
