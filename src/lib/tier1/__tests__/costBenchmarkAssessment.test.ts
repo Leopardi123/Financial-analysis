@@ -46,4 +46,24 @@ const nonDominantGold = assessCostAgainstBenchmark({
 assert.equal(nonDominantGold.tier, null);
 assert.equal(nonDominantGold.status, 'NOT_VERIFIED');
 
+const silver2024 = getCompatibleTier1CostBenchmark({
+  metal: 'Ag',
+  metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ',
+  basisId: 'S_AND_P_CO_PRODUCT_AISC_AG',
+  costBaseYear: 2024,
+});
+assert.equal(silver2024, TIER1_COST_BENCHMARKS.Ag);
+const silverNoBoundaries = assessCostAgainstBenchmark({
+  primaryMetal: 'Ag',
+  primaryMetalRevenueShare: 1,
+  metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ',
+  value: 18.81,
+  benchmark: silver2024!,
+  nowUtc: '2026-08-28T00:00:00Z',
+});
+assert.equal(silverNoBoundaries.tier, null);
+assert.equal(silverNoBoundaries.status, 'NOT_VERIFIED');
+assert.equal(silverNoBoundaries.threshold, null);
+assert.ok(silverNoBoundaries.reason.includes('P25/P50/P75'));
+
 console.log('costBenchmarkAssessment.test.ts passed');
