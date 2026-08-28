@@ -6,15 +6,15 @@ import { computeProjectEngineFullProductionV1 } from '../src/lib/project/engineF
 import { computeIrr } from '../src/lib/metrics/lista3.ts';
 import {
   TIER1_COST_BENCHMARKS,
+  getCompatibleTier1CostBenchmark,
   type Tier1CostBasisId,
-  type Tier1CostMetric,
   type Tier1Metal,
 } from '../src/lib/tier1/config.ts';
-import { assessCapitalReturns, assessCost, classifyTier } from '../src/lib/tier1/preRevenue.ts';
+import { assessCapitalReturns, classifyTier } from '../src/lib/tier1/preRevenue.ts';
+import { assessCostAgainstBenchmark } from '../src/lib/tier1/costBenchmarkAssessment.ts';
 import { selectConservativeProjectIrr, type ProjectIrrObservation } from '../src/lib/tier1/projectIrr.ts';
 import {
   canonicalCostMetricForPrimaryMetal,
-  costVintageCompatibility,
   type CanonicalCostResult,
 } from '../src/lib/tier1/cost.ts';
 import {
@@ -291,7 +291,7 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
 function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): void {
   const primaryMetal = assessment.primaryMetal as Tier1Metal | null;
   if (!primaryMetal) return;
-  const benchmark = TIER1_COST_BENCHMARKS[primaryMetal];
+  const preferredBenchmark = TIER1_COST_BENCHMARKS[primaryMetal];
   const diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
   assessment.diagnostics = diagnostics;
   diagnostics.push(...cost.diagnostics.map((item) => `Kostnad: ${item}`));
@@ -300,32 +300,58 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
   assessment.support.costMetricValue = cost.value;
   assessment.support.costBaseYear = cost.costBaseYear;
   assessment.support.costBasisId = cost.basisId;
-  assessment.support.costBenchmarkBasisId = benchmark.basisId;
   assessment.support.costMethod = cost.method;
   assessment.support.costProjectDetails = cost.projectDetails;
 
-  if (!benchmark.comparisonEnabled) {
-    const reason = `Kostnadsreferensen för ${primaryMetal} är endast informativ: dess definitionsbasis (${benchmark.basisId}) är inte homogen med den nuvarande projektmetriken. Ingen Tier-klassificering görs från denna referens.`;
-    assessment.gates.cost = {
-      status: 'NOT_VERIFIED', tier: null, value: finite(cost.value) ? cost.value : null,
-      threshold: benchmark.q1Max, unit: benchmark.unit, reason,
-    };
-    diagnostics.push(`Kostnad: ${reason}`);
-    return;
-  }
-
   if (cost.status !== 'COMPUTABLE' || !cost.metric || !finite(cost.value)) {
+    assessment.support.costBenchmarkBasisId = preferredBenchmark.basisId;
     assessment.gates.cost = {
       status: 'NOT_VERIFIED', tier: null, value: finite(cost.value) ? cost.value : null,
-      threshold: benchmark.q1Max, unit: benchmark.unit,
+      threshold: preferredBenchmark.q1Max, unit: preferredBenchmark.unit,
       reason: cost.reason,
     };
     diagnostics.push(`Kostnad: ${cost.reason}`);
     return;
   }
 
-  if (!cost.basisId || cost.basisId !== benchmark.basisId) {
-    const reason = `Cost-basis ${cost.basisId ?? 'saknas'} matchar inte benchmarkens ${benchmark.basisId}. Ingen implicit definitionskonvertering görs.`;
+  if (!cost.basisId || !Number.isInteger(cost.costBaseYear)) {
+    const reason = !cost.basisId
+      ? 'Cost-basis saknas; benchmarkfamilj får inte gissas.'
+      : 'Projektets costBaseYear saknas eller är ogiltigt; benchmarkår får inte gissas.';
+    assessment.gates.cost = {
+      status: 'NOT_VERIFIED', tier: null, value: cost.value,
+      threshold: preferredBenchmark.q1Max, unit: preferredBenchmark.unit, reason,
+    };
+    diagnostics.push(`Kostnad: ${reason}`);
+    return;
+  }
+
+  const benchmark = getCompatibleTier1CostBenchmark({
+    metal: primaryMetal,
+    metric: cost.metric,
+    basisId: cost.basisId,
+    costBaseYear: cost.costBaseYear as number,
+  });
+  if (!benchmark) {
+    const reason = `Ingen exakt cost-curve snapshot finns för ${primaryMetal}, metric ${cost.metric}, basis ${cost.basisId}, kostnadsår ${cost.costBaseYear}. Ingen implicit inflation eller definitionskonvertering görs.`;
+    assessment.support.costBenchmarkBasisId = null;
+    assessment.support.costBenchmarkYear = null;
+    assessment.gates.cost = {
+      status: 'NOT_VERIFIED', tier: null, value: cost.value,
+      threshold: preferredBenchmark.q1Max, unit: preferredBenchmark.unit, reason,
+    };
+    diagnostics.push(`Kostnad: ${reason}`);
+    return;
+  }
+
+  assessment.support.costBenchmarkBasisId = benchmark.basisId;
+  assessment.support.costBenchmarkYear = cost.costBaseYear;
+  assessment.support.costBenchmarkDataPeriod = benchmark.dataPeriod;
+  assessment.support.costBenchmarkSource = benchmark.sourceLabel;
+  assessment.support.costBenchmarkPageOrTable = benchmark.sourcePageOrTable ?? null;
+
+  if (cost.unit !== benchmark.unit) {
+    const reason = `Projektets kostnadsenhet ${cost.unit ?? 'saknas'} matchar inte snapshotens ${benchmark.unit}. Ingen implicit konvertering görs.`;
     assessment.gates.cost = {
       status: 'NOT_VERIFIED', tier: null, value: cost.value,
       threshold: benchmark.q1Max, unit: benchmark.unit, reason,
@@ -334,26 +360,15 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
     return;
   }
 
-  const vintage = costVintageCompatibility(cost.costBaseYear, benchmark.dataPeriod);
-  assessment.support.costBenchmarkYear = vintage.benchmarkYear;
-  if (!vintage.compatible) {
-    assessment.gates.cost = {
-      status: 'NOT_VERIFIED', tier: null, value: cost.value,
-      threshold: benchmark.q1Max, unit: benchmark.unit,
-      reason: `${cost.reason} ${vintage.reason}`,
-    };
-    diagnostics.push(`Kostnad: ${vintage.reason}`);
-    return;
-  }
-
-  const values: Partial<Record<Tier1CostMetric, number>> = { [cost.metric]: cost.value };
-  const gate = assessCost({
+  const gate = assessCostAgainstBenchmark({
     primaryMetal,
     primaryMetalRevenueShare: assessment.primaryMetalRevenueShare,
-    costMetricValues: values,
+    metric: cost.metric,
+    value: cost.value,
+    benchmark,
     nowUtc: new Date().toISOString(),
   });
-  gate.reason = `${gate.reason} ${cost.method === 'REPORTED_COST' ? 'Rapporterad kostnadsmetrik verifierad' : 'Canonical cost bridge verifierad'}; basis ${cost.basisId}; ${vintage.reason}`;
+  gate.reason = `${gate.reason} ${cost.method === 'REPORTED_COST' ? 'Rapporterad kostnadsmetrik verifierad' : 'Canonical cost bridge verifierad'}; basis ${cost.basisId}; kostnadsår ${cost.costBaseYear}.`;
   assessment.gates.cost = gate;
 }
 
