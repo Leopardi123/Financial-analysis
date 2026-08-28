@@ -28,6 +28,14 @@ type ProjectReconciliationDisplay = {
   jsonIrr: number | null;
   irrRelativeDiff: number | null;
   toleranceRelative: number;
+  reportStartYear: number | null;
+  reportEndYear: number | null;
+  jsonStartYear: number | null;
+  jsonEndYear: number | null;
+  productionStartPeriod: number | null;
+  reportProductionStartYear: number | null;
+  jsonProductionStartYear: number | null;
+  calendarShiftYears: number | null;
   reason: string;
 };
 
@@ -53,12 +61,20 @@ function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | nu
   return promise;
 }
 
+function reconciliationIsProvisional(assessment: Tier1PreRevenueAssessment | null): boolean {
+  if (!assessment) return false;
+  const support = assessment.support as ExtendedTierSupport;
+  return support.reconciliationVerified === false
+    && (assessment.status === 'TIER_2' || assessment.status === 'TIER_3' || assessment.status === 'NOT_QUALIFIED');
+}
+
 function overallText(assessment: Tier1PreRevenueAssessment | null): string {
   if (!assessment) return 'Ej verifierad';
+  const provisional = reconciliationIsProvisional(assessment) ? ' · prov.' : '';
   if (assessment.status === 'TIER_1') return 'Tier 1';
-  if (assessment.status === 'TIER_2') return 'Tier 2';
-  if (assessment.status === 'TIER_3') return 'Tier 3';
-  if (assessment.status === 'NOT_QUALIFIED') return 'Ej kvalificerad';
+  if (assessment.status === 'TIER_2') return `Tier 2${provisional}`;
+  if (assessment.status === 'TIER_3') return `Tier 3${provisional}`;
+  if (assessment.status === 'NOT_QUALIFIED') return `Ej kvalificerad${provisional}`;
   return 'Ej verifierad';
 }
 
@@ -116,6 +132,16 @@ function formatDate(value: string | null | undefined): string {
 function formatCyclePrice(value: number, unit: CyclePriceDisplayRow['unit']): string {
   const digits = unit === 'USD/tonne' ? 0 : 2;
   return `${value.toLocaleString('sv-SE', { maximumFractionDigits: digits })} ${unit}`;
+}
+
+function formatYearSpan(start: number | null | undefined, end: number | null | undefined): string {
+  if (typeof start !== 'number' || !Number.isFinite(start) || typeof end !== 'number' || !Number.isFinite(end)) return '—';
+  return start === end ? String(start) : `${start}–${end}`;
+}
+
+function formatCalendarShift(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `${value > 0 ? '+' : ''}${value} år`;
 }
 
 function extendedSupport(assessment: Tier1PreRevenueAssessment | null): ExtendedTierSupport | null {
@@ -177,7 +203,11 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
-  const title = useMemo(() => assessment ? 'Klicka för full Tier-bedömning.' : 'Tier-bedömning kunde inte hämtas.', [assessment]);
+  const title = useMemo(() => {
+    if (!assessment) return 'Tier-bedömning kunde inte hämtas.';
+    if (reconciliationIsProvisional(assessment)) return 'Beräknad Tier; PEA/PFS/FS-avstämning är ännu Ej verifierad. Klicka för detaljer.';
+    return 'Klicka för full Tier-bedömning.';
+  }, [assessment]);
   if (!loaded) return <span title="Tier-bedömning beräknas…">…</span>;
 
   const benchmark = assessment?.primaryMetal ? TIER1_COST_BENCHMARKS[assessment.primaryMetal] : null;
@@ -228,7 +258,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <div><span>Tier-IRR · spot</span><strong>{typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : '—'}</strong></div>
             <div><span>Spotdatum</span><strong>{formatDate(assessment.support.tierBasePriceAsOfUtc)}</strong></div>
             <div><span>Rapportavstämning</span><strong>{support?.reconciliationVerified === true ? 'Verifierad' : 'Ej verifierad'}</strong></div>
-            {support?.preReconciliationTierStatus && <div><span>Provisorisk Tier före guard</span><strong>{tierStatusText(support.preReconciliationTierStatus)}</strong></div>}
+            {support?.preReconciliationTierStatus && <div><span>Beräknad Tier före rapportguard</span><strong>{tierStatusText(support.preReconciliationTierStatus)}</strong></div>}
           </div>
 
           <div className="tier1-modal__gates">
@@ -271,13 +301,18 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           <div className="tier1-modal__section">
             <h4>Rapportavstämning · hard guard</h4>
             {reconciliation.length === 0 ? <p><strong>Ej verifierad.</strong> Ingen reconciliation-evidens finns i project_json.</p> : <>
-              <p>En fullt verifierad Tier kräver samma periodmappning, CAPEX/closure/WC, rapportpriser och huvudantaganden samt kontrollräkning mot rapportens after-tax NPV/IRR. Maximal relativ tolerans är 2 %.</p>
+              <p>Rapportavstämningen verifierar att project_json återger PEA/PFS/FS-ekonomin. Kalenderåren får vara framflyttade endast som en explicit, uniform shift; antal perioder, ordning, productionStartPeriod, CAPEX/closure/WC och relativa projektfaser måste vara oförändrade. Slutlig Tier 1 kräver verifierad rapportavstämning. Tier 2/3 kan visas som provisoriska medan avstämningen återstår.</p>
               {reconciliation.map((row) => <div key={row.projectId} className="tier1-modal__gate">
                 <div className="tier1-modal__gate-head"><strong>{row.projectId}</strong><span>{row.status === 'VERIFIED' ? 'VERIFIERAD' : 'EJ VERIFIERAD'}</span></div>
                 <div className="tier1-modal__gate-reason">{row.reason}</div>
-                {row.reportPageOrTable && <dl className="tier1-modal__facts">
+                {(row.reportPageOrTable || row.reportStartYear !== null || row.jsonStartYear !== null) && <dl className="tier1-modal__facts">
                   <div><dt>Rapportkälla</dt><dd>{row.reportSourceId ?? '—'}</dd></div>
-                  <div><dt>Sida / tabell</dt><dd>{row.reportPageOrTable}</dd></div>
+                  <div><dt>Sida / tabell</dt><dd>{row.reportPageOrTable ?? '—'}</dd></div>
+                  <div><dt>Rapporttimeline</dt><dd>{formatYearSpan(row.reportStartYear, row.reportEndYear)}</dd></div>
+                  <div><dt>Planning timeline</dt><dd>{formatYearSpan(row.jsonStartYear, row.jsonEndYear)}</dd></div>
+                  <div><dt>Kalenderförskjutning</dt><dd>{formatCalendarShift(row.calendarShiftYears)}</dd></div>
+                  <div><dt>Production start · rapport → planning</dt><dd>{row.reportProductionStartYear ?? '—'} → {row.jsonProductionStartYear ?? '—'}</dd></div>
+                  <div><dt>productionStartPeriod</dt><dd>{row.productionStartPeriod ?? '—'}</dd></div>
                   <div><dt>Diskonteringsränta</dt><dd>{formatPercentFraction(row.discountRate)}</dd></div>
                   <div><dt>NPV_report</dt><dd>{formatReportMoney(row.reportNpv, row.npvCurrency)}</dd></div>
                   <div><dt>NPV_json</dt><dd>{formatReportMoney(row.jsonNpv, row.npvCurrency)}</dd></div>
