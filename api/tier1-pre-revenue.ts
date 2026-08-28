@@ -17,6 +17,7 @@ import {
   costVintageCompatibility,
   type CanonicalCostResult,
 } from '../src/lib/tier1/cost.ts';
+import { assessCompanyProjectReconciliation } from '../src/lib/tier1/reconciliation.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
 function finite(value: unknown): value is number {
@@ -27,6 +28,25 @@ function canonicalCostBasisForMetal(metal: Tier1Metal): Tier1CostBasisId | null 
   if (metal === 'Cu') return 'S_AND_P_CO_PRODUCT_C1_CU';
   if (metal === 'Ni') return 'JAGUAR_NI_C1_MINE_SITE_GA';
   return null;
+}
+
+function sanitizeResolvedCuFallbackDiagnostics(assessment: any): void {
+  const diagnostics = Array.isArray(assessment?.diagnostics) ? assessment.diagnostics as string[] : [];
+  const hasSuccessfulDerivedCu = diagnostics.some((item) =>
+    typeof item === 'string'
+      && item.includes('price_diagnostic metal=Cu')
+      && item.includes('derived=true'),
+  );
+  const hasNoPriceFailure = diagnostics.some((item) =>
+    typeof item === 'string' && item.includes('metalsWithPriceFailure=[]'),
+  );
+  if (!hasSuccessfulDerivedCu || !hasNoPriceFailure) return;
+
+  assessment.diagnostics = diagnostics.filter((item) => !(
+    item.includes('Unknown commodity provider mapping for metal=Cu')
+    || item.includes('Spot resolver failed for CU_USD_TONNE')
+    || item.includes('Spot resolver failed for CU_USD_LB')
+  ));
 }
 
 async function computeProjectIrrObservations(symbol: string): Promise<ProjectIrrObservation[]> {
@@ -282,10 +302,26 @@ export default async function handler(req: any, res: any): Promise<void> {
       assessment.support.cyclePrices = cyclePriceDisplay.rows;
       assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
       assessment.diagnostics.push(...cyclePriceDisplay.diagnostics);
+      sanitizeResolvedCuFallbackDiagnostics(assessment);
 
       const classification = classifyTier(assessment.gates);
       assessment.status = classification.status;
       assessment.classificationReason = classification.reason;
+
+      const reconciliation = assessCompanyProjectReconciliation(
+        loaded.map((project) => ({ projectId: project.projectId, rawJson: project.rawJson })),
+      );
+      assessment.support.reconciliationVerified = reconciliation.allVerified;
+      assessment.support.projectReconciliation = reconciliation.projects;
+      assessment.support.preReconciliationTierStatus = classification.status;
+      if (!reconciliation.allVerified) {
+        assessment.status = 'NOT_VERIFIED';
+        assessment.classificationReason = `Tier-beräkningen är provisorisk: ${reconciliation.reason}`;
+        assessment.diagnostics.push(`Rapportavstämning: ${reconciliation.reason}`);
+        for (const project of reconciliation.projects.filter((item) => item.status !== 'VERIFIED')) {
+          assessment.diagnostics.push(`Rapportavstämning ${project.projectId}: ${project.reason}`);
+        }
+      }
     } catch (error) {
       assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
       assessment.diagnostics.push(`Tier post-processing kunde inte verifieras: ${error instanceof Error ? error.message : String(error)}`);
