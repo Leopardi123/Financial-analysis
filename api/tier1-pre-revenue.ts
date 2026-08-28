@@ -60,6 +60,7 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
     });
     const output = computeProjectEngineFullProductionV1(input);
     const phase1 = parsed.engineInputWithoutPrices.phase1;
+    const unknownCredits = new Array<number | null>(parsed.engineInputWithoutPrices.masterN + 1).fill(null);
     const result = canonicalCostMetricForPrimaryMetal({
       projectId: project.projectId,
       primaryMetal,
@@ -69,7 +70,7 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
       payableQtyUnitByMetal: parsed.engineInputWithoutPrices.payableQtyUnitByMetal,
       operatingCostsUSD: phase1.operatingCostsUSD,
       siteGandA_USD: phase1.siteGandA_USD,
-      byproductCreditsUSD: phase1.byproductCreditsUSD,
+      byproductCreditsUSD: phase1.byproductCreditsUSD ?? unknownCredits,
       economicsBreakdown: parsed.context.economicsBreakdown as any,
       revenueByMetalUSD: output.revenue.byMetalRevenueUSD,
       rawJson: project.rawJson,
