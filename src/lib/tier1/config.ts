@@ -210,7 +210,7 @@ export function isTier1Metal(value: string): value is Tier1Metal {
 }
 
 export function costBenchmarkDataYear(dataPeriod: string): number | null {
-  const match = String(dataPeriod ?? '').match(/\b(19|20)\d{2}\b/);
+  const match = String(dataPeriod ?? '').match(/(?:19|20)[0-9]{2}/);
   return match ? Number(match[0]) : null;
 }
 
