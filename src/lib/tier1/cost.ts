@@ -99,12 +99,6 @@ function notVerified(metric: Tier1CostMetric | null, reason: string, diagnostics
   };
 }
 
-function c1MetricForMetal(metal: Tier1Metal): Tier1CostMetric | null {
-  if (metal === 'Cu') return 'C1_CU_USD_PER_LB';
-  if (metal === 'Ni') return 'C1_NI_USD_PER_LB';
-  return null;
-}
-
 function productionIndices(input: CanonicalCostProjectInput): number[] {
   const payable = input.payableQtyByMetal[input.primaryMetal] ?? [];
   const out: number[] = [];
@@ -114,10 +108,20 @@ function productionIndices(input: CanonicalCostProjectInput): number[] {
   return out;
 }
 
+/**
+ * Copper-specific canonical C1 bridge.
+ *
+ * This deliberately does NOT handle nickel. The current Cu benchmark convention
+ * includes verified mine-site cash costs plus offsite freight/transport and
+ * TC/RC, net of verified by-product credits. The Jaguar nickel benchmark uses a
+ * materially different disclosed C1 bridge (mining + processing + G&A, with
+ * logistics/royalties/by-product credit shown outside C1), so sharing one generic
+ * "C1" formula would create false definition compatibility.
+ */
 export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): CanonicalCostResult {
-  const metric = c1MetricForMetal(input.primaryMetal);
+  const metric: Tier1CostMetric | null = input.primaryMetal === 'Cu' ? 'C1_CU_USD_PER_LB' : null;
   const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
-  if (!metric) return notVerified(null, `${input.primaryMetal} använder inte C1-familjen i Tier-motorn.`, [], costBaseYear);
+  if (!metric) return notVerified(null, `${input.primaryMetal} använder inte Cu-C1-bryggan i Tier-motorn.`, [], costBaseYear);
 
   const indices = productionIndices(input);
   if (indices.length === 0) return notVerified(metric, `Ingen positiv payable ${input.primaryMetal}-produktion finns för C1-denominatorn.`, [], costBaseYear);
@@ -233,15 +237,24 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
     numeratorUSD,
     denominator: denominatorLb,
     costBaseYear,
-    reason: 'Canonical C1 = mine-site operating costs + site G&A + freight/transport + TC/RC − verifierade by-product credits, per payable lb. Royalties, sustaining CAPEX, depreciation och skatt ingår inte.',
+    reason: 'Canonical Cu C1 = mine-site operating costs + site G&A + freight/transport + TC/RC − verifierade by-product credits, per payable lb. Royalties, sustaining CAPEX, depreciation och skatt ingår inte.',
     diagnostics,
   };
 }
 
 export function canonicalCostMetricForPrimaryMetal(input: CanonicalCostProjectInput): CanonicalCostResult {
-  if (input.primaryMetal === 'Cu' || input.primaryMetal === 'Ni') return computeCanonicalC1ForProject(input);
+  if (input.primaryMetal === 'Cu') return computeCanonicalC1ForProject(input);
 
   const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
+  if (input.primaryMetal === 'Ni') {
+    return notVerified(
+      'C1_NI_USD_PER_LB',
+      'Ni C1 hålls separat från Cu-C1. Jaguar-referensen 3,34 USD/lb definierar C1 som mining + processing + G&A; produktlogistik, royalties och by-product credit ligger utanför den redovisade C1-bryggan. Ingen Cu-formel återanvänds för Ni.',
+      [],
+      costBaseYear,
+    );
+  }
+
   const metricByMetal: Partial<Record<Tier1Metal, Tier1CostMetric>> = {
     Au: 'AISC_AU_USD_PER_TOZ',
     Ag: 'AISC_AGEQ_USD_PER_TOZ',
