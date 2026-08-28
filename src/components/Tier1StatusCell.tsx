@@ -4,6 +4,16 @@ import { TIER1_COST_BENCHMARKS } from '../lib/tier1/config.ts';
 
 const assessmentPromiseCache = new Map<string, Promise<Tier1PreRevenueAssessment | null>>();
 
+type CyclePriceDisplayRow = {
+  metal: string;
+  priceKey: string;
+  unit: 'USD/toz' | 'USD/lb' | 'USD/tonne';
+  spotPrice: number;
+  bearPrice: number;
+  multiplier: number;
+  projectIds: string[];
+};
+
 function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | null> {
   const key = symbol.trim().toUpperCase();
   const cached = assessmentPromiseCache.get(key);
@@ -55,6 +65,19 @@ function formatDate(value: string | null | undefined): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(0, 10);
   return date.toLocaleDateString('sv-SE');
+}
+
+function formatCyclePrice(value: number, unit: CyclePriceDisplayRow['unit']): string {
+  const digits = unit === 'USD/tonne' ? 0 : 2;
+  return `${value.toLocaleString('sv-SE', { maximumFractionDigits: digits })} ${unit}`;
+}
+
+function cyclePriceRows(assessment: Tier1PreRevenueAssessment | null): CyclePriceDisplayRow[] {
+  if (!assessment) return [];
+  const support = assessment.support as Tier1PreRevenueAssessment['support'] & { cyclePrices?: CyclePriceDisplayRow[] };
+  return Array.isArray(support.cyclePrices)
+    ? support.cyclePrices.filter((row) => row && typeof row.metal === 'string' && Number.isFinite(row.spotPrice) && Number.isFinite(row.bearPrice) && Number.isFinite(row.multiplier))
+    : [];
 }
 
 function displayDiagnostics(items: string[]): string[] {
@@ -113,6 +136,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
     ? `${assessment.support.scaleWindowStartYear}–${assessment.support.scaleWindowEndYear}`
     : '—';
   const diagnostics = assessment ? displayDiagnostics(assessment.diagnostics) : [];
+  const cyclePrices = cyclePriceRows(assessment);
 
   return <>
     <button
@@ -173,6 +197,15 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
               <div><dt>Bear NPV10</dt><dd>{formatUsd(assessment.support.cycleNpv10Usd)}</dd></div>
               <div><dt>Bear-längd</dt><dd>{assessment.support.cycleDurationProductionPeriods} produktionsår</dd></div>
             </dl>
+            {cyclePrices.length > 0 && <>
+              <h4>Metallpriser i cykeltestet</h4>
+              <div className="tier1-modal__chips">
+                {cyclePrices.map((row) => <span key={`${row.metal}-${row.priceKey}`} title={`${row.priceKey} · projekt ${row.projectIds.join(', ')}`}>
+                  <strong>{row.metal}</strong> {formatCyclePrice(row.spotPrice, row.unit)} → {formatCyclePrice(row.bearPrice, row.unit)} · {formatNumber(row.multiplier)}x
+                </span>)}
+              </div>
+              <p>Vänster är gemensamt aktuellt spotpris. Höger är priset som faktiskt används under de första {assessment.support.cycleDurationProductionPeriods} produktionsåren i bear-testet; därefter återgår modellen till spot. Spotdatum: {formatDate(assessment.support.tierBasePriceAsOfUtc)}.</p>
+            </>}
             {assessment.support.cycleMethod && <p><strong>Cykelmetod:</strong> {assessment.support.cycleMethod}</p>}
             {Object.keys(assessment.support.cycleMultipliersByMetal).length > 0 && <p><strong>Bear-multipliers:</strong> {Object.entries(assessment.support.cycleMultipliersByMetal).map(([metal, value]) => `${metal} ${formatNumber(value)}x`).join(' · ')}</p>}
           </div>
