@@ -4,7 +4,12 @@ import { parseProjectJsonV1 } from '../src/lib/project/jsonv1/parse.ts';
 import { resolveProjectPricesToEngineInput } from '../src/lib/project/jsonv1/resolvePrices.ts';
 import { computeProjectEngineFullProductionV1 } from '../src/lib/project/engineFullProductionV1.ts';
 import { computeIrr } from '../src/lib/metrics/lista3.ts';
-import { TIER1_COST_BENCHMARKS, type Tier1CostMetric, type Tier1Metal } from '../src/lib/tier1/config.ts';
+import {
+  TIER1_COST_BENCHMARKS,
+  type Tier1CostBasisId,
+  type Tier1CostMetric,
+  type Tier1Metal,
+} from '../src/lib/tier1/config.ts';
 import { assessCapitalReturns, assessCost, classifyTier } from '../src/lib/tier1/preRevenue.ts';
 import { selectConservativeProjectIrr, type ProjectIrrObservation } from '../src/lib/tier1/projectIrr.ts';
 import {
@@ -16,6 +21,12 @@ import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-pri
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function canonicalCostBasisForMetal(metal: Tier1Metal): Tier1CostBasisId | null {
+  if (metal === 'Cu') return 'S_AND_P_CO_PRODUCT_C1_CU';
+  if (metal === 'Ni') return 'JAGUAR_NI_C1_MINE_SITE_GA';
+  return null;
 }
 
 async function computeProjectIrrObservations(symbol: string): Promise<ProjectIrrObservation[]> {
@@ -42,11 +53,15 @@ async function computeProjectIrrObservations(symbol: string): Promise<ProjectIrr
   return observations;
 }
 
-type CompanyCanonicalCost = CanonicalCostResult & { projectDetails: string[] };
+type CompanyCanonicalCost = CanonicalCostResult & {
+  projectDetails: string[];
+  basisId: Tier1CostBasisId | null;
+};
 
 async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Metal): Promise<CompanyCanonicalCost> {
   const loaded = await loadProjectsForSymbol(symbol);
   const results: Array<{ projectId: string; result: CanonicalCostResult }> = [];
+  const basisId = canonicalCostBasisForMetal(primaryMetal);
 
   for (const project of loaded) {
     const parsed = parseProjectJsonV1(project.rawJson);
@@ -82,7 +97,7 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
   if (results.length === 0) {
     return {
       status: 'NOT_VERIFIED', metric: null, value: null, unit: null, numeratorUSD: null, denominator: null,
-      costBaseYear: null, reason: `Inget projekt med payable ${primaryMetal} hittades för canonical cost bridge.`, diagnostics: [], projectDetails: [],
+      costBaseYear: null, reason: `Inget projekt med payable ${primaryMetal} hittades för canonical cost bridge.`, diagnostics: [], projectDetails: [], basisId,
     };
   }
 
@@ -99,6 +114,7 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
       reason: unresolved.map(({ projectId, result }) => `${projectId}: ${result.reason}`).join(' · '),
       diagnostics: unresolved.flatMap(({ projectId, result }) => result.diagnostics.map((item) => `${projectId}: ${item}`)),
       projectDetails: results.map(({ projectId, result }) => `${projectId}: ${result.status}`),
+      basisId,
     };
   }
 
@@ -110,7 +126,7 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
       status: 'NOT_VERIFIED', metric: computed[0].result.metric, value: null, unit: computed[0].result.unit,
       numeratorUSD: null, denominator: null, costBaseYear: null,
       reason: 'Flerprojektsbolaget har inkompatibla canonical cost metrics eller kostnadsbasår; ingen implicit sammanvägning görs.',
-      diagnostics: [], projectDetails: computed.map(({ projectId, result }) => `${projectId}: ${result.metric}, basår ${String(result.costBaseYear)}`),
+      diagnostics: [], projectDetails: computed.map(({ projectId, result }) => `${projectId}: ${result.metric}, basår ${String(result.costBaseYear)}`), basisId,
     };
   }
 
@@ -127,6 +143,7 @@ async function computeCanonicalCompanyCost(symbol: string, primaryMetal: Tier1Me
     reason: computed[0].result.reason,
     diagnostics: computed.flatMap(({ projectId, result }) => result.diagnostics.map((item) => `${projectId}: ${item}`)),
     projectDetails: computed.map(({ projectId, result }) => `${projectId}: ${result.value.toFixed(4)} ${result.unit ?? ''}`),
+    basisId,
   };
 }
 
@@ -141,8 +158,20 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
   assessment.support.costMetric = cost.metric;
   assessment.support.costMetricValue = cost.value;
   assessment.support.costBaseYear = cost.costBaseYear;
+  assessment.support.costBasisId = cost.basisId;
+  assessment.support.costBenchmarkBasisId = benchmark.basisId;
   assessment.support.costMethod = cost.status === 'COMPUTABLE' ? 'CANONICAL_COST_V1' : 'NOT_VERIFIED';
   assessment.support.costProjectDetails = cost.projectDetails;
+
+  if (!benchmark.comparisonEnabled) {
+    const reason = `Kostnadsreferensen för ${primaryMetal} är endast informativ: dess definitionsbasis (${benchmark.basisId}) är inte homogen med den nuvarande projektmetriken. Ingen Tier-klassificering görs från denna referens.`;
+    assessment.gates.cost = {
+      status: 'NOT_VERIFIED', tier: null, value: finite(cost.value) ? cost.value : null,
+      threshold: benchmark.q1Max, unit: benchmark.unit, reason,
+    };
+    diagnostics.push(`Kostnad: ${reason}`);
+    return;
+  }
 
   if (cost.status !== 'COMPUTABLE' || !cost.metric || !finite(cost.value)) {
     assessment.gates.cost = {
@@ -151,6 +180,16 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
       reason: cost.reason,
     };
     diagnostics.push(`Kostnad: ${cost.reason}`);
+    return;
+  }
+
+  if (!cost.basisId || cost.basisId !== benchmark.basisId) {
+    const reason = `Canonical cost-basis ${cost.basisId ?? 'saknas'} matchar inte benchmarkens ${benchmark.basisId}. Ingen implicit definitionskonvertering görs.`;
+    assessment.gates.cost = {
+      status: 'NOT_VERIFIED', tier: null, value: cost.value,
+      threshold: benchmark.q1Max, unit: benchmark.unit, reason,
+    };
+    diagnostics.push(`Kostnad: ${reason}`);
     return;
   }
 
@@ -173,7 +212,7 @@ function applyCanonicalCostGate(assessment: any, cost: CompanyCanonicalCost): vo
     costMetricValues: values,
     nowUtc: new Date().toISOString(),
   });
-  gate.reason = `${gate.reason} Canonical cost bridge verifierad; ${vintage.reason}`;
+  gate.reason = `${gate.reason} Canonical cost bridge verifierad; basis ${cost.basisId}; ${vintage.reason}`;
   assessment.gates.cost = gate;
 }
 
