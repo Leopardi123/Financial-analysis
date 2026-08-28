@@ -65,7 +65,7 @@ const unresolvedInvestmentProject = selectConservativeProjectIrr([
 assert.equal(unresolvedInvestmentProject.irr, null);
 assert.deepEqual(unresolvedInvestmentProject.unresolvedProjectIds, ['p2']);
 
-// Canonical Cu/Ni C1 is only computable when mine-site COGS reconciles to OPEX,
+// Canonical Cu C1 is only computable when mine-site COGS reconciles to OPEX,
 // offsite costs are explicit, and credits cannot be double-counted.
 const canonicalCuInput = {
   projectId: 'cu-test',
@@ -102,6 +102,21 @@ assert.equal(canonicalCu.costBaseYear, 2025);
 assert.ok(canonicalCu.value !== null && Math.abs(canonicalCu.value - 0.67) < 1e-12);
 assert.equal(canonicalCu.numeratorUSD, 134);
 assert.equal(canonicalCu.denominator, 200);
+
+// Nickel must not silently reuse the Cu C1 definition. Jaguar's cited first-
+// quartile C1 excludes logistics, royalties and by-product credits from C1.
+const nickelDefinitionGuard = canonicalCostMetricForPrimaryMetal({
+  ...canonicalCuInput,
+  projectId: 'ni-test',
+  primaryMetal: 'Ni',
+  payableQtyByMetal: { Ni: [0, 100, 100] },
+  payableQtyUnitByMetal: { Ni: 'lb' },
+  revenueByMetalUSD: { Ni: [0, 1_000, 1_000] },
+});
+assert.equal(nickelDefinitionGuard.status, 'NOT_VERIFIED');
+assert.equal(nickelDefinitionGuard.metric, 'C1_NI_USD_PER_LB');
+assert.ok(nickelDefinitionGuard.reason.includes('Jaguar'));
+assert.ok(nickelDefinitionGuard.reason.includes('Ingen Cu-formel'));
 
 const cogsMismatch = computeCanonicalC1ForProject({
   ...canonicalCuInput,
