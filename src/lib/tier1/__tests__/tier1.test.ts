@@ -107,7 +107,7 @@ const cogsMismatch = computeCanonicalC1ForProject({
   ...canonicalCuInput,
   economicsBreakdown: {
     ...canonicalCuInput.economicsBreakdown,
-    cogs: { ...canonicalCuInput.economicsBreakdown.cogs, miningUSD: [0, 30, 30] },
+    cogs: { ...canonicalCuInput.economicsBreakdown.cogs, miningUSD: [0, 2_020, 2_020] },
   },
 });
 assert.equal(cogsMismatch.status, 'NOT_VERIFIED');
