@@ -103,9 +103,9 @@ assert.ok(canonicalCu.value !== null && Math.abs(canonicalCu.value - 0.67) < 1e-
 assert.equal(canonicalCu.numeratorUSD, 134);
 assert.equal(canonicalCu.denominator, 200);
 
-// Nickel must not silently reuse the Cu C1 definition. Jaguar's cited first-
-// quartile C1 excludes logistics, royalties and by-product credits from C1.
-const nickelDefinitionGuard = canonicalCostMetricForPrimaryMetal({
+// Nickel uses a separate Jaguar-compatible C1 bridge. It deliberately excludes
+// product logistics, royalties and by-product credits from the C1 numerator.
+const canonicalNickel = canonicalCostMetricForPrimaryMetal({
   ...canonicalCuInput,
   projectId: 'ni-test',
   primaryMetal: 'Ni',
@@ -113,10 +113,24 @@ const nickelDefinitionGuard = canonicalCostMetricForPrimaryMetal({
   payableQtyUnitByMetal: { Ni: 'lb' },
   revenueByMetalUSD: { Ni: [0, 1_000, 1_000] },
 });
-assert.equal(nickelDefinitionGuard.status, 'NOT_VERIFIED');
-assert.equal(nickelDefinitionGuard.metric, 'C1_NI_USD_PER_LB');
-assert.ok(nickelDefinitionGuard.reason.includes('Jaguar'));
-assert.ok(nickelDefinitionGuard.reason.includes('Ingen Cu-formel'));
+assert.equal(canonicalNickel.status, 'COMPUTABLE');
+assert.equal(canonicalNickel.metric, 'C1_NI_USD_PER_LB');
+assert.equal(canonicalNickel.costBaseYear, 2025);
+assert.ok(canonicalNickel.value !== null && Math.abs(canonicalNickel.value - 0.60) < 1e-12);
+assert.equal(canonicalNickel.numeratorUSD, 120);
+assert.equal(canonicalNickel.denominator, 200);
+assert.ok(canonicalNickel.reason.includes('Jaguar-kompatibel'));
+
+const nickelWithSecondaryCredit = canonicalCostMetricForPrimaryMetal({
+  ...canonicalCuInput,
+  projectId: 'ni-credit-test',
+  primaryMetal: 'Ni',
+  payableQtyByMetal: { Ni: [0, 100, 100] },
+  payableQtyUnitByMetal: { Ni: 'lb' },
+  revenueByMetalUSD: { Ni: [0, 1_000, 1_000], Co: [0, 20, 20] },
+});
+assert.equal(nickelWithSecondaryCredit.status, 'NOT_VERIFIED');
+assert.ok(nickelWithSecondaryCredit.reason.includes('Sekundära metallintäkter'));
 
 const cogsMismatch = computeCanonicalC1ForProject({
   ...canonicalCuInput,
