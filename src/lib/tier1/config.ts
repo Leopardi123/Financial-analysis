@@ -55,6 +55,8 @@ export type Tier1CostBenchmark = {
   dataPeriod: string;
   sourceLabel: string;
   sourceUrl: string;
+  /** Exact slide/page/table when the public evidence exposes one. Never inferred. */
+  sourcePageOrTable?: string;
   evidenceUrl?: string;
   notes: string;
 };
@@ -77,11 +79,9 @@ export const TIER1_PRODUCTION_THRESHOLDS: Record<Tier1Metal, Tier1ProductionThre
 };
 
 /**
- * Static, manually updateable cost-curve evidence. FULL_QUARTILE_CURVE can
- * classify Tier 1/2/3 when P25/P50 are verified on the same metric/basis/year.
- * EXACT_Q1_BOUNDARY can prove Tier 1 but cannot distinguish Tier 2 from Tier 3
- * without P50. Q1_REFERENCE_CEILING is pass-only: above a cited first-quartile
- * asset is unknown, never an inferred Tier 2/3.
+ * Preferred/current benchmark per metal. Historical exact-year snapshots live
+ * in TIER1_COST_BENCHMARK_SNAPSHOTS below. No project cost is inflation-adjusted
+ * implicitly to make it fit a different benchmark year.
  */
 export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   Au: {
@@ -90,6 +90,7 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
     updatedAtUtc: '2026-08-28', dataPeriod: '2025E',
     sourceLabel: 'S&P Capital IQ / G2 Goldfields global gold AISC curve',
     sourceUrl: 'https://g2goldfields.com/wp-content/uploads/2026/03/G2-Goldfields-Investor-Presentation-March-2026-Public.pdf',
+    sourcePageOrTable: 'slide 27',
     notes: '2025E global gold AISC curve, co-product basis, mines >25 koz Au. Publicerade kvartilband: Q1 <1 228; Q2 1 228–1 501; Q3 1 501–1 840; Q4 >1 840 USD/oz Au. Gränserna är explicit utskrivna i källan, därför boundaryUncertaintyAbs=0.',
   },
   Ag: {
@@ -148,6 +149,22 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   },
 };
 
+/**
+ * Exact-year benchmark registry. Add a historical snapshot only when its
+ * percentile values, metric, basis and cost year are independently verified.
+ * Current entries seed the registry; no synthetic inflation backcasts exist.
+ */
+export const TIER1_COST_BENCHMARK_SNAPSHOTS: Record<Tier1Metal, Tier1CostBenchmark[]> = {
+  Au: [TIER1_COST_BENCHMARKS.Au],
+  Ag: [TIER1_COST_BENCHMARKS.Ag],
+  Cu: [TIER1_COST_BENCHMARKS.Cu],
+  Zn: [TIER1_COST_BENCHMARKS.Zn],
+  Pb: [TIER1_COST_BENCHMARKS.Pb],
+  Ni: [TIER1_COST_BENCHMARKS.Ni],
+  Pt: [TIER1_COST_BENCHMARKS.Pt],
+  Pd: [TIER1_COST_BENCHMARKS.Pd],
+};
+
 export const TIER1_POLICY = {
   tier1LomYears: 15,
   tier2LomYears: 10,
@@ -190,6 +207,25 @@ export function tierBandFromIrr(value: number): TierBand | null {
 
 export function isTier1Metal(value: string): value is Tier1Metal {
   return value in TIER1_PRODUCTION_THRESHOLDS;
+}
+
+export function costBenchmarkDataYear(dataPeriod: string): number | null {
+  const match = String(dataPeriod ?? '').match(/\b(19|20)\d{2}\b/);
+  return match ? Number(match[0]) : null;
+}
+
+export function getCompatibleTier1CostBenchmark(args: {
+  metal: Tier1Metal;
+  metric: Tier1CostMetric;
+  basisId: Tier1CostBasisId;
+  costBaseYear: number;
+}): Tier1CostBenchmark | null {
+  const matches = TIER1_COST_BENCHMARK_SNAPSHOTS[args.metal].filter((benchmark) =>
+    benchmark.metric === args.metric
+    && benchmark.basisId === args.basisId
+    && costBenchmarkDataYear(benchmark.dataPeriod) === args.costBaseYear,
+  );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function ageInDays(asOfUtc: string, nowUtc: string): number | null {
