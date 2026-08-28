@@ -81,10 +81,6 @@ function seriesComplete(series: NumericSeries | undefined, indices: number[]): s
   return Array.isArray(series) && indices.every((index) => finite(series[index]));
 }
 
-function anyFinite(series: NumericSeries | undefined, indices: number[]): boolean {
-  return Array.isArray(series) && indices.some((index) => finite(series[index]));
-}
-
 function payableLb(value: number, unit: string): number | null {
   if (unit === 'lb') return value;
   if (unit === 'tonne') return value * LB_PER_TONNE;
@@ -146,7 +142,13 @@ function reconciledMineSiteCogs(
   return { diagnostics };
 }
 
-/** Copper-specific C1: mine-site costs + site G&A + offsite TC/RC/freight, net by-product credits. */
+/**
+ * Copper C1 aligned to the cited Santa Cruz PFS / S&P co-product comparison.
+ * Santa Cruz's disclosed US$1.32/lb is mining + processing + site G&A divided
+ * by payable copper. Royalties and sustaining capital are outside C1. Because
+ * project_json currently has no verified co-product cost-allocation contract,
+ * a Cu project with secondary metal revenue cannot be reconstructed safely.
+ */
 export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): CanonicalCostResult {
   const metric: Tier1CostMetric | null = input.primaryMetal === 'Cu' ? 'C1_CU_USD_PER_LB' : null;
   const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
@@ -158,35 +160,28 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
   const payableUnit = input.payableQtyUnitByMetal.Cu;
   if (!payableUnit) return notVerified(metric, 'Payable-enhet saknas för Cu.', [], costBaseYear);
   if (!seriesComplete(input.byproductCreditsUSD, indices)) {
-    return notVerified(metric, 'byproductCreditsUSD är inte komplett över producerande perioder; noll måste anges explicit om inga separata credits finns.', [], costBaseYear);
+    return notVerified(metric, 'byproductCreditsUSD är inte komplett; Santa Cruz/S&P-kompatibel Cu C1 kräver explicit 0 när ingen co-product-allokering finns.', [], costBaseYear);
   }
 
   const reconciled = reconciledMineSiteCogs(input, metric, indices, costBaseYear);
   if ('status' in reconciled) return reconciled;
   const diagnostics = reconciled.diagnostics;
 
-  const selling = input.economicsBreakdown?.selling;
-  if (!selling) return notVerified(metric, 'Selling/offsite-breakdown saknas; transport och TC/RC kan inte verifieras.', diagnostics, costBaseYear);
-  if (!seriesComplete(selling.transportUSD, indices)) {
-    return notVerified(metric, 'transportUSD är inte komplett över producerande perioder; noll måste anges explicit om posten inte finns.', diagnostics, costBaseYear);
-  }
-  const useCombinedTcRc = seriesComplete(selling.tcRcUSD, indices);
-  const splitTcRcComplete = seriesComplete(selling.treatmentChargesUSD, indices) && seriesComplete(selling.refiningChargesUSD, indices);
-  if (!useCombinedTcRc && !splitTcRcComplete) {
-    return notVerified(metric, 'TC/RC är inte komplett: ange antingen tcRcUSD eller både treatmentChargesUSD och refiningChargesUSD (0 explicit om ej tillämpligt).', diagnostics, costBaseYear);
-  }
-  if (useCombinedTcRc && (anyFinite(selling.treatmentChargesUSD, indices) || anyFinite(selling.refiningChargesUSD, indices))) {
-    return notVerified(metric, 'Både kombinerad och splittrad TC/RC förekommer; C1 skulle riskera dubbelräkning.', diagnostics, costBaseYear);
-  }
-
   const secondaryMetalNames = Object.entries(input.revenueByMetalUSD)
     .filter(([metal, revenue]) => metal !== 'Cu' && indices.some((t) => finite(revenue[t]) && (revenue[t] as number) > 0))
     .map(([metal]) => metal);
-  const hasExplicitCredits = indices.some((t) => (input.byproductCreditsUSD[t] as number) !== 0);
-  if (hasExplicitCredits && secondaryMetalNames.length > 0) {
+  if (secondaryMetalNames.length > 0) {
     return notVerified(
       metric,
-      `Både separata byproductCreditsUSD och sekundära metallintäkter (${secondaryMetalNames.join(', ')}) finns. Nuvarande schema anger inte om de överlappar; C1 får därför inte dubbelkreditera dem.`,
+      `Sekundära metallintäkter (${secondaryMetalNames.join(', ')}) finns. Benchmarken är S&P co-product C1 men project_json saknar verifierad co-product-kostnadsallokering; ingen by-product-credit-proxy används.`,
+      diagnostics,
+      costBaseYear,
+    );
+  }
+  if (indices.some((t) => (input.byproductCreditsUSD[t] as number) !== 0)) {
+    return notVerified(
+      metric,
+      'byproductCreditsUSD är inte noll. Santa Cruz/S&P-kompatibel Cu C1 får inte rekonstrueras genom att dra av ospecificerade by-product credits.',
       diagnostics,
       costBaseYear,
     );
@@ -201,22 +196,7 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
     if (!finite(qtyLb) || qtyLb <= 0) {
       return notVerified(metric, `Payable-enheten ${payableUnit} kan inte konverteras definitionssäkert till lb för Cu C1.`, diagnostics, costBaseYear);
     }
-    const tcRc = useCombinedTcRc
-      ? (selling.tcRcUSD![t] as number)
-      : (selling.treatmentChargesUSD![t] as number) + (selling.refiningChargesUSD![t] as number);
-    const transport = selling.transportUSD![t] as number;
-    const explicitCredits = input.byproductCreditsUSD[t] as number;
-    let secondaryMetalCredits = 0;
-    for (const [metal, revenue] of Object.entries(input.revenueByMetalUSD)) {
-      if (metal === 'Cu') continue;
-      const value = revenue[t];
-      if (!finite(value)) {
-        return notVerified(metric, `Metallintäkt för ${metal} är inte komplett i period ${t}; by-product credits kan inte verifieras.`, diagnostics, costBaseYear);
-      }
-      secondaryMetalCredits += value;
-    }
-    const credits = secondaryMetalNames.length > 0 ? secondaryMetalCredits : explicitCredits;
-    numeratorUSD += (input.operatingCostsUSD[t] as number) + (input.siteGandA_USD[t] as number) + tcRc + transport - credits;
+    numeratorUSD += (input.operatingCostsUSD[t] as number) + (input.siteGandA_USD[t] as number);
     denominatorLb += qtyLb;
   }
 
@@ -224,7 +204,7 @@ export function computeCanonicalC1ForProject(input: CanonicalCostProjectInput): 
   return {
     status: 'COMPUTABLE', metric, value: numeratorUSD / denominatorLb, unit: 'USD/lb',
     numeratorUSD, denominator: denominatorLb, costBaseYear,
-    reason: 'Canonical Cu C1 = mine-site operating costs + site G&A + freight/transport + TC/RC − verifierade by-product credits, per payable lb. Royalties, sustaining CAPEX, depreciation och skatt ingår inte.',
+    reason: 'Canonical Cu C1 (Santa Cruz/S&P-kompatibel för single-product Cu) = mine-site operating costs + site G&A per payable Cu-lb. Royalties, sustaining CAPEX, TC/RC, transport och by-product credits ingår inte i denna brygga.',
     diagnostics,
   };
 }
