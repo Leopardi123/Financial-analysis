@@ -73,7 +73,7 @@ export function extractCostBaseYear(rawJson: unknown, economicsBreakdown?: Econo
 }
 
 export function benchmarkCostBaseYear(dataPeriod: string): number | null {
-  const match = String(dataPeriod ?? '').match(/\b(19|20)\d{2}\b/);
+  const match = String(dataPeriod ?? '').match(/(?:19|20)[0-9]{2}/);
   return match ? Number(match[0]) : null;
 }
 
@@ -265,7 +265,7 @@ export function canonicalCostMetricForPrimaryMetal(input: CanonicalCostProjectIn
   const costBaseYear = extractCostBaseYear(input.rawJson, input.economicsBreakdown);
   const metricByMetal: Partial<Record<Tier1Metal, Tier1CostMetric>> = {
     Au: 'AISC_AU_USD_PER_TOZ',
-    Ag: 'AISC_AGEQ_USD_PER_TOZ',
+    Ag: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ',
     Zn: 'AISC_ZNEQ_USD_PER_LB',
     Pb: 'AISC_ZNEQ_USD_PER_LB',
     Pt: 'AISC_PGM3E_USD_PER_TOZ',
@@ -274,7 +274,7 @@ export function canonicalCostMetricForPrimaryMetal(input: CanonicalCostProjectIn
   const metric = metricByMetal[input.primaryMetal] ?? null;
   return notVerified(
     metric,
-    'Full canonical AISC kan ännu inte verifieras från project_json: nuvarande sustaining-cost-serie saknar ett hårt WGC-liknande kontrakt för bl.a. corporate G&A och sustaining exploration/studies. Befintligt equivalent-mått är därför diagnostiskt, inte en Q1-gate.',
+    'Full canonical AISC kan ännu inte verifieras från project_json: nuvarande sustaining-cost-serie saknar ett hårt definitionskontrakt för bl.a. corporate G&A och sustaining exploration/studies. Befintliga equivalent-/sustaining-mått är därför diagnostiska, inte en kvartil-gate.',
     [],
     costBaseYear,
   );
@@ -283,7 +283,7 @@ export function canonicalCostMetricForPrimaryMetal(input: CanonicalCostProjectIn
 export function costVintageCompatibility(costBaseYear: number | null, benchmarkDataPeriod: string): { compatible: boolean; benchmarkYear: number | null; reason: string } {
   const benchmarkYear = benchmarkCostBaseYear(benchmarkDataPeriod);
   if (costBaseYear === null) {
-    return { compatible: false, benchmarkYear, reason: 'Projektets kostnadsbasår saknas; ett gammalt nominellt C1/AISC får inte jämföras med dagens Q1-referens.' };
+    return { compatible: false, benchmarkYear, reason: 'Projektets kostnadsbasår saknas; ett gammalt nominellt C1/AISC får inte jämföras med dagens kostnadskurva.' };
   }
   if (benchmarkYear === null) {
     return { compatible: false, benchmarkYear: null, reason: 'Benchmarkens kostnadsår kunde inte fastställas.' };
