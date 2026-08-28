@@ -5,7 +5,7 @@ import type { ProjectJsonV1 } from '../../project/jsonv1/schema.ts';
 const masterN = 2;
 const source: ProjectJsonV1 = {
   version: 'project_json_v2',
-  time: { masterN, productionStartPeriod: 1, productionStartYear: 2027 },
+  time: { masterN, productionStartPeriod: 1, productionStartYear: 2031 },
   economics: { taxRate: 0.25 },
   series: {
     capexUSD: [100, 0, 0],
@@ -42,15 +42,19 @@ const source: ProjectJsonV1 = {
     report: {
       sourceId: 'pfs-2025',
       pageOrTable: 'Economic analysis table',
+      timeline: {
+        periodYears: [2026, 2027, 2028],
+        productionStartPeriod: 1,
+      },
       discountRate: 0.08,
       npv: 100,
       npvCurrency: 'USD',
       irrAfterTax: 0.25,
       priceDeckByMetal: { Cu: { value: 4, unit: 'USD/lb' } },
     },
+    calendarShiftYears: 4,
     jsonCheck: { npvAtReportDiscountRate: 100.5, irrAfterTax: 0.249 },
     checks: {
-      periodMappingVerified: true,
       capexPlacementVerified: true,
       closureWorkingCapitalVerified: true,
       reportPricesAndAssumptionsVerified: true,
@@ -68,6 +72,8 @@ assert.equal(template.economicsBreakdown.reportedCostMetrics[0].metric, 'C1_CU_U
 assert.equal(template.economicsBreakdown.reportedCostMetrics[0].basisId, 'S_AND_P_CO_PRODUCT_C1_CU');
 assert.equal(template.economicsBreakdown.reportedCostMetrics[0].sourceId, 'pfs-2025');
 assert.equal(template.reconciliation.report.pageOrTable, 'Economic analysis table');
-assert.equal(template.reconciliation.checks.periodMappingVerified, true);
+assert.deepEqual(template.reconciliation.report.timeline.periodYears, [2026, 2027, 2028]);
+assert.equal(template.reconciliation.report.timeline.productionStartPeriod, 1);
+assert.equal(template.reconciliation.calendarShiftYears, 4);
 
 console.log('projectEvidenceTemplate.test.ts passed');
