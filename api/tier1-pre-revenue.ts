@@ -378,6 +378,12 @@ export default async function handler(req: any, res: any): Promise<void> {
   if (capturedStatus === 200 && capturedBody?.ok === true && assessment && symbol) {
     try {
       const loaded = await loadProjectsForSymbol(symbol);
+      const reconciliation = assessCompanyProjectReconciliation(
+        loaded.map((project) => ({ projectId: project.projectId, rawJson: project.rawJson })),
+      );
+      assessment.support.reconciliationVerified = reconciliation.allVerified;
+      assessment.support.projectReconciliation = reconciliation.projects;
+
       if (loaded.length > 1) {
         const observations = await computeProjectIrrObservations(symbol);
         const selection = selectConservativeProjectIrr(observations);
@@ -428,35 +434,35 @@ export default async function handler(req: any, res: any): Promise<void> {
       const classification = classifyTier(assessment.gates);
       assessment.status = classification.status;
       assessment.classificationReason = classification.reason;
-
-      const reconciliation = assessCompanyProjectReconciliation(
-        loaded.map((project) => ({ projectId: project.projectId, rawJson: project.rawJson })),
-      );
-      assessment.support.reconciliationVerified = reconciliation.allVerified;
-      assessment.support.projectReconciliation = reconciliation.projects;
       assessment.support.preReconciliationTierStatus = classification.status;
+
       if (!reconciliation.allVerified) {
-        assessment.status = 'NOT_VERIFIED';
-        assessment.classificationReason = `Tier-beräkningen är provisorisk: ${reconciliation.reason}`;
         assessment.diagnostics.push(`Rapportavstämning: ${reconciliation.reason}`);
         for (const project of reconciliation.projects.filter((item) => item.status !== 'VERIFIED')) {
           assessment.diagnostics.push(`Rapportavstämning ${project.projectId}: ${project.reason}`);
         }
+
+        if (classification.status === 'TIER_1') {
+          assessment.status = 'NOT_VERIFIED';
+          assessment.classificationReason = `Tier 1-kandidat, men slutlig Tier 1 kräver verifierad PEA/PFS/FS-avstämning: ${reconciliation.reason}`;
+        } else if (classification.status === 'TIER_2' || classification.status === 'TIER_3' || classification.status === 'NOT_QUALIFIED') {
+          assessment.classificationReason = `${classification.reason} Rapportavstämningen är ännu Ej verifierad; klassningen är därför provisorisk.`;
+        }
       }
     } catch (error) {
       assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
-      assessment.diagnostics.push(`Tier post-processing kunde inte verifieras: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      assessment.diagnostics.push(`Tier post-processing kunde inte verifieras: ${message}`);
       if (assessment.gates?.cost) {
         assessment.gates.cost = {
           status: 'NOT_VERIFIED', tier: null, value: null,
           threshold: assessment.gates.cost.threshold ?? null,
           unit: assessment.gates.cost.unit ?? null,
-          reason: `Canonical cost post-processing misslyckades: ${error instanceof Error ? error.message : String(error)}`,
+          reason: `Canonical cost post-processing misslyckades: ${message}`,
         };
       }
-      const classification = classifyTier(assessment.gates);
-      assessment.status = classification.status;
-      assessment.classificationReason = classification.reason;
+      assessment.status = 'NOT_VERIFIED';
+      assessment.classificationReason = `Tier post-processing kunde inte verifieras: ${message}`;
     }
   }
 
