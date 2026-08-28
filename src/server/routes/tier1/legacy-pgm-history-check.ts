@@ -1,4 +1,6 @@
-import { fetchLegacyCommodityHistoricalFull } from '../../../lib/prices/providers/fmp.ts';
+import type { PriceKey } from '../../../lib/prices/keys.ts';
+import { readHistoryRowsInRange } from '../../../lib/prices/db/readHistory.ts';
+import { refreshHistoryRangeToMonthlyBlobs } from '../../../lib/prices/refreshHistory.ts';
 import { getLegacySymbolForPriceKey } from '../../../lib/prices/providers/legacyCommoditySymbolMap.ts';
 import { computeTier1CycleMultiplier, toMonthlyLast } from '../../../lib/tier1/cycle.ts';
 
@@ -10,37 +12,35 @@ function dateYearsAgo(yearsAgo: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-async function check(priceKey: string, from: string, to: string): Promise<Record<string, unknown>> {
+async function check(priceKey: (typeof ALLOWED)[number], from: string, to: string): Promise<Record<string, unknown>> {
   const symbol = getLegacySymbolForPriceKey(priceKey);
   if (!symbol) return { ok: false, priceKey, error: 'No verified legacy symbol mapping.' };
   try {
-    const rows = await fetchLegacyCommodityHistoricalFull(symbol, { fromUtc: from, toUtc: to });
-    const monthly = toMonthlyLast(rows);
+    const before = await readHistoryRowsInRange({ priceKey: priceKey as PriceKey, from, to });
+    const monthlyBefore = toMonthlyLast(before.rows).length;
+    const refreshed = await refreshHistoryRangeToMonthlyBlobs({ priceKey: priceKey as PriceKey, from, to });
+    const after = await readHistoryRowsInRange({ priceKey: priceKey as PriceKey, from, to });
+    const monthly = toMonthlyLast(after.rows);
     return {
       ok: true,
       priceKey,
-      symbol,
-      endpoint: `/api/v3/historical-price-full/${symbol}`,
-      dailyRows: rows.length,
-      monthlyObservations: monthly.length,
-      firstDate: rows[0]?.date ?? null,
-      lastDate: rows[rows.length - 1]?.date ?? null,
-      cycle: computeTier1CycleMultiplier(rows),
+      verifiedLegacySymbol: symbol,
+      legacyEndpoint: `/api/v3/historical-price-full/${symbol}`,
+      monthlyBefore,
+      monthsTouched: refreshed.monthsTouched,
+      monthlyAfter: monthly.length,
+      firstDate: after.rows[0]?.date ?? null,
+      lastDate: after.rows[after.rows.length - 1]?.date ?? null,
+      cycle: computeTier1CycleMultiplier(after.rows),
     };
   } catch (error) {
-    return { ok: false, priceKey, symbol, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, priceKey, verifiedLegacySymbol: symbol, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
 export default async function handler(req: any, res: any): Promise<void> {
   const from = dateYearsAgo(25);
   const to = new Date().toISOString().slice(0, 10);
-  const requested = String(req.query?.priceKey ?? '').trim().toUpperCase();
-  const keys = requested ? [requested] : [...ALLOWED];
-  if (keys.some((key) => !ALLOWED.includes(key as (typeof ALLOWED)[number]))) {
-    res.status(400).json({ ok: false, error: 'priceKey must be XPT_USD_TOZ or XPD_USD_TOZ' });
-    return;
-  }
-  const results = await Promise.all(keys.map((key) => check(key, from, to)));
+  const results = await Promise.all(ALLOWED.map((key) => check(key, from, to)));
   res.status(200).json({ ok: true, from, to, results });
 }
