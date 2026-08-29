@@ -10,14 +10,8 @@ import {
 assert.deepEqual(
   Object.fromEntries(Object.entries(TIER1_PRODUCTION_THRESHOLDS).map(([metal, row]) => [metal, [row.minimumAnnualPayable, row.unit]])),
   {
-    Au: [300_000, 'toz'],
-    Ag: [15_000_000, 'toz'],
-    Cu: [100_000, 'tonne'],
-    Zn: [150_000, 'tonne'],
-    Pb: [100_000, 'tonne'],
-    Ni: [40_000, 'tonne'],
-    Pt: [100_000, 'toz'],
-    Pd: [150_000, 'toz'],
+    Au: [300_000, 'toz'], Ag: [15_000_000, 'toz'], Cu: [100_000, 'tonne'], Zn: [150_000, 'tonne'],
+    Pb: [100_000, 'tonne'], Ni: [40_000, 'tonne'], Pt: [100_000, 'toz'], Pd: [150_000, 'toz'],
   },
 );
 
@@ -32,22 +26,21 @@ assert.equal(TIER1_COST_BENCHMARKS.Au.sourcePageOrTable, 'slide 27');
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q2 1 228–1 501'));
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q3 1 501–1 840'));
 
-// Silver uses a clean co-product metric/basis. The public curve definition is
-// identified, but no percentile is manufactured from the old Juanicipio AgEq
-// reference or from visual inspection without an explicit uncertainty audit.
-assert.equal(TIER1_COST_BENCHMARKS.Ag.comparisonEnabled, false);
+// Silver now uses the verified public 2025 S&P-modelled co-product curve from
+// Pan American. Percentiles are explicit best-estimate visual read-offs, with
+// read-off uncertainty retained as diagnostic context rather than a hard guard.
+assert.equal(TIER1_COST_BENCHMARKS.Ag.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Ag.metric, 'AISC_AG_CO_PRODUCT_USD_PER_TOZ');
 assert.equal(TIER1_COST_BENCHMARKS.Ag.basisId, 'S_AND_P_CO_PRODUCT_AISC_AG');
-assert.equal(TIER1_COST_BENCHMARKS.Ag.benchmarkKind, 'CURVE_IDENTIFIED_NO_BOUNDARIES');
-assert.equal(TIER1_COST_BENCHMARKS.Ag.q1Max, null);
-assert.equal(TIER1_COST_BENCHMARKS.Ag.p50Max, null);
-assert.equal(TIER1_COST_BENCHMARKS.Ag.p75Max, null);
-assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Ag.dataPeriod), 2024);
-assert.ok(!TIER1_COST_BENCHMARKS.Ag.notes.includes('12,9'));
+assert.equal(TIER1_COST_BENCHMARKS.Ag.benchmarkKind, 'FULL_QUARTILE_CURVE');
+assert.equal(TIER1_COST_BENCHMARKS.Ag.q1Max, 14.0);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.p50Max, 18.5);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.p75Max, 22.5);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.boundaryUncertaintyAbs, 0.75);
+assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Ag.dataPeriod), 2025);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.sourcePageOrTable, 'slide 16, 2025 Cost Curve (100%-basis)');
+assert.ok(TIER1_COST_BENCHMARKS.Ag.notes.includes('visual read-offs'));
 
-// Copper now uses the full 2024 actual S&P co-product C1 curve digitised from
-// Ivanhoe Electric slide 10. The plotted values carry an explicit read-off
-// uncertainty and are not represented as published exact tabular percentiles.
 assert.equal(TIER1_COST_BENCHMARKS.Cu.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Cu.basisId, 'S_AND_P_CO_PRODUCT_C1_CU');
 assert.equal(TIER1_COST_BENCHMARKS.Cu.benchmarkKind, 'FULL_QUARTILE_CURVE');
@@ -97,42 +90,17 @@ for (const benchmark of Object.values(TIER1_COST_BENCHMARKS)) {
   }
 }
 
-// Cost-year selection is exact and definition-locked. A 2024 project must not
-// silently use the verified 2025E Au curve; historical snapshots are added only
-// when independently sourced.
 assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Au.dataPeriod), 2025);
 assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Au.length, 1);
-assert.equal(
-  getCompatibleTier1CostBenchmark({
-    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2025,
-  }),
-  TIER1_COST_BENCHMARKS.Au,
-);
-assert.equal(
-  getCompatibleTier1CostBenchmark({
-    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2024,
-  }),
-  null,
-);
-assert.equal(
-  getCompatibleTier1CostBenchmark({
-    metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'JAGUAR_NI_C1_MINE_SITE_GA', costBaseYear: 2025,
-  }),
-  null,
-);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2025 }), TIER1_COST_BENCHMARKS.Au);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2024 }), null);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'JAGUAR_NI_C1_MINE_SITE_GA', costBaseYear: 2025 }), null);
+
+assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Ag.length, 1);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Ag', metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AG', costBaseYear: 2025 }), TIER1_COST_BENCHMARKS.Ag);
 
 assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Cu.length, 1);
-assert.equal(
-  getCompatibleTier1CostBenchmark({
-    metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2024,
-  }),
-  TIER1_COST_BENCHMARKS.Cu,
-);
-assert.equal(
-  getCompatibleTier1CostBenchmark({
-    metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2025,
-  }),
-  null,
-);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2024 }), TIER1_COST_BENCHMARKS.Cu);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2025 }), null);
 
 console.log('costBenchmarkBasis.test.ts passed');
