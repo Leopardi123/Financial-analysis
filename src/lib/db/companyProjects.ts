@@ -5,6 +5,7 @@ export type CompanyProjectSummary = {
   project_name: string | null;
   json_version: string;
   updated_at_utc: string;
+  disabled: boolean;
 };
 
 export type CompanyProjectRow = {
@@ -30,20 +31,31 @@ function makeId(symbol: string, project_id: string): string {
   return `sym:${symbol}|pid:${project_id}`;
 }
 
+function projectIsDisabled(rawJson: unknown): boolean {
+  if (typeof rawJson !== 'string' || !rawJson.trim()) return false;
+  try {
+    const parsed = JSON.parse(rawJson) as { meta?: { disabled?: unknown } };
+    return parsed?.meta?.disabled === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function listCompanyProjects(symbol: string): Promise<CompanyProjectSummary[]> {
   const rows = await query(
-    `SELECT project_id, project_name, json_version, updated_at_utc
+    `SELECT project_id, project_name, json_version, raw_json, updated_at_utc
      FROM company_projects
      WHERE symbol = ?
      ORDER BY updated_at_utc DESC, project_id ASC`,
     [symbol],
-  ) as unknown as CompanyProjectSummary[];
+  ) as unknown as Array<CompanyProjectSummary & { raw_json?: string }>;
 
   return rows.map((row) => ({
     project_id: String(row.project_id),
     project_name: row.project_name === null || row.project_name === undefined ? null : String(row.project_name),
     json_version: String(row.json_version),
     updated_at_utc: String(row.updated_at_utc),
+    disabled: projectIsDisabled(row.raw_json),
   }));
 }
 
