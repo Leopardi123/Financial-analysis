@@ -26,10 +26,28 @@ function gateStatus(tier: 1 | 2 | 3): 'PASS' | 'FAIL' {
   return tier === 1 ? 'PASS' : 'FAIL';
 }
 
+function displayCostUnit(unit: string): string {
+  return unit === 'USD/toz' ? 'USD/oz' : unit;
+}
+
+function digitisedBoundaryNote(value: number, benchmark: Tier1CostBenchmark): string {
+  const displayUnit = displayCostUnit(benchmark.unit);
+  const uncertainty = benchmark.boundaryUncertaintyAbs;
+  if (!(finite(uncertainty) && uncertainty > 0)) return '';
+  const near: string[] = [];
+  if (finite(benchmark.q1Max) && Math.abs(value - benchmark.q1Max) <= uncertainty) near.push('P25');
+  if (finite(benchmark.p50Max) && Math.abs(value - benchmark.p50Max) <= uncertainty) near.push('P50');
+  if (finite(benchmark.p75Max) && Math.abs(value - benchmark.p75Max) <= uncertainty) near.push('P75');
+  return near.length > 0
+    ? ` Värdet ligger inom ±${uncertainty} ${displayUnit} från digitaliserad ${near.join('/')}-gräns; best-estimate-gränsen används och osäkerheten är diagnostisk.`
+    : '';
+}
+
 /**
- * Cost gate against one already-selected, definition/year-compatible benchmark.
- * Benchmark selection is deliberately outside this function so callers cannot
- * silently substitute another cost year or basis family.
+ * Cost gate against the selected benchmark. Project JSON supplies the best
+ * available project cost; benchmark read-off uncertainty is diagnostic rather
+ * than a hard guard. Invalid/missing values, units and benchmark boundaries
+ * remain fail-closed.
  */
 export function assessCostAgainstBenchmark(args: {
   primaryMetal: Tier1Metal;
@@ -40,6 +58,7 @@ export function assessCostAgainstBenchmark(args: {
   nowUtc?: string;
 }): Tier1Gate {
   const { benchmark } = args;
+  const displayUnit = displayCostUnit(benchmark.unit);
   const metricLabel = COST_METRIC_LABELS[args.metric];
 
   if (benchmark.metal !== args.primaryMetal || benchmark.metric !== args.metric) {
@@ -73,6 +92,13 @@ export function assessCostAgainstBenchmark(args: {
     };
   }
 
+  if (!finite(args.value) || args.value < 0) {
+    return {
+      status: 'NOT_VERIFIED', tier: null, value: null,
+      threshold: benchmark.q1Max, unit: benchmark.unit,
+      reason: `${metricLabel} är matematiskt oanvändbar.`,
+    };
+  }
   if (!finite(benchmark.q1Max)) {
     return {
       status: 'NOT_VERIFIED', tier: null, value: args.value,
@@ -86,28 +112,31 @@ export function assessCostAgainstBenchmark(args: {
       return {
         status: 'PASS', tier: 1, value: args.value,
         threshold: benchmark.q1Max, unit: benchmark.unit,
-        reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit} är ≤ Q1-referensen ${benchmark.q1Max} ${benchmark.unit} i ${benchmark.dataPeriod}-snapshoten och bevisar Cost Tier 1. P50 saknas, så högre cost får inte gissas till Tier 2/3.`,
+        reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit} är ≤ Q1-referensen ${benchmark.q1Max} ${displayUnit} i ${benchmark.dataPeriod}-snapshoten och bevisar Cost Tier 1. P50 saknas, så högre cost får inte gissas till Tier 2/3.${digitisedBoundaryNote(args.value, benchmark)}`,
       };
     }
     return {
       status: 'NOT_VERIFIED', tier: null, value: args.value,
       threshold: benchmark.q1Max, unit: benchmark.unit,
-      reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit} ligger över Q1-referensen ${benchmark.q1Max} i ${benchmark.dataPeriod}-snapshoten. Homogen P50 saknas, så Tier 2/3 får inte gissas.`,
+      reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit} ligger över Q1-referensen ${benchmark.q1Max} i ${benchmark.dataPeriod}-snapshoten. Homogen P50 saknas, så Tier 2/3 får inte gissas.`,
     };
   }
 
+  // Best-available policy: use the digitised point estimate for classification.
+  // boundaryUncertaintyAbs is retained for disclosure/diagnostics, not as a
+  // second hard guard that can erase an otherwise usable project cost.
   const classified = classifyCostAgainstPercentiles({
     value: args.value,
     p25Max: benchmark.q1Max,
     p50Max: benchmark.p50Max,
     p75Max: benchmark.p75Max,
-    uncertaintyAbs: benchmark.boundaryUncertaintyAbs,
+    uncertaintyAbs: 0,
   });
   if (classified.tier === null) {
     return {
       status: 'NOT_VERIFIED', tier: null, value: args.value,
       threshold: benchmark.q1Max, unit: benchmark.unit,
-      reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit}: ${classified.reason}`,
+      reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit}: ${classified.reason}`,
     };
   }
 
@@ -122,6 +151,6 @@ export function assessCostAgainstBenchmark(args: {
     value: args.value,
     threshold,
     unit: benchmark.unit,
-    reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit}. ${classified.reason} Benchmark: ${benchmark.dataPeriod}${benchmark.sourcePageOrTable ? `, ${benchmark.sourcePageOrTable}` : ''}.`,
+    reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit}. ${classified.reason}${digitisedBoundaryNote(args.value, benchmark)} Benchmark: ${benchmark.dataPeriod}${benchmark.sourcePageOrTable ? `, ${benchmark.sourcePageOrTable}` : ''}.`,
   };
 }

@@ -3,7 +3,7 @@ import { buildProjectJsonV1Template } from '../../project/jsonv1/template.ts';
 import type { ProjectJsonV1 } from '../../project/jsonv1/schema.ts';
 
 const masterN = 2;
-const source: ProjectJsonV1 = {
+const source = {
   version: 'project_json_v2',
   time: { masterN, productionStartPeriod: 1, productionStartYear: 2031 },
   economics: { taxRate: 0.25 },
@@ -27,53 +27,33 @@ const source: ProjectJsonV1 = {
     oreMilledTonnes: [0, 1000, 1000],
   },
   economicsBreakdown: {
-    meta: { defaultSource: 'PFS', costBaseYear: 2025, notes: 'locked' },
+    meta: { defaultSource: 'PFS', notes: 'locked' },
     reportedCostMetrics: [{
       metric: 'C1_CU_USD_PER_LB',
-      basisId: 'S_AND_P_CO_PRODUCT_C1_CU',
       value: 1.22,
       unit: 'USD/lb',
+      // Legacy Tier-only evidence is deliberately ignored by the template.
+      basisId: 'S_AND_P_CO_PRODUCT_C1_CU',
       costBaseYear: 2025,
       sourceId: 'pfs-2025',
       pageOrTable: 'Table 18-5',
     }],
   },
   reconciliation: {
-    report: {
-      sourceId: 'pfs-2025',
-      pageOrTable: 'Economic analysis table',
-      timeline: {
-        periodYears: [2026, 2027, 2028],
-        productionStartPeriod: 1,
-      },
-      discountRate: 0.08,
-      npv: 100,
-      npvCurrency: 'USD',
-      irrAfterTax: 0.25,
-      priceDeckByMetal: { Cu: { value: 4, unit: 'USD/lb' } },
-    },
-    calendarShiftYears: 4,
-    jsonCheck: { npvAtReportDiscountRate: 100.5, irrAfterTax: 0.249 },
-    checks: {
-      capexPlacementVerified: true,
-      closureWorkingCapitalVerified: true,
-      reportPricesAndAssumptionsVerified: true,
-      cashFlowDefinitionVerified: true,
-    },
-    toleranceRelative: 0.02,
-    verifiedAtUtc: '2026-08-28T00:00:00Z',
+    report: { sourceId: 'legacy' },
   },
-};
+} as unknown as ProjectJsonV1;
 
 const template = buildProjectJsonV1Template(source) as any;
-assert.equal(template.economicsBreakdown.meta.costBaseYear, 2025);
 assert.equal(template.economicsBreakdown.reportedCostMetrics.length, 1);
 assert.equal(template.economicsBreakdown.reportedCostMetrics[0].metric, 'C1_CU_USD_PER_LB');
-assert.equal(template.economicsBreakdown.reportedCostMetrics[0].basisId, 'S_AND_P_CO_PRODUCT_C1_CU');
-assert.equal(template.economicsBreakdown.reportedCostMetrics[0].sourceId, 'pfs-2025');
-assert.equal(template.reconciliation.report.pageOrTable, 'Economic analysis table');
-assert.deepEqual(template.reconciliation.report.timeline.periodYears, [2026, 2027, 2028]);
-assert.equal(template.reconciliation.report.timeline.productionStartPeriod, 1);
-assert.equal(template.reconciliation.calendarShiftYears, 4);
+assert.equal(template.economicsBreakdown.reportedCostMetrics[0].value, 1.22);
+assert.equal(template.economicsBreakdown.reportedCostMetrics[0].unit, 'USD/lb');
+assert.equal('basisId' in template.economicsBreakdown.reportedCostMetrics[0], false);
+assert.equal('costBaseYear' in template.economicsBreakdown.reportedCostMetrics[0], false);
+assert.equal('sourceId' in template.economicsBreakdown.reportedCostMetrics[0], false);
+assert.equal('pageOrTable' in template.economicsBreakdown.reportedCostMetrics[0], false);
+assert.equal('costBaseYear' in template.economicsBreakdown.meta, false);
+assert.equal('reconciliation' in template, false);
 
 console.log('projectEvidenceTemplate.test.ts passed');

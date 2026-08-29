@@ -3353,7 +3353,7 @@ Capital Available: ${availableLabel}`,
   }, [corporateCanonicalStartPeriods, corporateViewMetrics, lockedTargetCurrency]);
 
   const corporateAlwaysMarkerMetricKeys = useMemo(
-    () => new Set<string>(["DCF_Target", "DCF_perShare"]),
+    () => new Set<string>(["DCF_Target", "DCF_perShare", "NAV_prodStart", "NAV_prodStart_perShare"]),
     [],
   );
 

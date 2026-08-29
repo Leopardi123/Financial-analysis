@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   deleteCompanyProject,
   getCompanyProject,
-  listCompanyProjects,
+  listAllCompanyProjects,
   upsertCompanyProject,
   type CompanyProjectSummary,
 } from '../lib/client/companyProjectsClient.ts';
@@ -58,7 +58,6 @@ function stripPeriodEndDatesForV2(root: Record<string, unknown>): Record<string,
   }
   return clone;
 }
-
 
 function validateProjectJson(rawJson: string): ValidationState {
   let parsed: unknown;
@@ -270,7 +269,7 @@ export default function CompanyProjectsEditorPage() {
     setLoadingList(true);
     setListError(null);
     try {
-      const data = await listCompanyProjects(symbol);
+      const data = await listAllCompanyProjects(symbol);
       setProjects(data);
       if (nextSelectedProjectId) {
         setSelectedProjectId(nextSelectedProjectId);
@@ -428,6 +427,61 @@ export default function CompanyProjectsEditorPage() {
     }
   }
 
+  async function handleSetProjectDisabled(project: CompanyProjectSummary, disabled: boolean): Promise<void> {
+    if (!symbol) return;
+
+    if (
+      selectedProjectId === project.project_id
+      && savedRawJson !== null
+      && rawJsonInput !== savedRawJson
+    ) {
+      setEditorError('Projektet har osparade ändringar. Spara eller återställ innan status ändras.');
+      return;
+    }
+
+    try {
+      const stored = await getCompanyProject(symbol, project.project_id);
+      const raw = JSON.parse(JSON.stringify(stored.raw_json)) as Record<string, unknown>;
+      const existingMeta = raw.meta;
+      const meta = typeof existingMeta === 'object' && existingMeta !== null && !Array.isArray(existingMeta)
+        ? existingMeta as Record<string, unknown>
+        : {};
+
+      if (disabled) {
+        meta.disabled = true;
+        raw.meta = meta;
+      } else {
+        delete meta.disabled;
+        if (Object.keys(meta).length > 0) {
+          raw.meta = meta;
+        } else {
+          delete raw.meta;
+        }
+      }
+
+      const result = await upsertCompanyProject({
+        symbol,
+        project_id: stored.project_id,
+        project_name: stored.project_name,
+        raw_json: stripPeriodEndDatesForV2(raw),
+      });
+
+      setEditorError(null);
+      setEditorInfo(disabled ? `Inaktiverade ${project.project_id}.` : `Aktiverade ${project.project_id}.`);
+
+      if (selectedProjectId === project.project_id && !isNewDraft) {
+        const pretty = JSON.stringify(stripPeriodEndDatesForV2(raw), null, 2);
+        setRawJsonInput(pretty);
+        setSavedRawJson(pretty);
+        setLastSavedAtUtc(result.updated_at_utc);
+      }
+
+      await refreshList(project.project_id);
+    } catch (error) {
+      setEditorError((error as Error).message);
+    }
+  }
+
   async function handleDelete(projectId: string): Promise<void> {
     if (!symbol) return;
     const confirmed = window.confirm(`Delete project "${projectId}" for ${symbol}?`);
@@ -460,9 +514,6 @@ export default function CompanyProjectsEditorPage() {
     setEditorError(null);
     setEditorInfo('Reset to last saved JSON.');
   }
-
-
-
 
   function handleConvertV1ToV2(): void {
     let parsed: unknown;
@@ -557,10 +608,13 @@ export default function CompanyProjectsEditorPage() {
                 <div>
                   <strong>{project.project_id}</strong>
                   <div>{project.project_name || '—'}</div>
-                  <small>{project.updated_at_utc}</small>
+                  <small>{project.disabled ? 'Inaktiverat · ' : ''}{project.updated_at_utc}</small>
                 </div>
                 <div className="project-row-actions">
                   <button type="button" onClick={() => void loadExistingProject(project.project_id)}>Edit</button>
+                  <button type="button" onClick={() => void handleSetProjectDisabled(project, !project.disabled)}>
+                    {project.disabled ? 'Aktivera' : 'Inaktivera'}
+                  </button>
                   <button type="button" className="danger" onClick={() => void handleDelete(project.project_id)}>Delete</button>
                 </div>
               </li>
@@ -637,8 +691,6 @@ export default function CompanyProjectsEditorPage() {
               />
             </label>
           </div>
-
-          
 
           <div className="scenario-shift-controls">
             <h3>Scenario: förskjut produktion framåt</h3>

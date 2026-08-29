@@ -23,7 +23,7 @@ for (const [value, expectedTier] of [
     metric: 'AISC_AU_USD_PER_TOZ',
     value,
     benchmark: gold2025!,
-    nowUtc: '2026-08-28T00:00:00Z',
+    nowUtc: '2026-08-29T00:00:00Z',
   });
   assert.equal(gate.tier, expectedTier);
 }
@@ -42,34 +42,37 @@ const nonDominantGold = assessCostAgainstBenchmark({
   metric: 'AISC_AU_USD_PER_TOZ',
   value: 1_100,
   benchmark: gold2025!,
-  nowUtc: '2026-08-28T00:00:00Z',
+  nowUtc: '2026-08-29T00:00:00Z',
 });
 assert.equal(nonDominantGold.tier, null);
 assert.equal(nonDominantGold.status, 'NOT_VERIFIED');
 
-const silver2024 = getCompatibleTier1CostBenchmark({
+const silver2025 = getCompatibleTier1CostBenchmark({
   metal: 'Ag',
   metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ',
   basisId: 'S_AND_P_CO_PRODUCT_AISC_AG',
-  costBaseYear: 2024,
+  costBaseYear: 2025,
 });
-assert.equal(silver2024, TIER1_COST_BENCHMARKS.Ag);
-const silverNoBoundaries = assessCostAgainstBenchmark({
+assert.equal(silver2025, TIER1_COST_BENCHMARKS.Ag);
+assert.equal(silver2025?.benchmarkKind, 'FULL_QUARTILE_CURVE');
+assert.equal(silver2025?.q1Max, 14.0);
+assert.equal(silver2025?.p50Max, 18.5);
+assert.equal(silver2025?.p75Max, 22.5);
+const silverNearMedian = assessCostAgainstBenchmark({
   primaryMetal: 'Ag',
   primaryMetalRevenueShare: 1,
   metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ',
   value: 18.81,
-  benchmark: silver2024!,
-  nowUtc: '2026-08-28T00:00:00Z',
+  benchmark: silver2025!,
+  nowUtc: '2026-08-29T00:00:00Z',
 });
-assert.equal(silverNoBoundaries.tier, null);
-assert.equal(silverNoBoundaries.status, 'NOT_VERIFIED');
-assert.equal(silverNoBoundaries.threshold, null);
-assert.ok(silverNoBoundaries.reason.includes('P25/P50/P75'));
+assert.equal(silverNearMedian.tier, 3);
+assert.equal(silverNearMedian.status, 'FAIL');
+assert.ok(silverNearMedian.reason.includes('best-estimate'));
 
 // Copper: the S&P curve is 2024 actual on co-product C1 basis. The percentile
-// values are digitised from slide 10 and therefore carry ±0.05 USD/lb read-off
-// uncertainty. Values inside the boundary bands must fail closed.
+// values carry ±0.05 USD/lb read-off uncertainty. Best-estimate boundaries are
+// used for classification while proximity remains visible as diagnostics.
 const copper2024 = getCompatibleTier1CostBenchmark({
   metal: 'Cu',
   metric: 'C1_CU_USD_PER_LB',
@@ -83,6 +86,7 @@ assert.equal(getCompatibleTier1CostBenchmark({
 
 for (const [value, expectedTier] of [
   [1.32, 1],
+  [1.38, 1],
   [1.50, 2],
   [1.90, 3],
   [2.30, 3],
@@ -93,30 +97,28 @@ for (const [value, expectedTier] of [
     metric: 'C1_CU_USD_PER_LB',
     value,
     benchmark: copper2024!,
-    nowUtc: '2026-08-28T00:00:00Z',
+    nowUtc: '2026-08-29T00:00:00Z',
   });
   assert.equal(gate.tier, expectedTier, `Cu ${value} USD/lb should be Cost Tier ${expectedTier}`);
 }
 
-for (const value of [1.40, 1.76] as const) {
+for (const [value, expectedTier] of [[1.40, 1], [1.76, 2]] as const) {
   const gate = assessCostAgainstBenchmark({
     primaryMetal: 'Cu',
     primaryMetalRevenueShare: 1,
     metric: 'C1_CU_USD_PER_LB',
     value,
     benchmark: copper2024!,
-    nowUtc: '2026-08-28T00:00:00Z',
+    nowUtc: '2026-08-29T00:00:00Z',
   });
-  assert.equal(gate.status, 'NOT_VERIFIED');
-  assert.equal(gate.tier, null);
-  assert.ok(gate.reason.includes('digitaliserade'));
+  assert.equal(gate.tier, expectedTier);
+  assert.ok(gate.reason.includes('best-estimate'));
 }
 
 // Real-project exact-vintage canonical regression: Arizona Sonoran Cactus 2024
 // PEA reports 5,338.683 Mlb payable copper and LOM cash operating costs of
 // US$9.341bn = mining 7.252bn + process 2.039bn + G&A 0.050bn. Royalties are
-// separately reported and excluded here. This matches the engine's single-
-// product cathode S&P/Santa-Cruz-compatible canonical C1 bridge.
+// separately reported and excluded here.
 const cactusCanonical = computeCanonicalC1ForProject({
   projectId: 'cactus-2024-pea',
   primaryMetal: 'Cu',
@@ -144,18 +146,16 @@ assert.equal(cactusCanonical.metric, 'C1_CU_USD_PER_LB');
 assert.equal(cactusCanonical.costBaseYear, 2024);
 assert.ok(cactusCanonical.value !== null && Math.abs(cactusCanonical.value - 1.7496824591383306) < 1e-12);
 
-// Cactus is intentionally NOT forced into Tier 2 or 3: its canonical ~1.75
-// USD/lb lies inside the ±0.05 uncertainty band around digitised P50=1.76.
 const cactusGate = assessCostAgainstBenchmark({
   primaryMetal: 'Cu',
   primaryMetalRevenueShare: 1,
   metric: cactusCanonical.metric!,
   value: cactusCanonical.value!,
   benchmark: copper2024!,
-  nowUtc: '2026-08-28T00:00:00Z',
+  nowUtc: '2026-08-29T00:00:00Z',
 });
-assert.equal(cactusGate.status, 'NOT_VERIFIED');
-assert.equal(cactusGate.tier, null);
-assert.ok(cactusGate.reason.includes('P50'));
+assert.equal(cactusGate.status, 'FAIL');
+assert.equal(cactusGate.tier, 2);
+assert.ok(cactusGate.reason.includes('best-estimate'));
 
 console.log('costBenchmarkAssessment.test.ts passed');

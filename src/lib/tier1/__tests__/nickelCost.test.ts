@@ -9,8 +9,8 @@ import { extractReportedCostEvidence } from '../reportedCost.ts';
 
 // BMI Q2 2025 nickel C1 curve: payable metal using BMI methodology, costs
 // inclusive of by-product sales. Percentile boundaries are digitised from the
-// public chart, so the explicit ±0.15 USD/lb uncertainty must fail closed near
-// P25/P50 rather than manufacture precision.
+// public chart. The explicit ±0.15 USD/lb uncertainty is disclosed but the
+// best-estimate boundary remains usable for Tier classification.
 const bmi2025 = getCompatibleTier1CostBenchmark({
   metal: 'Ni',
   metric: 'C1_NI_USD_PER_LB',
@@ -41,7 +41,7 @@ for (const [value, expectedTier] of [
   assert.equal(gate.tier, expectedTier, `Ni ${value} USD/lb should be Cost Tier ${expectedTier}`);
 }
 
-for (const value of [4.95, 6.45] as const) {
+for (const [value, expectedTier] of [[4.95, 1], [6.45, 2]] as const) {
   const gate = assessCostAgainstBenchmark({
     primaryMetal: 'Ni',
     primaryMetalRevenueShare: 0.45,
@@ -50,9 +50,8 @@ for (const value of [4.95, 6.45] as const) {
     benchmark: bmi2025!,
     nowUtc: '2026-08-28T00:00:00Z',
   });
-  assert.equal(gate.status, 'NOT_VERIFIED');
-  assert.equal(gate.tier, null);
-  assert.ok(gate.reason.includes('digitaliserade'));
+  assert.equal(gate.tier, expectedTier);
+  assert.ok(gate.reason.includes('best-estimate'));
 }
 
 // Real-project reported-cost regression: TMC NORI-D PFS presentation, slide 17,

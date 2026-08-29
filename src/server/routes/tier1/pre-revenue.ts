@@ -26,8 +26,15 @@ import {
   type Tier1Gate,
   type Tier1PreRevenueAssessment,
 } from '../../../lib/tier1/preRevenue.ts';
+import { assessCostAgainstBenchmark } from '../../../lib/tier1/costBenchmarkAssessment.ts';
 
 const LB_PER_TONNE = 2204.6226218487757;
+const GRAMS_PER_TOZ = 31.1034768;
+const GRAMS_PER_KG = 1_000;
+const GRAMS_PER_LB = 453.59237;
+const GRAMS_PER_TONNE = 1_000_000;
+const GRAMS_PER_SHORT_TON = 907_184.74;
+const GRAMS_PER_LONG_TON = 1_016_046.9088;
 
 type ProjectPrepared = {
   projectId: string;
@@ -85,12 +92,29 @@ function addToNestedMap(target: Map<string, Map<number, number>>, key: string, y
   target.set(key, byYear);
 }
 
-function standardPayableQuantity(priceKey: string, value: number): { value: number; unit: 'toz' | 'tonne' } | null {
-  const unit = getPriceKeyDefinition(priceKey).canonicalUnit;
-  if (unit === 'USD_per_toz') return { value, unit: 'toz' };
-  if (unit === 'USD_per_tonne') return { value, unit: 'tonne' };
-  if (unit === 'USD_per_lb') return { value: value / LB_PER_TONNE, unit: 'tonne' };
+function payableQuantityInGrams(value: number, unit: string): number | null {
+  if (unit === 'g') return value;
+  if (unit === 'kg') return value * GRAMS_PER_KG;
+  if (unit === 'lb') return value * GRAMS_PER_LB;
+  if (unit === 'tonne') return value * GRAMS_PER_TONNE;
+  if (unit === 'short_ton') return value * GRAMS_PER_SHORT_TON;
+  if (unit === 'long_ton') return value * GRAMS_PER_LONG_TON;
+  if (unit === 'toz') return value * GRAMS_PER_TOZ;
   return null;
+}
+
+function standardPayableQuantity(
+  metal: Tier1Metal,
+  quantityUnit: string | undefined,
+  value: number,
+): { value: number; unit: 'toz' | 'tonne' } | null {
+  if (!quantityUnit) return null;
+  const grams = payableQuantityInGrams(value, quantityUnit);
+  if (!finite(grams) || grams < 0) return null;
+  if (metal === 'Au' || metal === 'Ag' || metal === 'Pt' || metal === 'Pd') {
+    return { value: grams / GRAMS_PER_TOZ, unit: 'toz' };
+  }
+  return { value: grams / GRAMS_PER_TONNE, unit: 'tonne' };
 }
 
 function combinedScaleEquivalent(averages: Partial<Record<Tier1Metal, number>>): number {
@@ -316,15 +340,19 @@ export default async function handler(req: any, res: any): Promise<void> {
       const physicalInput = parsed.engineInputWithoutPrices;
       const yearsByPeriod = physicalInput.yearsByPeriod;
 
-      // Physical mine-plan gates never depend on the report deck or current prices.
+      // Physical mine-plan gates use physical payable quantities and their
+      // declared quantity units. Price keys must never determine scale units.
       for (const [metal, qtySeries] of Object.entries(physicalInput.payableQtyByMetal)) {
-        const priceKey = physicalInput.priceKeyByMetal[metal];
-        if (!priceKey) continue;
+        if (!isTier1Metal(metal)) continue;
+        const qtyUnit = physicalInput.payableQtyUnitByMetal[metal];
         for (let t = 0; t < qtySeries.length; t += 1) {
           const qty = qtySeries[t];
           if (!finite(qty) || qty <= 0) continue;
-          const standard = standardPayableQuantity(priceKey, qty);
-          if (!standard) continue;
+          const standard = standardPayableQuantity(metal, qtyUnit, qty);
+          if (!standard) {
+            diagnostics.push(`${project.projectId}: payable-enheten ${qtyUnit ?? 'saknas'} kan inte konverteras för ${metal}.`);
+            continue;
+          }
           const existingUnit = quantityUnitByMetal.get(metal);
           if (existingUnit && existingUnit !== standard.unit) {
             diagnostics.push(`${project.projectId}: inkonsekventa kanoniska payable-enheter för ${metal}.`);
@@ -486,7 +514,31 @@ export default async function handler(req: any, res: any): Promise<void> {
     const znEqAisc = equivalentAiscForMetal(preparedProjects, 'Zn', sustainingCostUsd);
     if (finite(znEqAisc)) costMetricValues.AISC_ZNEQ_USD_PER_LB = znEqAisc;
 
-    const costGate = assessCost({ primaryMetal, primaryMetalRevenueShare, costMetricValues, nowUtc: new Date().toISOString() });
+    let costGate = assessCost({ primaryMetal, primaryMetalRevenueShare, costMetricValues, nowUtc: new Date().toISOString() });
+    let selectedCostMetric: Tier1CostMetric | null = null;
+
+    // Silver best-available fallback: the existing project engine already
+    // computes AgEq AISC from the same sustaining-cost numerator and the gross
+    // revenue-equivalent silver denominator. When no explicit reported
+    // co-product Ag AISC exists, use that canonical economic output as an
+    // explicitly labelled proxy against the primary-silver co-product curve.
+    // This adds no project input and does not alter Project/Corporate economics.
+    if (primaryMetal === 'Ag' && finite(agEqAisc) && (costGate.status === 'NOT_VERIFIED' || costGate.tier === null)) {
+      const benchmark = TIER1_COST_BENCHMARKS.Ag;
+      const proxyGate = assessCostAgainstBenchmark({
+        primaryMetal: 'Ag',
+        primaryMetalRevenueShare,
+        metric: benchmark.metric,
+        value: agEqAisc,
+        benchmark,
+        nowUtc: new Date().toISOString(),
+      });
+      proxyGate.reason = `Best available från befintlig ekonomisk modell: AgEq AISC ${agEqAisc.toFixed(2)} USD/toz används som silver-cost proxy mot S&P:s co-product Ag-kurva. Ingen extra project_json-data antas. ${proxyGate.reason}`;
+      costGate = proxyGate;
+      selectedCostMetric = 'AISC_AGEQ_USD_PER_TOZ';
+      diagnostics.push(`Kostnad Ag: engine-baserad AgEq AISC ${agEqAisc.toFixed(4)} USD/toz används som best-available proxy mot Ag co-product-kurvan.`);
+    }
+
     const cycleReason = missingCycle.length > 0
       ? `Saknar verifierbar lång historik för: ${missingCycle.map(([priceKey]) => priceKey).join(', ')}.`
       : undefined;
@@ -503,7 +555,7 @@ export default async function handler(req: any, res: any): Promise<void> {
     }
 
     const benchmark = primaryMetal ? TIER1_COST_BENCHMARKS[primaryMetal] : null;
-    const selectedCostMetric = benchmark && finite(costMetricValues[benchmark.metric]) ? benchmark.metric : null;
+    if (!selectedCostMetric) selectedCostMetric = benchmark && finite(costMetricValues[benchmark.metric]) ? benchmark.metric : null;
 
     const assessment: Tier1PreRevenueAssessment = {
       status: classification.status,
@@ -530,7 +582,7 @@ export default async function handler(req: any, res: any): Promise<void> {
         scaleWindowEndYear: scaleWindow.endYear,
         scaleWindowYears: scaleWindow.years,
         costMetric: selectedCostMetric,
-        costMetricValue: selectedCostMetric ? costMetricValues[selectedCostMetric] ?? null : null,
+        costMetricValue: selectedCostMetric ? costMetricValues[selectedCostMetric] ?? (selectedCostMetric === 'AISC_AGEQ_USD_PER_TOZ' ? agEqAisc : null) : null,
       },
       diagnostics,
     };
