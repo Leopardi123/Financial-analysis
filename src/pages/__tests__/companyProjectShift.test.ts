@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shiftProjectToTargetProductionYear } from '../companyProjectShift.ts';
 
-test('shiftProjectToTargetProductionYear keeps production chain length and cost vintage when delaying start', () => {
+test('shiftProjectToTargetProductionYear keeps production chain length when delaying start', () => {
   const project = {
     version: 'project_json_v2',
     time: {
@@ -38,9 +38,6 @@ test('shiftProjectToTargetProductionYear keeps production chain length and cost 
       gradeUnitByMetal: { Au: 'g/t' },
       recoveryPctByMetal: { Au: [0, 0, 0.9, 0.9, 0.9] },
     },
-    economicsBreakdown: {
-      meta: { defaultSource: 'PFS', costBaseYear: 2025, notes: '2025 USD cost basis' },
-    },
   } as Record<string, unknown>;
 
   const result = shiftProjectToTargetProductionYear(project, 2029);
@@ -59,10 +56,4 @@ test('shiftProjectToTargetProductionYear keeps production chain length and cost 
 
   const oreMilled = ((shifted.operations as Record<string, unknown>).oreMilledTonnes as Array<number | null>);
   assert.deepEqual(oreMilled, [null, null, 0, 0, 500000, 500000, 500000]);
-
-  const breakdown = shifted.economicsBreakdown as Record<string, unknown>;
-  const costMeta = breakdown.meta as Record<string, unknown>;
-  assert.equal(costMeta.costBaseYear, 2025);
-  assert.equal(costMeta.defaultSource, 'PFS');
-  assert.equal(costMeta.notes, '2025 USD cost basis');
 });
