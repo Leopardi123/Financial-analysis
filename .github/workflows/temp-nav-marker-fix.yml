@@ -1,0 +1,46 @@
+name: Temporary NAV marker fix
+
+on:
+  push:
+    branches:
+      - codex/tier1-simplify-single-source
+    paths:
+      - .github/workflows/temp-nav-marker-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-nav-marker-set:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/tier1-simplify-single-source
+          fetch-depth: 0
+      - name: Apply exact NAV marker replacement
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/components/SingleStockDashboard.tsx')
+          text = path.read_text()
+          old = 'new Set<string>(["DCF_Target", "DCF_perShare"])'
+          new = 'new Set<string>(["DCF_Target", "DCF_perShare", "NAV_prodStart", "NAV_prodStart_perShare"])'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one marker-set occurrence, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff -- src/components/SingleStockDashboard.tsx
+      - name: Commit exact UI wiring change
+        run: |
+          if git diff --quiet -- src/components/SingleStockDashboard.tsx; then
+            echo "No change needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/SingleStockDashboard.tsx
+          git commit -m "fix(corporate): show NAV at all project-start years"
+          git push origin HEAD:codex/tier1-simplify-single-source
