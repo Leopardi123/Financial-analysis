@@ -26,7 +26,12 @@ function gateStatus(tier: 1 | 2 | 3): 'PASS' | 'FAIL' {
   return tier === 1 ? 'PASS' : 'FAIL';
 }
 
+function displayCostUnit(unit: string): string {
+  return unit === 'USD/toz' ? 'USD/oz' : unit;
+}
+
 function digitisedBoundaryNote(value: number, benchmark: Tier1CostBenchmark): string {
+  const displayUnit = displayCostUnit(benchmark.unit);
   const uncertainty = benchmark.boundaryUncertaintyAbs;
   if (!(finite(uncertainty) && uncertainty > 0)) return '';
   const near: string[] = [];
@@ -34,7 +39,7 @@ function digitisedBoundaryNote(value: number, benchmark: Tier1CostBenchmark): st
   if (finite(benchmark.p50Max) && Math.abs(value - benchmark.p50Max) <= uncertainty) near.push('P50');
   if (finite(benchmark.p75Max) && Math.abs(value - benchmark.p75Max) <= uncertainty) near.push('P75');
   return near.length > 0
-    ? ` Värdet ligger inom ±${uncertainty} ${benchmark.unit} från digitaliserad ${near.join('/')}-gräns; best-estimate-gränsen används och osäkerheten är diagnostisk.`
+    ? ` Värdet ligger inom ±${uncertainty} ${displayUnit} från digitaliserad ${near.join('/')}-gräns; best-estimate-gränsen används och osäkerheten är diagnostisk.`
     : '';
 }
 
@@ -53,6 +58,7 @@ export function assessCostAgainstBenchmark(args: {
   nowUtc?: string;
 }): Tier1Gate {
   const { benchmark } = args;
+  const displayUnit = displayCostUnit(benchmark.unit);
   const metricLabel = COST_METRIC_LABELS[args.metric];
 
   if (benchmark.metal !== args.primaryMetal || benchmark.metric !== args.metric) {
@@ -106,13 +112,13 @@ export function assessCostAgainstBenchmark(args: {
       return {
         status: 'PASS', tier: 1, value: args.value,
         threshold: benchmark.q1Max, unit: benchmark.unit,
-        reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit} är ≤ Q1-referensen ${benchmark.q1Max} ${benchmark.unit} i ${benchmark.dataPeriod}-snapshoten och bevisar Cost Tier 1. P50 saknas, så högre cost får inte gissas till Tier 2/3.${digitisedBoundaryNote(args.value, benchmark)}`,
+        reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit} är ≤ Q1-referensen ${benchmark.q1Max} ${displayUnit} i ${benchmark.dataPeriod}-snapshoten och bevisar Cost Tier 1. P50 saknas, så högre cost får inte gissas till Tier 2/3.${digitisedBoundaryNote(args.value, benchmark)}`,
       };
     }
     return {
       status: 'NOT_VERIFIED', tier: null, value: args.value,
       threshold: benchmark.q1Max, unit: benchmark.unit,
-      reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit} ligger över Q1-referensen ${benchmark.q1Max} i ${benchmark.dataPeriod}-snapshoten. Homogen P50 saknas, så Tier 2/3 får inte gissas.`,
+      reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit} ligger över Q1-referensen ${benchmark.q1Max} i ${benchmark.dataPeriod}-snapshoten. Homogen P50 saknas, så Tier 2/3 får inte gissas.`,
     };
   }
 
@@ -130,7 +136,7 @@ export function assessCostAgainstBenchmark(args: {
     return {
       status: 'NOT_VERIFIED', tier: null, value: args.value,
       threshold: benchmark.q1Max, unit: benchmark.unit,
-      reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit}: ${classified.reason}`,
+      reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit}: ${classified.reason}`,
     };
   }
 
@@ -145,6 +151,6 @@ export function assessCostAgainstBenchmark(args: {
     value: args.value,
     threshold,
     unit: benchmark.unit,
-    reason: `${metricLabel} ${args.value.toFixed(2)} ${benchmark.unit}. ${classified.reason}${digitisedBoundaryNote(args.value, benchmark)} Benchmark: ${benchmark.dataPeriod}${benchmark.sourcePageOrTable ? `, ${benchmark.sourcePageOrTable}` : ''}.`,
+    reason: `${metricLabel} ${args.value.toFixed(2)} ${displayUnit}. ${classified.reason}${digitisedBoundaryNote(args.value, benchmark)} Benchmark: ${benchmark.dataPeriod}${benchmark.sourcePageOrTable ? `, ${benchmark.sourcePageOrTable}` : ''}.`,
   };
 }
