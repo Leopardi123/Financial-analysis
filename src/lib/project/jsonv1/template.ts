@@ -25,20 +25,13 @@ const QTY_UNIT_CHOICES = ['g', 'kg', 'lb', 'long_ton', 'short_ton', 'tonne', 'to
 const PRICE_KEY_CHOICES = PRICE_KEY_DEFINITIONS.map((definition) => definition.priceKey);
 const REPORTED_COST_METRIC_CHOICES = [
   'AISC_AU_USD_PER_TOZ',
+  'AISC_AG_CO_PRODUCT_USD_PER_TOZ',
   'AISC_AGEQ_USD_PER_TOZ',
   'C1_CU_USD_PER_LB',
   'AISC_ZNEQ_USD_PER_LB',
   'C1_NI_USD_PER_LB',
   'AISC_NI_USD_PER_LB',
   'AISC_PGM3E_USD_PER_TOZ',
-] as const;
-const REPORTED_COST_BASIS_CHOICES = [
-  'S_AND_P_CO_PRODUCT_AISC_AU',
-  'JUANICIPIO_REPORTED_AGEQ_AISC_MIXED_Q1_EVIDENCE',
-  'S_AND_P_CO_PRODUCT_C1_CU',
-  'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS',
-  'JAGUAR_NI_C1_MINE_SITE_GA',
-  'VALTERRA_PGM_3E_AISC_SOLD',
 ] as const;
 const REPORTED_COST_UNIT_CHOICES = ['USD/lb', 'USD/toz'] as const;
 
@@ -162,14 +155,9 @@ function normalizeReportedCostMetrics(value: unknown): Array<Record<string, unkn
     .map((item) => ({
       metric: typeof item.metric === 'string' ? item.metric : '',
       _choices_metric: [...REPORTED_COST_METRIC_CHOICES],
-      basisId: typeof item.basisId === 'string' ? item.basisId : '',
-      _choices_basisId: [...REPORTED_COST_BASIS_CHOICES],
       value: typeof item.value === 'number' && Number.isFinite(item.value) ? item.value : null,
       unit: typeof item.unit === 'string' ? item.unit : null,
       _choices_unit: [...REPORTED_COST_UNIT_CHOICES],
-      costBaseYear: Number.isInteger(item.costBaseYear) ? item.costBaseYear : null,
-      sourceId: typeof item.sourceId === 'string' ? item.sourceId : '',
-      pageOrTable: typeof item.pageOrTable === 'string' ? item.pageOrTable : '',
     }));
 }
 
@@ -200,9 +188,6 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
   const economicsBreakdownTaxesDetail = economicsBreakdown.taxesDetail === null
     ? null
     : asRecord(economicsBreakdown.taxesDetail);
-  const reconciliation = root.reconciliation && typeof root.reconciliation === 'object' && !Array.isArray(root.reconciliation)
-    ? root.reconciliation as NonNullable<ProjectJsonV1['reconciliation']>
-    : null;
 
   const output = {
     version: 'project_json_v2',
@@ -334,12 +319,10 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
           ? economicsBreakdownMeta.defaultSource
           : null,
         _choices_defaultSource: [...ECONOMICS_BREAKDOWN_SOURCE_CHOICES],
-        costBaseYear: Number.isInteger(economicsBreakdownMeta.costBaseYear) ? economicsBreakdownMeta.costBaseYear : null,
-        _description_costBaseYear: 'Nominal USD cost-estimate year. Tier cost comparisons require a compatible benchmark cost year; no implicit inflation/index adjustment is made.',
         notes: typeof economicsBreakdownMeta.notes === 'string' ? economicsBreakdownMeta.notes : null,
       },
       reportedCostMetrics: normalizeReportedCostMetrics(economicsBreakdown.reportedCostMetrics),
-      _description_reportedCostMetrics: 'Optional directly reported AISC/C1 evidence. Use only when the technical report explicitly supports metric, definition basis, value, cost year and exact source page/table. Tier never infers basisId.',
+      _description_reportedCostMetrics: 'Optional current reported AISC/C1. Tier uses metric + value + unit as best available information; benchmark-specific evidence fields are not required here.',
       cogs: {
         miningUSD: normalizeSeries(economicsBreakdownCogs.miningUSD, seriesLength),
         millingUSD: normalizeSeries(economicsBreakdownCogs.millingUSD, seriesLength),
@@ -362,8 +345,6 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
         }
         : null,
     },
-    reconciliation,
-    _description_reconciliation: 'Hard PEA/PFS/FS model-reconciliation evidence. Leave null until report page/table, report price deck, period/CAPEX/closure-WC/assumption/cash-flow checks and NPV/IRR control calculation are actually verified.',
   } as unknown as ProjectJsonV1Template;
 
   for (const metal of Object.keys(output.metals.payableQtyUnitByMetal ?? {})) {
@@ -539,7 +520,6 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
     economicsBreakdown: {
       meta: {
         defaultSource: null,
-        costBaseYear: null,
         notes: null,
       },
       reportedCostMetrics: [],
@@ -560,6 +540,5 @@ export function getProjectJsonV1Template(): ProjectJsonV1 {
       royaltiesDetail: [],
       taxesDetail: null,
     },
-    reconciliation: null,
   });
 }
