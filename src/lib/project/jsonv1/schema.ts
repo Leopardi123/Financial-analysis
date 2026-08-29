@@ -22,6 +22,7 @@ export type ProjectJsonV1 = {
     projectName?: string;
     currency?: 'USD';
     notes?: string;
+    disabled?: boolean;
   };
 
   time: {
