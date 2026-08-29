@@ -1,6 +1,11 @@
 import { mergeMonthlyPayload, encodeMonthlyPayload, decodeMonthlyPayload, type MonthlyPricePayload } from "./historyBlob.js";
-import { fetchHistoricalEodFull } from "./providers/fmp.js";
-import { fetchFredCommodityPriceSeries, getFredCommodityPriceMapping } from "./providers/fred.js";
+import { fetchHistoricalEodFull, fetchLegacyCommodityHistoricalFull } from "./providers/fmp.js";
+import { getLegacySymbolForPriceKey } from "./providers/legacyCommoditySymbolMap.ts";
+import {
+  fetchFredCommodityPriceSeries,
+  getFredHistoryCommodityPriceMapping,
+  isFredHistoryOnlyCommodityPriceKey,
+} from "./providers/fred.js";
 import { getPriceKeyDefinition, type PriceKey } from "./keys.js";
 import { convertPriceToCanonical } from "./units/convert.js";
 
@@ -52,6 +57,23 @@ function toPayload(rows: HistoryInputRow[]): MonthlyPricePayload {
   };
 }
 
+function mergeHistoryRows(primary: HistoryInputRow[], fallback: HistoryInputRow[]): HistoryInputRow[] {
+  const byDate = new Map<string, HistoryInputRow>();
+  for (const row of fallback) byDate.set(row.date, row);
+  for (const row of primary) byDate.set(row.date, row);
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function hasMaterialLeadingGap(rows: HistoryInputRow[], requestedFrom: string): boolean {
+  if (rows.length === 0) return true;
+  const earliest = rows[0]?.date;
+  if (!earliest) return true;
+  const requested = Date.parse(`${requestedFrom}T00:00:00Z`);
+  const observed = Date.parse(`${earliest}T00:00:00Z`);
+  if (!Number.isFinite(requested) || !Number.isFinite(observed)) return false;
+  return observed - requested > 45 * 86_400_000;
+}
+
 async function defaultQuery(sql: string, params: Array<string | number | null> = []): Promise<any[]> {
   const db = await import("../../../api/_db.js");
   return db.query(sql, params);
@@ -72,6 +94,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
   queryFn?: QueryFn;
   executeFn?: ExecuteFn;
   fetchHistoricalFn?: typeof fetchHistoricalEodFull;
+  fetchLegacyHistoricalFn?: typeof fetchLegacyCommodityHistoricalFull;
   fetchFredCommodityPriceSeriesFn?: typeof fetchFredCommodityPriceSeries;
 } = {}): Promise<{ monthsTouched: number }> {
   const lockKey = `${args.priceKey}:${args.from}:${args.to}`;
@@ -84,6 +107,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
     const queryFn = deps.queryFn ?? defaultQuery;
     const executeFn = deps.executeFn ?? defaultExecute;
     const fetchHistoricalFn = deps.fetchHistoricalFn ?? fetchHistoricalEodFull;
+    const fetchLegacyHistoricalFn = deps.fetchLegacyHistoricalFn ?? fetchLegacyCommodityHistoricalFull;
     const fetchFredFn = deps.fetchFredCommodityPriceSeriesFn ?? fetchFredCommodityPriceSeries;
 
     const mappingRows = await queryFn(
@@ -95,8 +119,23 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
     ) as ProviderMapRow[];
 
     const mapping = mappingRows[0] ?? null;
-    const provider = String(mapping?.provider ?? (fxProviderSymbolFromKey(args.priceKey) ? "FMP" : "")).toUpperCase();
-    let providerSymbol = mapping?.provider_symbol ?? null;
+    const fredRegistryMapping = getFredHistoryCommodityPriceMapping(args.priceKey);
+    const historyOnlyFred = isFredHistoryOnlyCommodityPriceKey(args.priceKey) && fredRegistryMapping !== null;
+
+    // A verified history-only registry entry deliberately overrides the normal
+    // current-price provider for historical calibration. This is used for Cu:
+    // current spot remains FMP/COMEX, while the long relative-cycle history is
+    // the IMF/FRED global copper benchmark. It is a source/basis distinction,
+    // not an implicit COMEX↔LME conversion.
+    const provider = String(
+      historyOnlyFred
+        ? "FRED"
+        : mapping?.provider
+          ?? (fredRegistryMapping ? "FRED" : fxProviderSymbolFromKey(args.priceKey) ? "FMP" : ""),
+    ).toUpperCase();
+    let providerSymbol = historyOnlyFred
+      ? fredRegistryMapping?.fredSeriesId ?? null
+      : mapping?.provider_symbol ?? fredRegistryMapping?.fredSeriesId ?? null;
     let providerLabel: "FMP" | "FRED";
     let filtered: HistoryInputRow[];
 
@@ -105,15 +144,64 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
       if (!providerSymbol) {
         throw new Error(`No FMP mapping found for price key: ${args.priceKey}`);
       }
-      const allRows = await fetchHistoricalFn(providerSymbol);
-      filtered = allRows.filter((row) => row.date >= args.from && row.date <= args.to);
+
+      const verifiedLegacySymbol = getLegacySymbolForPriceKey(args.priceKey);
+      const legacySymbol = verifiedLegacySymbol ?? providerSymbol;
+      let stableRows: HistoryInputRow[] = [];
+      let stableError: unknown = null;
+
+      try {
+        const allRows = await fetchHistoricalFn(providerSymbol);
+        stableRows = allRows.filter((row) => row.date >= args.from && row.date <= args.to);
+      } catch (error) {
+        stableError = error;
+      }
+
+      if (stableError !== null) {
+        if (!verifiedLegacySymbol) {
+          throw stableError;
+        }
+        try {
+          const legacyRows = await fetchLegacyHistoricalFn(verifiedLegacySymbol, {
+            fromUtc: args.from,
+            toUtc: args.to,
+          });
+          filtered = legacyRows.filter((row) => row.date >= args.from && row.date <= args.to);
+          providerSymbol = verifiedLegacySymbol;
+        } catch (legacyError) {
+          throw new Error(
+            `FMP stable history failed for ${args.priceKey}/${providerSymbol}: ${stableError instanceof Error ? stableError.message : String(stableError)}; verified legacy ${verifiedLegacySymbol} also failed: ${legacyError instanceof Error ? legacyError.message : String(legacyError)}`,
+          );
+        }
+      } else {
+        filtered = stableRows;
+
+        // The stable FMP full-history endpoint can return only the recent portion of a
+        // requested commodity history. Use the verified legacy v3 range endpoint as a
+        // backfill when stable starts materially after the requested start. Stable rows
+        // win on overlapping dates. If the legacy call fails, retain valid stable rows;
+        // callers requiring longer coverage remain NOT_VERIFIED rather than guessing.
+        if (hasMaterialLeadingGap(filtered, args.from)) {
+          try {
+            const legacyRows = await fetchLegacyHistoricalFn(legacySymbol, {
+              fromUtc: args.from,
+              toUtc: args.to,
+            });
+            const legacyFiltered = legacyRows.filter((row) => row.date >= args.from && row.date <= args.to);
+            filtered = mergeHistoryRows(filtered, legacyFiltered);
+            if (verifiedLegacySymbol) providerSymbol = verifiedLegacySymbol;
+          } catch {
+            // Keep valid stable history.
+          }
+        }
+      }
       providerLabel = "FMP";
     } else if (provider === "FRED") {
-      const fredMapping = getFredCommodityPriceMapping(args.priceKey);
+      const fredMapping = fredRegistryMapping;
       if (!fredMapping) {
         throw new Error(`No verified FRED commodity mapping found for price key: ${args.priceKey}`);
       }
-      if (providerSymbol && providerSymbol !== fredMapping.fredSeriesId) {
+      if (!historyOnlyFred && providerSymbol && providerSymbol !== fredMapping.fredSeriesId) {
         throw new Error(
           `FRED provider mapping mismatch for ${args.priceKey}: database=${providerSymbol}, registry=${fredMapping.fredSeriesId}`,
         );

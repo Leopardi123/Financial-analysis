@@ -15,6 +15,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/tier1/pre-revenue",
+      "destination": "/api/tier1-pre-revenue"
+    },
+    {
       "source": "/api/:path*",
       "destination": "/api"
     },
@@ -25,6 +29,9 @@
   ],
   "functions": {
     "api/index.ts": {
+      "includeFiles": "src/**/*.ts"
+    },
+    "api/tier1-pre-revenue.ts": {
       "includeFiles": "src/**/*.ts"
     }
   }

@@ -10,7 +10,9 @@ export type FredCommodityPriceMapping = {
 
 /**
  * Verified IMF Primary Commodity Prices series distributed by FRED.
- * These are monthly period-average benchmarks, not spot prices.
+ * These are monthly period-average benchmarks, not spot quotes.
+ * Entries here may be used by the normal price resolver where FRED is the
+ * canonical live/most-recent source for that key.
  */
 export const FRED_COMMODITY_PRICE_MAPPINGS: readonly FredCommodityPriceMapping[] = [
   {
@@ -57,12 +59,48 @@ export const FRED_COMMODITY_PRICE_MAPPINGS: readonly FredCommodityPriceMapping[]
   },
 ] as const;
 
+/**
+ * Verified long-history mappings that are intentionally NOT eligible as the
+ * normal current-price source. Copper current pricing stays on the existing
+ * FMP/COMEX path; cycle calibration uses the IMF/FRED global copper benchmark
+ * PCOPPUSDM as a history-only relative-cycle proxy. The multiplier is
+ * dimensionless, while the source basis remains explicitly distinct from
+ * current COMEX spot.
+ */
+export const FRED_HISTORY_ONLY_COMMODITY_PRICE_MAPPINGS: readonly FredCommodityPriceMapping[] = [
+  {
+    priceKey: 'CU_USD_LB',
+    fredSeriesId: 'PCOPPUSDM',
+    providerUnit: 'USD_PER_TONNE',
+    frequency: 'monthly',
+    description: 'IMF/FRED global copper benchmark, monthly period average; history-only relative-cycle proxy for current COMEX-derived USD/lb copper',
+  },
+  {
+    priceKey: 'CU_USD_TONNE',
+    fredSeriesId: 'PCOPPUSDM',
+    providerUnit: 'USD_PER_TONNE',
+    frequency: 'monthly',
+    description: 'IMF/FRED global copper benchmark, monthly period average; history-only for cycle calibration',
+  },
+] as const;
+
 const FRED_COMMODITY_PRICE_MAP = new Map(
   FRED_COMMODITY_PRICE_MAPPINGS.map((mapping) => [mapping.priceKey, mapping]),
+);
+const FRED_HISTORY_ONLY_COMMODITY_PRICE_MAP = new Map(
+  FRED_HISTORY_ONLY_COMMODITY_PRICE_MAPPINGS.map((mapping) => [mapping.priceKey, mapping]),
 );
 
 export function getFredCommodityPriceMapping(priceKey: string): FredCommodityPriceMapping | null {
   return FRED_COMMODITY_PRICE_MAP.get(priceKey) ?? null;
+}
+
+export function getFredHistoryCommodityPriceMapping(priceKey: string): FredCommodityPriceMapping | null {
+  return FRED_COMMODITY_PRICE_MAP.get(priceKey) ?? FRED_HISTORY_ONLY_COMMODITY_PRICE_MAP.get(priceKey) ?? null;
+}
+
+export function isFredHistoryOnlyCommodityPriceKey(priceKey: string): boolean {
+  return FRED_HISTORY_ONLY_COMMODITY_PRICE_MAP.has(priceKey);
 }
 
 export function isFredCommodityPriceKey(priceKey: string): boolean {
