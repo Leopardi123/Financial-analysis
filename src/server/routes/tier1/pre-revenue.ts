@@ -29,6 +29,12 @@ import {
 import { assessCostAgainstBenchmark } from '../../../lib/tier1/costBenchmarkAssessment.ts';
 
 const LB_PER_TONNE = 2204.6226218487757;
+const GRAMS_PER_TOZ = 31.1034768;
+const GRAMS_PER_KG = 1_000;
+const GRAMS_PER_LB = 453.59237;
+const GRAMS_PER_TONNE = 1_000_000;
+const GRAMS_PER_SHORT_TON = 907_184.74;
+const GRAMS_PER_LONG_TON = 1_016_046.9088;
 
 type ProjectPrepared = {
   projectId: string;
@@ -86,12 +92,29 @@ function addToNestedMap(target: Map<string, Map<number, number>>, key: string, y
   target.set(key, byYear);
 }
 
-function standardPayableQuantity(priceKey: string, value: number): { value: number; unit: 'toz' | 'tonne' } | null {
-  const unit = getPriceKeyDefinition(priceKey).canonicalUnit;
-  if (unit === 'USD_per_toz') return { value, unit: 'toz' };
-  if (unit === 'USD_per_tonne') return { value, unit: 'tonne' };
-  if (unit === 'USD_per_lb') return { value: value / LB_PER_TONNE, unit: 'tonne' };
+function payableQuantityInGrams(value: number, unit: string): number | null {
+  if (unit === 'g') return value;
+  if (unit === 'kg') return value * GRAMS_PER_KG;
+  if (unit === 'lb') return value * GRAMS_PER_LB;
+  if (unit === 'tonne') return value * GRAMS_PER_TONNE;
+  if (unit === 'short_ton') return value * GRAMS_PER_SHORT_TON;
+  if (unit === 'long_ton') return value * GRAMS_PER_LONG_TON;
+  if (unit === 'toz') return value * GRAMS_PER_TOZ;
   return null;
+}
+
+function standardPayableQuantity(
+  metal: Tier1Metal,
+  quantityUnit: string | undefined,
+  value: number,
+): { value: number; unit: 'toz' | 'tonne' } | null {
+  if (!quantityUnit) return null;
+  const grams = payableQuantityInGrams(value, quantityUnit);
+  if (!finite(grams) || grams < 0) return null;
+  if (metal === 'Au' || metal === 'Ag' || metal === 'Pt' || metal === 'Pd') {
+    return { value: grams / GRAMS_PER_TOZ, unit: 'toz' };
+  }
+  return { value: grams / GRAMS_PER_TONNE, unit: 'tonne' };
 }
 
 function combinedScaleEquivalent(averages: Partial<Record<Tier1Metal, number>>): number {
@@ -317,15 +340,19 @@ export default async function handler(req: any, res: any): Promise<void> {
       const physicalInput = parsed.engineInputWithoutPrices;
       const yearsByPeriod = physicalInput.yearsByPeriod;
 
-      // Physical mine-plan gates never depend on the report deck or current prices.
+      // Physical mine-plan gates use physical payable quantities and their
+      // declared quantity units. Price keys must never determine scale units.
       for (const [metal, qtySeries] of Object.entries(physicalInput.payableQtyByMetal)) {
-        const priceKey = physicalInput.priceKeyByMetal[metal];
-        if (!priceKey) continue;
+        if (!isTier1Metal(metal)) continue;
+        const qtyUnit = physicalInput.payableQtyUnitByMetal[metal];
         for (let t = 0; t < qtySeries.length; t += 1) {
           const qty = qtySeries[t];
           if (!finite(qty) || qty <= 0) continue;
-          const standard = standardPayableQuantity(priceKey, qty);
-          if (!standard) continue;
+          const standard = standardPayableQuantity(metal, qtyUnit, qty);
+          if (!standard) {
+            diagnostics.push(`${project.projectId}: payable-enheten ${qtyUnit ?? 'saknas'} kan inte konverteras för ${metal}.`);
+            continue;
+          }
           const existingUnit = quantityUnitByMetal.get(metal);
           if (existingUnit && existingUnit !== standard.unit) {
             diagnostics.push(`${project.projectId}: inkonsekventa kanoniska payable-enheter för ${metal}.`);
