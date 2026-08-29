@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   deleteCompanyProject,
   getCompanyProject,
-  listCompanyProjects,
+  listAllCompanyProjects,
   upsertCompanyProject,
   type CompanyProjectSummary,
 } from '../lib/client/companyProjectsClient.ts';
@@ -58,7 +58,6 @@ function stripPeriodEndDatesForV2(root: Record<string, unknown>): Record<string,
   }
   return clone;
 }
-
 
 function validateProjectJson(rawJson: string): ValidationState {
   let parsed: unknown;
@@ -159,6 +158,12 @@ export default function CompanyProjectsEditorPage() {
     }
     return readRootTime(parsedValidation.parsed);
   }, [parsedValidation]);
+  const projectDisabled = useMemo(() => {
+    if (!parsedValidation.ok || !parsedValidation.parsed) return false;
+    const meta = parsedValidation.parsed.meta;
+    return typeof meta === 'object' && meta !== null && !Array.isArray(meta)
+      && (meta as Record<string, unknown>).disabled === true;
+  }, [parsedValidation]);
   const productionStartPeriodValue = useMemo(
     () => (Number.isInteger(parsedTime?.productionStartPeriod) ? String(parsedTime?.productionStartPeriod) : ''),
     [parsedTime],
@@ -239,6 +244,32 @@ export default function CompanyProjectsEditorPage() {
     setEditorError(null);
   }
 
+  function handleProjectDisabledToggle(checked: boolean): void {
+    if (!parsedValidation.ok || !parsedValidation.parsed) {
+      setEditorError(parsedValidation.error ?? 'Fix JSON validation errors before changing project status.');
+      return;
+    }
+
+    const nextRoot = JSON.parse(JSON.stringify(parsedValidation.parsed)) as Record<string, unknown>;
+    const existingMeta = nextRoot.meta;
+    const meta = typeof existingMeta === 'object' && existingMeta !== null && !Array.isArray(existingMeta)
+      ? existingMeta as Record<string, unknown>
+      : {};
+
+    if (checked) {
+      meta.disabled = true;
+    } else {
+      delete meta.disabled;
+    }
+    nextRoot.meta = meta;
+
+    setRawJsonInput(JSON.stringify(stripPeriodEndDatesForV2(nextRoot), null, 2));
+    setEditorError(null);
+    setEditorInfo(checked
+      ? 'Projektet är markerat som inaktiverat. Spara för att utesluta det från Corporate och Compare Stocks.'
+      : 'Projektet är markerat som aktivt. Spara för att inkludera det i Corporate och Compare Stocks.');
+  }
+
   function handleAlreadyProducingToggle(checked: boolean): void {
     if (checked) {
       const currentPeriod = Number.isInteger(parsedTime?.productionStartPeriod)
@@ -270,7 +301,7 @@ export default function CompanyProjectsEditorPage() {
     setLoadingList(true);
     setListError(null);
     try {
-      const data = await listCompanyProjects(symbol);
+      const data = await listAllCompanyProjects(symbol);
       setProjects(data);
       if (nextSelectedProjectId) {
         setSelectedProjectId(nextSelectedProjectId);
@@ -461,9 +492,6 @@ export default function CompanyProjectsEditorPage() {
     setEditorInfo('Reset to last saved JSON.');
   }
 
-
-
-
   function handleConvertV1ToV2(): void {
     let parsed: unknown;
     try {
@@ -557,7 +585,7 @@ export default function CompanyProjectsEditorPage() {
                 <div>
                   <strong>{project.project_id}</strong>
                   <div>{project.project_name || '—'}</div>
-                  <small>{project.updated_at_utc}</small>
+                  <small>{project.disabled ? 'Inaktiverat · ' : ''}{project.updated_at_utc}</small>
                 </div>
                 <div className="project-row-actions">
                   <button type="button" onClick={() => void loadExistingProject(project.project_id)}>Edit</button>
@@ -589,6 +617,18 @@ export default function CompanyProjectsEditorPage() {
               <span>project_name</span>
               <input type="text" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} />
             </label>
+            <div className="checkbox-field">
+              <span>Project usage</span>
+              <label className="checkbox-inline">
+                <input
+                  type="checkbox"
+                  checked={projectDisabled}
+                  onChange={(event) => handleProjectDisabledToggle(event.target.checked)}
+                />
+                <span>Inaktivera projekt</span>
+              </label>
+              <small>Projektet finns kvar i editorn men används inte i Corporate eller Compare Stocks.</small>
+            </div>
             <div className="checkbox-field">
               <span>Production status</span>
               <label className="checkbox-inline">
@@ -637,8 +677,6 @@ export default function CompanyProjectsEditorPage() {
               />
             </label>
           </div>
-
-          
 
           <div className="scenario-shift-controls">
             <h3>Scenario: förskjut produktion framåt</h3>
