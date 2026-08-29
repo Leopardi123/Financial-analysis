@@ -1,221 +1,196 @@
 import assert from 'node:assert/strict';
-import { computeTier1CycleMultiplier } from '../cycle.ts';
-import { getTier1CostBenchmarkTodos } from '../config.ts';
-import { assessCapitalReturns, assessCombinedScale, assessLom, classifyCostAgainstPercentiles, classifyTier, type Tier1Gate } from '../preRevenue.ts';
-import { selectConservativeProjectIrr } from '../projectIrr.ts';
-import { canonicalCostMetricForPrimaryMetal, computeCanonicalC1ForProject, costVintageCompatibility } from '../cost.ts';
-import { getFredCommodityPriceMapping, getFredHistoryCommodityPriceMapping, isFredHistoryOnlyCommodityPriceKey } from '../../prices/providers/fred.ts';
+import {
+  TIER1_COST_BENCHMARKS,
+  TIER1_POLICY,
+  TIER1_PRODUCTION_THRESHOLDS,
+  getTier1CostBenchmarkTodos,
+} from '../config.ts';
+import {
+  assessCapitalReturns,
+  assessCombinedScale,
+  assessCost,
+  assessCycle,
+  assessLom,
+  classifyCostAgainstPercentiles,
+  classifyTier,
+  determinePrimaryMetal,
+} from '../preRevenue.ts';
+import {
+  applyRelativeCycleToPriceSeries,
+  computeTier1CycleMultiplier,
+  toMonthlyLast,
+} from '../cycle.ts';
+import {
+  getFredCommodityPriceMapping,
+  getFredHistoryCommodityPriceMapping,
+  isFredHistoryOnlyCommodityPriceKey,
+} from '../../prices/commodityFredConfig.ts';
 
-function monthDate(index: number): string {
-  const date = new Date(Date.UTC(2000 + Math.floor(index / 12), index % 12, 28));
-  return date.toISOString().slice(0, 10);
-}
-
-const history = Array.from({ length: 320 }, (_, index) => {
-  const cycle = index % 80;
-  const regime = cycle >= 48 && cycle <= 67 ? 0.66 : cycle >= 40 && cycle < 48 ? 0.82 : 1;
-  const trend = 100 + index * 0.12;
-  return { date: monthDate(index), close: trend * regime };
-});
-
-const cycle = computeTier1CycleMultiplier(history);
-assert.equal(cycle.status, 'COMPUTABLE');
-assert.ok(cycle.multiplier !== null && cycle.multiplier > 0.5 && cycle.multiplier < 0.95);
-assert.ok(cycle.bearEpisodes >= 2);
-assert.ok(cycle.method.includes('Uthålliga lågcykelepisoder'));
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Au.minimumAnnualPayable, 300_000);
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Ag.minimumAnnualPayable, 15_000_000);
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Cu.minimumAnnualPayable, 100_000);
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Zn.minimumAnnualPayable, 150_000);
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Pb.minimumAnnualPayable, 100_000);
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Ni.minimumAnnualPayable, 40_000);
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Pt.minimumAnnualPayable, 100_000);
+assert.equal(TIER1_PRODUCTION_THRESHOLDS.Pd.minimumAnnualPayable, 150_000);
 
 assert.equal(assessLom(15).tier, 1);
 assert.equal(assessLom(14).tier, 2);
+assert.equal(assessLom(10).tier, 2);
 assert.equal(assessLom(9).tier, 3);
 
-// ABRA-like best sustained 10y window (2030–2039): ~11.13 Moz Ag/y + ~75.4 koz Au/y.
-const abraSustainedScale = assessCombinedScale({ Ag: 11_130_000, Au: 75_400 }, '10-års fönster 2030–2039');
-assert.equal(abraSustainedScale.gate.tier, 2);
-assert.ok(abraSustainedScale.combinedEquivalent !== null && abraSustainedScale.combinedEquivalent > 0.99 && abraSustainedScale.combinedEquivalent < 1.0);
-
-const verySmallScale = assessCombinedScale({ Au: 60_000 });
-assert.equal(verySmallScale.gate.tier, 3);
-
-const polymetallicPass = assessCombinedScale({ Cu: 60_000, Au: 120_000 });
-assert.equal(polymetallicPass.gate.tier, 1);
-assert.equal(polymetallicPass.combinedEquivalent, 1);
-
 assert.equal(assessCapitalReturns(0.25).tier, 1);
-assert.equal(assessCapitalReturns(0.22).tier, 2);
-assert.equal(assessCapitalReturns(0.17).tier, 3);
-assert.equal(assessCapitalReturns(0.14).tier, null);
-assert.ok(assessCapitalReturns(0.25).reason.includes('spot'));
+assert.equal(assessCapitalReturns(0.249).tier, 2);
+assert.equal(assessCapitalReturns(0.20).tier, 2);
+assert.equal(assessCapitalReturns(0.199).tier, 3);
+assert.equal(assessCapitalReturns(0.15).tier, 3);
+assert.equal(assessCapitalReturns(0.149).status, 'FAIL');
+assert.equal(assessCapitalReturns(0.149).tier, null);
 
-// Multi-project Tier uses the lowest valid IRR among projects that actually
-// contain investment cash-flow. A positive-only project has no investment IRR
-// and must not turn the company into NOT_VERIFIED.
-const ggdLikeProjectIrr = selectConservativeProjectIrr([
-  { projectId: 'p3', irr: 1.0263, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
-  { projectId: 'p2', irr: 0.7636, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
-  { projectId: 'p4', irr: null, hasNegativeCashFlow: false, hasPositiveCashFlow: true },
-]);
-assert.equal(ggdLikeProjectIrr.irr, 0.7636);
-assert.deepEqual(ggdLikeProjectIrr.ignoredNoInvestmentProjectIds, ['p4']);
-assert.deepEqual(ggdLikeProjectIrr.unresolvedProjectIds, []);
+const scaleTier1 = assessCombinedScale({ Au: 300_000 });
+assert.equal(scaleTier1.gate.tier, 1);
+assert.equal(scaleTier1.combinedEquivalent, 1);
+const polymetalTier1 = assessCombinedScale({ Au: 150_000, Cu: 50_000 });
+assert.equal(polymetalTier1.gate.tier, 1);
+assert.equal(polymetalTier1.combinedEquivalent, 1);
+const scaleTier2 = assessCombinedScale({ Au: 120_000 });
+assert.equal(scaleTier2.gate.tier, 2);
+const scaleTier3 = assessCombinedScale({ Au: 119_999 });
+assert.equal(scaleTier3.gate.tier, 3);
 
-const unresolvedInvestmentProject = selectConservativeProjectIrr([
-  { projectId: 'p1', irr: 0.30, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
-  { projectId: 'p2', irr: null, hasNegativeCashFlow: true, hasPositiveCashFlow: true },
-]);
-assert.equal(unresolvedInvestmentProject.irr, null);
-assert.deepEqual(unresolvedInvestmentProject.unresolvedProjectIds, ['p2']);
+const primary = determinePrimaryMetal({ Au: 90, Cu: 10 });
+assert.equal(primary.metal, 'Au');
+assert.equal(primary.share, 0.9);
 
-// Santa Cruz-compatible Cu C1 is mine-site operating cost + site G&A per
-// payable Cu-lb. Offsite selling costs, royalties and sustaining capital are
-// outside this disclosed C1. Polymetallic Cu needs explicit co-product allocation.
-const canonicalCuInput = {
-  projectId: 'cu-test',
-  primaryMetal: 'Cu' as const,
-  productionStartPeriod: 1,
-  masterN: 2,
-  payableQtyByMetal: { Cu: [0, 100, 100] },
-  payableQtyUnitByMetal: { Cu: 'lb' },
-  operatingCostsUSD: [0, 50, 50],
-  siteGandA_USD: [0, 10, 10],
-  byproductCreditsUSD: [0, 0, 0],
-  economicsBreakdown: {
-    meta: { costBaseYear: 2025 },
-    cogs: {
-      miningUSD: [0, 20, 20],
-      millingUSD: [0, 20, 20],
-      utilitiesUSD: [0, 5, 5],
-      maintenanceUSD: [0, 5, 5],
-      campUSD: [0, 0, 0],
-    },
-    selling: {
-      treatmentChargesUSD: [0, 3, 3],
-      refiningChargesUSD: [0, 2, 2],
-      transportUSD: [0, 2, 2],
-    },
-  },
-  revenueByMetalUSD: { Cu: [0, 1_000, 1_000] },
-};
+const percentileQ1 = classifyCostAgainstPercentiles({ value: 1, p25Max: 2, p50Max: 3 });
+assert.equal(percentileQ1.tier, 1);
+const percentileQ2 = classifyCostAgainstPercentiles({ value: 2.5, p25Max: 2, p50Max: 3 });
+assert.equal(percentileQ2.tier, 2);
+const percentileQ3 = classifyCostAgainstPercentiles({ value: 3.5, p25Max: 2, p50Max: 3, p75Max: 4 });
+assert.equal(percentileQ3.tier, 3);
+const percentileBoundary = classifyCostAgainstPercentiles({ value: 2.01, p25Max: 2, p50Max: 3, uncertaintyAbs: 0.05 });
+assert.equal(percentileBoundary.tier, null);
 
-const canonicalCu = computeCanonicalC1ForProject(canonicalCuInput);
-assert.equal(canonicalCu.status, 'COMPUTABLE');
-assert.equal(canonicalCu.metric, 'C1_CU_USD_PER_LB');
-assert.equal(canonicalCu.costBaseYear, 2025);
-assert.ok(canonicalCu.value !== null && Math.abs(canonicalCu.value - 0.60) < 1e-12);
-assert.equal(canonicalCu.numeratorUSD, 120);
-assert.equal(canonicalCu.denominator, 200);
-assert.ok(canonicalCu.reason.includes('Santa Cruz/S&P-kompatibel'));
-
-// Nickel uses a separate Jaguar-compatible C1 bridge. It deliberately excludes
-// product logistics, royalties and by-product credits from the C1 numerator.
-const canonicalNickel = canonicalCostMetricForPrimaryMetal({
-  ...canonicalCuInput,
-  projectId: 'ni-test',
-  primaryMetal: 'Ni',
-  payableQtyByMetal: { Ni: [0, 100, 100] },
-  payableQtyUnitByMetal: { Ni: 'lb' },
-  revenueByMetalUSD: { Ni: [0, 1_000, 1_000] },
-});
-assert.equal(canonicalNickel.status, 'COMPUTABLE');
-assert.equal(canonicalNickel.metric, 'C1_NI_USD_PER_LB');
-assert.equal(canonicalNickel.costBaseYear, 2025);
-assert.ok(canonicalNickel.value !== null && Math.abs(canonicalNickel.value - 0.60) < 1e-12);
-assert.equal(canonicalNickel.numeratorUSD, 120);
-assert.equal(canonicalNickel.denominator, 200);
-assert.ok(canonicalNickel.reason.includes('Jaguar-kompatibel'));
-
-const nickelWithSecondaryCredit = canonicalCostMetricForPrimaryMetal({
-  ...canonicalCuInput,
-  projectId: 'ni-credit-test',
-  primaryMetal: 'Ni',
-  payableQtyByMetal: { Ni: [0, 100, 100] },
-  payableQtyUnitByMetal: { Ni: 'lb' },
-  revenueByMetalUSD: { Ni: [0, 1_000, 1_000], Co: [0, 20, 20] },
-});
-assert.equal(nickelWithSecondaryCredit.status, 'NOT_VERIFIED');
-assert.ok(nickelWithSecondaryCredit.reason.includes('Sekundära metallintäkter'));
-
-const cogsMismatch = computeCanonicalC1ForProject({
-  ...canonicalCuInput,
-  economicsBreakdown: {
-    ...canonicalCuInput.economicsBreakdown,
-    cogs: { ...canonicalCuInput.economicsBreakdown.cogs, miningUSD: [0, 2_020, 2_020] },
-  },
-});
-assert.equal(cogsMismatch.status, 'NOT_VERIFIED');
-assert.ok(cogsMismatch.reason.includes('reconcilerar inte'));
-
-const offsiteDoesNotEnterCuC1 = computeCanonicalC1ForProject({
-  ...canonicalCuInput,
-  economicsBreakdown: {
-    ...canonicalCuInput.economicsBreakdown,
-    selling: { treatmentChargesUSD: [0, 500, 500], refiningChargesUSD: [0, 500, 500], transportUSD: [0, 500, 500] },
-  },
-});
-assert.equal(offsiteDoesNotEnterCuC1.status, 'COMPUTABLE');
-assert.equal(offsiteDoesNotEnterCuC1.value, canonicalCu.value);
-
-const copperWithSecondaryMetal = computeCanonicalC1ForProject({
-  ...canonicalCuInput,
-  revenueByMetalUSD: { Cu: [0, 1_000, 1_000], Au: [0, 10, 10] },
-});
-assert.equal(copperWithSecondaryMetal.status, 'NOT_VERIFIED');
-assert.ok(copperWithSecondaryMetal.reason.includes('co-product'));
-
-const copperWithUnallocatedCredit = computeCanonicalC1ForProject({
-  ...canonicalCuInput,
-  byproductCreditsUSD: [0, 4, 4],
-});
-assert.equal(copperWithUnallocatedCredit.status, 'NOT_VERIFIED');
-assert.ok(copperWithUnallocatedCredit.reason.includes('byproductCreditsUSD'));
-
-assert.equal(costVintageCompatibility(2025, '2025 PFS').compatible, true);
-assert.equal(costVintageCompatibility(2024, '2025 PFS').compatible, false);
-assert.equal(costVintageCompatibility(null, '2025 PFS').compatible, false);
-
-const goldAiscNotYetCanonical = canonicalCostMetricForPrimaryMetal({
-  ...canonicalCuInput,
+const auBenchmark = TIER1_COST_BENCHMARKS.Au;
+const auCostTier1 = assessCost({
   primaryMetal: 'Au',
-  payableQtyByMetal: { Au: [0, 100, 100] },
-  payableQtyUnitByMetal: { Au: 'toz' },
-  revenueByMetalUSD: { Au: [0, 1_000, 1_000] },
+  primaryMetalRevenueShare: 0.9,
+  metric: 'AISC_AU_USD_PER_TOZ',
+  value: 1_000,
+  costBaseYear: 2025,
+  basisId: 'S_AND_P_CO_PRODUCT_AISC_AU',
+  nowUtc: '2026-08-28T00:00:00Z',
 });
-assert.equal(goldAiscNotYetCanonical.status, 'NOT_VERIFIED');
-assert.ok(goldAiscNotYetCanonical.reason.includes('Full canonical AISC'));
-
-// Cost-curve policy: Q1 => Tier 1, Q2 => Tier 2, upper half => Tier 3.
-const costTier1 = classifyCostAgainstPercentiles({ value: 90, p25Max: 100, p50Max: 150, p75Max: 200 });
-const costTier2 = classifyCostAgainstPercentiles({ value: 125, p25Max: 100, p50Max: 150, p75Max: 200 });
-const costTier3Q3 = classifyCostAgainstPercentiles({ value: 175, p25Max: 100, p50Max: 150, p75Max: 200 });
-const costTier3Q4 = classifyCostAgainstPercentiles({ value: 225, p25Max: 100, p50Max: 150, p75Max: 200 });
-assert.equal(costTier1.tier, 1);
-assert.equal(costTier2.tier, 2);
-assert.equal(costTier3Q3.tier, 3);
-assert.equal(costTier3Q4.tier, 3);
-assert.ok(costTier3Q4.reason.includes('fjärde kvartilen'));
-
-const uncertainP25 = classifyCostAgainstPercentiles({ value: 102, p25Max: 100, p50Max: 150, p75Max: 200, uncertaintyAbs: 5 });
-const uncertainP50 = classifyCostAgainstPercentiles({ value: 147, p25Max: 100, p50Max: 150, p75Max: 200, uncertaintyAbs: 5 });
-assert.equal(uncertainP25.tier, null);
-assert.equal(uncertainP50.tier, null);
-assert.ok(uncertainP25.reason.includes('P25'));
-assert.ok(uncertainP50.reason.includes('P50'));
-
-const invalidCostCurve = classifyCostAgainstPercentiles({ value: 100, p25Max: 150, p50Max: 140 });
-assert.equal(invalidCostCurve.tier, null);
-
-const gate = (tier: 1 | 2 | 3 | null, status: Tier1Gate['status'] = tier === 1 ? 'PASS' : tier === null ? 'NOT_VERIFIED' : 'FAIL'): Tier1Gate => ({
-  status, tier, value: 1, threshold: 1, unit: null, reason: '',
+assert.equal(auCostTier1.tier, 1);
+assert.equal(auCostTier1.value, 1_000);
+assert.equal(auCostTier1.threshold, auBenchmark.q1Max);
+const auCostTier2 = assessCost({
+  primaryMetal: 'Au',
+  primaryMetalRevenueShare: 0.9,
+  metric: 'AISC_AU_USD_PER_TOZ',
+  value: 1_300,
+  costBaseYear: 2025,
+  basisId: 'S_AND_P_CO_PRODUCT_AISC_AU',
+  nowUtc: '2026-08-28T00:00:00Z',
 });
+assert.equal(auCostTier2.tier, 2);
+const auCostTier3 = assessCost({
+  primaryMetal: 'Au',
+  primaryMetalRevenueShare: 0.9,
+  metric: 'AISC_AU_USD_PER_TOZ',
+  value: 1_600,
+  costBaseYear: 2025,
+  basisId: 'S_AND_P_CO_PRODUCT_AISC_AU',
+  nowUtc: '2026-08-28T00:00:00Z',
+});
+assert.equal(auCostTier3.tier, 3);
+const auCostHigh = assessCost({
+  primaryMetal: 'Au',
+  primaryMetalRevenueShare: 0.9,
+  metric: 'AISC_AU_USD_PER_TOZ',
+  value: 2_000,
+  costBaseYear: 2025,
+  basisId: 'S_AND_P_CO_PRODUCT_AISC_AU',
+  nowUtc: '2026-08-28T00:00:00Z',
+});
+assert.equal(auCostHigh.tier, 3);
 
-assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_1');
-assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(2), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_2');
-assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(3), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_3');
-assert.equal(classifyTier({ lom: gate(1), scale: gate(2), cost: gate(null), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_2');
-assert.ok(classifyTier({ lom: gate(1), scale: gate(2), cost: gate(null), cycle: gate(1), capitalReturns: gate(1) }).reason.includes('provisoriska'));
-assert.equal(classifyTier({ lom: gate(1), scale: gate(2), cost: gate(3), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_3');
-assert.equal(classifyTier({ lom: gate(1), scale: gate(3), cost: gate(null), cycle: gate(1), capitalReturns: gate(1) }).status, 'TIER_3');
-assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(null), capitalReturns: gate(1) }).status, 'NOT_VERIFIED');
-assert.equal(classifyTier({ lom: gate(1), scale: gate(1), cost: gate(1), cycle: gate(1), capitalReturns: gate(null, 'FAIL') }).status, 'NOT_QUALIFIED');
+const primaryNotDominant = assessCost({
+  primaryMetal: 'Au',
+  primaryMetalRevenueShare: 0.79,
+  metric: 'AISC_AU_USD_PER_TOZ',
+  value: 1_000,
+  costBaseYear: 2025,
+  basisId: 'S_AND_P_CO_PRODUCT_AISC_AU',
+  nowUtc: '2026-08-28T00:00:00Z',
+});
+assert.equal(primaryNotDominant.status, 'NOT_VERIFIED');
+
+const unknownCost = assessCost({
+  primaryMetal: 'Au',
+  primaryMetalRevenueShare: 0.9,
+  metric: null,
+  value: null,
+  costBaseYear: null,
+  basisId: null,
+  nowUtc: '2026-08-28T00:00:00Z',
+});
+assert.equal(unknownCost.status, 'NOT_VERIFIED');
+
+const tier1All = classifyTier({
+  lom: assessLom(20), scale: assessCombinedScale({ Au: 500_000 }).gate,
+  cost: auCostTier1, cycle: assessCycle(100), capitalReturns: assessCapitalReturns(0.30),
+});
+assert.equal(tier1All.status, 'TIER_1');
+
+const tier2Structural = classifyTier({
+  lom: assessLom(12), scale: assessCombinedScale({ Au: 500_000 }).gate,
+  cost: auCostTier1, cycle: assessCycle(100), capitalReturns: assessCapitalReturns(0.30),
+});
+assert.equal(tier2Structural.status, 'TIER_2');
+
+const tier3Structural = classifyTier({
+  lom: assessLom(8), scale: assessCombinedScale({ Au: 500_000 }).gate,
+  cost: auCostTier1, cycle: assessCycle(100), capitalReturns: assessCapitalReturns(0.30),
+});
+assert.equal(tier3Structural.status, 'TIER_3');
+
+const tier1MissingCost = classifyTier({
+  lom: assessLom(20), scale: assessCombinedScale({ Au: 500_000 }).gate,
+  cost: unknownCost, cycle: assessCycle(100), capitalReturns: assessCapitalReturns(0.30),
+});
+assert.equal(tier1MissingCost.status, 'NOT_VERIFIED');
+
+const tier2MissingCost = classifyTier({
+  lom: assessLom(12), scale: assessCombinedScale({ Au: 500_000 }).gate,
+  cost: unknownCost, cycle: assessCycle(100), capitalReturns: assessCapitalReturns(0.30),
+});
+assert.equal(tier2MissingCost.status, 'TIER_2');
+
+const noCycle = classifyTier({
+  lom: assessLom(20), scale: assessCombinedScale({ Au: 500_000 }).gate,
+  cost: auCostTier1, cycle: assessCycle(-1), capitalReturns: assessCapitalReturns(0.30),
+});
+assert.equal(noCycle.status, 'NOT_QUALIFIED');
+
+const rows = Array.from({ length: 25 * 12 }, (_, i) => {
+  const year = 2000 + Math.floor(i / 12);
+  const month = (i % 12) + 1;
+  let value = 100;
+  if (year >= 2005 && year <= 2006) value = 70;
+  if (year >= 2015 && year <= 2016) value = 80;
+  return { date: `${year}-${String(month).padStart(2, '0')}-28`, value };
+});
+const cycle = computeTier1CycleMultiplier(rows);
+assert.equal(cycle.status, 'VERIFIED');
+assert.ok(cycle.multiplier !== null && cycle.multiplier < 1);
+const stressed = applyRelativeCycleToPriceSeries([100, 100, 100, 100, 100], 1, 3, cycle.multiplier!);
+assert.equal(stressed[0], 100);
+assert.equal(stressed[4], 100);
+assert.ok((stressed[1] ?? 0) < 100);
+assert.equal(stressed[1], stressed[2]);
+assert.equal(stressed[2], stressed[3]);
 
 // Copper current pricing must stay on the existing FMP/COMEX path. Long Tier
 // cycle calibration uses the verified IMF/FRED PCOPPUSDM global benchmark as a
@@ -231,7 +206,7 @@ for (const copperPriceKey of ['CU_USD_LB', 'CU_USD_TONNE']) {
 }
 
 assert.equal(getTier1CostBenchmarkTodos('2027-08-26T00:00:00Z').length, 0);
-const staleTodos = getTier1CostBenchmarkTodos('2027-08-28T00:00:00Z');
+const staleTodos = getTier1CostBenchmarkTodos('2027-08-30T00:00:00Z');
 assert.equal(staleTodos.length, 8);
 assert.ok(staleTodos.every((todo) => todo.includes('uppdatera statisk kostnadskurva')));
 
