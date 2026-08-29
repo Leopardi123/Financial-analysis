@@ -158,12 +158,6 @@ export default function CompanyProjectsEditorPage() {
     }
     return readRootTime(parsedValidation.parsed);
   }, [parsedValidation]);
-  const projectDisabled = useMemo(() => {
-    if (!parsedValidation.ok || !parsedValidation.parsed) return false;
-    const meta = parsedValidation.parsed.meta;
-    return typeof meta === 'object' && meta !== null && !Array.isArray(meta)
-      && (meta as Record<string, unknown>).disabled === true;
-  }, [parsedValidation]);
   const productionStartPeriodValue = useMemo(
     () => (Number.isInteger(parsedTime?.productionStartPeriod) ? String(parsedTime?.productionStartPeriod) : ''),
     [parsedTime],
@@ -242,32 +236,6 @@ export default function CompanyProjectsEditorPage() {
     time.productionStartYear = year;
     setRawJsonInput(JSON.stringify(stripPeriodEndDatesForV2(nextRoot), null, 2));
     setEditorError(null);
-  }
-
-  function handleProjectDisabledToggle(checked: boolean): void {
-    if (!parsedValidation.ok || !parsedValidation.parsed) {
-      setEditorError(parsedValidation.error ?? 'Fix JSON validation errors before changing project status.');
-      return;
-    }
-
-    const nextRoot = JSON.parse(JSON.stringify(parsedValidation.parsed)) as Record<string, unknown>;
-    const existingMeta = nextRoot.meta;
-    const meta = typeof existingMeta === 'object' && existingMeta !== null && !Array.isArray(existingMeta)
-      ? existingMeta as Record<string, unknown>
-      : {};
-
-    if (checked) {
-      meta.disabled = true;
-    } else {
-      delete meta.disabled;
-    }
-    nextRoot.meta = meta;
-
-    setRawJsonInput(JSON.stringify(stripPeriodEndDatesForV2(nextRoot), null, 2));
-    setEditorError(null);
-    setEditorInfo(checked
-      ? 'Projektet är markerat som inaktiverat. Spara för att utesluta det från Corporate och Compare Stocks.'
-      : 'Projektet är markerat som aktivt. Spara för att inkludera det i Corporate och Compare Stocks.');
   }
 
   function handleAlreadyProducingToggle(checked: boolean): void {
@@ -459,6 +427,61 @@ export default function CompanyProjectsEditorPage() {
     }
   }
 
+  async function handleSetProjectDisabled(project: CompanyProjectSummary, disabled: boolean): Promise<void> {
+    if (!symbol) return;
+
+    if (
+      selectedProjectId === project.project_id
+      && savedRawJson !== null
+      && rawJsonInput !== savedRawJson
+    ) {
+      setEditorError('Projektet har osparade ändringar. Spara eller återställ innan status ändras.');
+      return;
+    }
+
+    try {
+      const stored = await getCompanyProject(symbol, project.project_id);
+      const raw = JSON.parse(JSON.stringify(stored.raw_json)) as Record<string, unknown>;
+      const existingMeta = raw.meta;
+      const meta = typeof existingMeta === 'object' && existingMeta !== null && !Array.isArray(existingMeta)
+        ? existingMeta as Record<string, unknown>
+        : {};
+
+      if (disabled) {
+        meta.disabled = true;
+        raw.meta = meta;
+      } else {
+        delete meta.disabled;
+        if (Object.keys(meta).length > 0) {
+          raw.meta = meta;
+        } else {
+          delete raw.meta;
+        }
+      }
+
+      const result = await upsertCompanyProject({
+        symbol,
+        project_id: stored.project_id,
+        project_name: stored.project_name,
+        raw_json: stripPeriodEndDatesForV2(raw),
+      });
+
+      setEditorError(null);
+      setEditorInfo(disabled ? `Inaktiverade ${project.project_id}.` : `Aktiverade ${project.project_id}.`);
+
+      if (selectedProjectId === project.project_id && !isNewDraft) {
+        const pretty = JSON.stringify(stripPeriodEndDatesForV2(raw), null, 2);
+        setRawJsonInput(pretty);
+        setSavedRawJson(pretty);
+        setLastSavedAtUtc(result.updated_at_utc);
+      }
+
+      await refreshList(project.project_id);
+    } catch (error) {
+      setEditorError((error as Error).message);
+    }
+  }
+
   async function handleDelete(projectId: string): Promise<void> {
     if (!symbol) return;
     const confirmed = window.confirm(`Delete project "${projectId}" for ${symbol}?`);
@@ -589,6 +612,9 @@ export default function CompanyProjectsEditorPage() {
                 </div>
                 <div className="project-row-actions">
                   <button type="button" onClick={() => void loadExistingProject(project.project_id)}>Edit</button>
+                  <button type="button" onClick={() => void handleSetProjectDisabled(project, !project.disabled)}>
+                    {project.disabled ? 'Aktivera' : 'Inaktivera'}
+                  </button>
                   <button type="button" className="danger" onClick={() => void handleDelete(project.project_id)}>Delete</button>
                 </div>
               </li>
@@ -617,18 +643,6 @@ export default function CompanyProjectsEditorPage() {
               <span>project_name</span>
               <input type="text" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} />
             </label>
-            <div className="checkbox-field">
-              <span>Project usage</span>
-              <label className="checkbox-inline">
-                <input
-                  type="checkbox"
-                  checked={projectDisabled}
-                  onChange={(event) => handleProjectDisabledToggle(event.target.checked)}
-                />
-                <span>Inaktivera projekt</span>
-              </label>
-              <small>Projektet finns kvar i editorn men används inte i Corporate eller Compare Stocks.</small>
-            </div>
             <div className="checkbox-field">
               <span>Production status</span>
               <label className="checkbox-inline">
