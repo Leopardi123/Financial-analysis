@@ -66,19 +66,14 @@ export type Tier1CostBenchmark = {
   /** False means the cited source is retained as evidence but may not classify Tier cost. */
   comparisonEnabled: boolean;
   benchmarkKind: Tier1CostBenchmarkKind;
-  /**
-   * Maximum cost for the first quartile / P25 boundary when verified. Null is
-   * required when the curve is identified but the boundary itself has not yet
-   * been extracted/verified; never substitute a peer asset or zero.
-   */
+  /** Maximum cost for the first quartile / P25 boundary when available. */
   q1Max: number | null;
-  /** P50 and P75 cost-curve boundaries. Null until definition-compatible values are verified. */
+  /** P50 and P75 cost-curve boundaries. */
   p50Max: number | null;
   p75Max: number | null;
   /**
-   * Absolute uncertainty around digitised percentile boundaries in benchmark
-   * units. Published exact values use 0. A project inside an uncertainty band
-   * must remain NOT_VERIFIED rather than being forced across a boundary.
+   * Absolute read-off uncertainty for digitised boundaries. It is disclosed as
+   * diagnostic context; best-estimate boundaries remain usable for Tier.
    */
   boundaryUncertaintyAbs: number;
   unit: 'USD/toz' | 'USD/lb';
@@ -111,8 +106,8 @@ export const TIER1_PRODUCTION_THRESHOLDS: Record<Tier1Metal, Tier1ProductionThre
 
 /**
  * Preferred/current benchmark per metal. Historical exact-year snapshots live
- * in TIER1_COST_BENCHMARK_SNAPSHOTS below. No project cost is inflation-adjusted
- * implicitly to make it fit a different benchmark year.
+ * in TIER1_COST_BENCHMARK_SNAPSHOTS below. Project JSON is not benchmark-shaped;
+ * the benchmark is Tier configuration only.
  */
 export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
   Au: {
@@ -122,15 +117,16 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
     sourceLabel: 'S&P Capital IQ / G2 Goldfields global gold AISC curve',
     sourceUrl: 'https://g2goldfields.com/wp-content/uploads/2026/03/G2-Goldfields-Investor-Presentation-March-2026-Public.pdf',
     sourcePageOrTable: 'slide 27',
-    notes: '2025E global gold AISC curve, co-product basis, mines >25 koz Au. Publicerade kvartilband: Q1 <1 228; Q2 1 228–1 501; Q3 1 501–1 840; Q4 >1 840 USD/oz Au. Gränserna är explicit utskrivna i källan, därför boundaryUncertaintyAbs=0.',
+    notes: '2025E global gold AISC curve, co-product basis, mines >25 koz Au. Publicerade kvartilband: Q1 <1 228; Q2 1 228–1 501; Q3 1 501–1 840; Q4 >1 840 USD/oz Au. Gränserna är explicit utskrivna i källan.',
   },
   Ag: {
-    metal: 'Ag', metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AG', comparisonEnabled: false,
-    benchmarkKind: 'CURVE_IDENTIFIED_NO_BOUNDARIES', q1Max: null, p50Max: null, p75Max: null, boundaryUncertaintyAbs: 0, unit: 'USD/toz',
-    updatedAtUtc: '2026-08-28', dataPeriod: '2024 actual',
-    sourceLabel: 'S&P Global Market Intelligence global co-product silver AISC curve / Sunshine Silver SEC filing',
-    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/2091017/000114036126013160/filename1.htm',
-    notes: 'Global 2024 actual co-product silver AISC curve, excluding Russia and mines below 500 koz Ag. Co-product cost allocation is based on revenue-value split. The public source verifies the curve definition and that Sunshine base-case AISC 18.81 USD/oz is in Q2, but it does not print exact P25/P50/P75 values. Those boundaries therefore remain null and silver Cost Tier is fail-closed until they are independently extracted and assigned an explicit digitisation uncertainty.',
+    metal: 'Ag', metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AG', comparisonEnabled: true,
+    benchmarkKind: 'FULL_QUARTILE_CURVE', q1Max: 14.0, p50Max: 18.5, p75Max: 22.5, boundaryUncertaintyAbs: 0.75, unit: 'USD/toz',
+    updatedAtUtc: '2026-08-29', dataPeriod: '2025',
+    sourceLabel: 'S&P Global modelled data / Pan American Silver 2025 co-product silver AISC cost curve',
+    sourceUrl: 'https://panamericansilver.com/wp-content/uploads/2026/06/PAAS-Investor-Presentation_June_2026_vF.pdf',
+    sourcePageOrTable: 'slide 16, 2025 Cost Curve (100%-basis)',
+    notes: '2025 co-product AISC curve for primary silver mines. Pan American states that Co-Product AISC is S&P Modelled Data and figures are displayed on a co-product basis and calculated by S&P Global. P25≈14.0, P50≈18.5 and P75≈22.5 USD/oz are visual read-offs from the plotted cumulative-paid-silver curve, not published tabular values. boundaryUncertaintyAbs=0.75 USD/oz records read-off uncertainty; the best-estimate boundaries are still used for classification and proximity is disclosed diagnostically.',
   },
   Cu: {
     metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', comparisonEnabled: true,
@@ -140,7 +136,7 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
     sourceUrl: 'https://ivanhoeelectric.com/site/assets/files/10951/sc_pfs_investor_presentation_vfinal_v2.pdf',
     sourcePageOrTable: 'slide 10, First Quartile Unit Cash Costs',
     evidenceUrl: 'https://ivanhoeelectric.com/news/ivanhoe-electrics-preliminary-feasibility-study-for-the-santa-cruz-copper-project-in-arizona-defines-a-high-quality-underground/',
-    notes: 'S&P Global Market Intelligence 2024 actual C1 cash operating cost curve on a co-product basis for global copper mines, excluding processing facilities. P25≈1.40, P50≈1.76 and P75≈2.18 USD/lb are digitised from the plotted curve, not published tabular values; boundaryUncertaintyAbs=0.05 USD/lb prevents classification inside the read-off uncertainty bands. Ivanhoe separately states that Santa Cruz C1 1.32 USD/lb is global first quartile against the Q4 2024 S&P dataset; 1.32 is therefore an independent Q1 sanity check, not the P25 value.',
+    notes: 'S&P Global Market Intelligence 2024 actual C1 cash operating cost curve on a co-product basis for global copper mines, excluding processing facilities. P25≈1.40, P50≈1.76 and P75≈2.18 USD/lb are digitised from the plotted curve, not published tabular values. boundaryUncertaintyAbs=0.05 USD/lb is diagnostic; best-estimate boundaries remain usable. Ivanhoe separately states that Santa Cruz C1 1.32 USD/lb is global first quartile against the Q4 2024 S&P dataset; 1.32 is an independent Q1 sanity check, not the P25 value.',
   },
   Zn: {
     metal: 'Zn', metric: 'AISC_ZNEQ_USD_PER_LB', basisId: 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS', comparisonEnabled: false,
@@ -183,9 +179,7 @@ export const TIER1_COST_BENCHMARKS: Record<Tier1Metal, Tier1CostBenchmark> = {
 };
 
 /**
- * Full Nickel C1 curve retained as a second, definition-locked 2025 snapshot.
- * The preferred Jaguar bridge remains available for projects that report that
- * exact basis; no implicit conversion between the two Ni definitions is made.
+ * Full Nickel C1 curve retained as a second 2025 snapshot.
  */
 export const TIER1_NI_BMI_2025_COST_BENCHMARK: Tier1CostBenchmark = {
   metal: 'Ni',
@@ -203,14 +197,10 @@ export const TIER1_NI_BMI_2025_COST_BENCHMARK: Tier1CostBenchmark = {
   sourceLabel: 'Benchmark Mineral Intelligence Nickel Forecast Q2 2025 / The Metals Company',
   sourceUrl: 'https://investors.metals.co/static-files/f36f6850-3baa-4591-a902-dc3c884391e6',
   sourcePageOrTable: 'slide 17, Nickel C1 Cost Curve 2025',
-  notes: 'BMI-kurvan är korrigerad för payable metal med BMI-metodik och kostnaderna inkluderar by-product sales. P25≈4,95, P50≈6,45 och P75≈6,95 USD/lb är digitaliserade från diagrammet (ungefär 10,9/14,2/15,3 kUSD/t Ni), inte publicerade tabellvärden. boundaryUncertaintyAbs=0,15 USD/lb gör bedömningen fail-closed nära P25/P50. TMC:s markerade 1 065 USD/t C1 har lagts till av TMC och är inte ett BMI-estimat.',
+  notes: 'BMI-kurvan är korrigerad för payable metal med BMI-metodik och kostnaderna inkluderar by-product sales. P25≈4,95, P50≈6,45 och P75≈6,95 USD/lb är digitaliserade från diagrammet (ungefär 10,9/14,2/15,3 kUSD/t Ni), inte publicerade tabellvärden. boundaryUncertaintyAbs=0,15 USD/lb är diagnostisk när best-estimate-gränserna används. TMC:s markerade 1 065 USD/t C1 har lagts till av TMC och är inte ett BMI-estimat.',
 };
 
-/**
- * Exact-year benchmark registry. Add a historical snapshot only when its
- * percentile values, metric, basis and cost year are independently verified.
- * Current entries seed the registry; no synthetic inflation backcasts exist.
- */
+/** Exact-year benchmark registry. */
 export const TIER1_COST_BENCHMARK_SNAPSHOTS: Record<Tier1Metal, Tier1CostBenchmark[]> = {
   Au: [TIER1_COST_BENCHMARKS.Au],
   Ag: [TIER1_COST_BENCHMARKS.Ag],
