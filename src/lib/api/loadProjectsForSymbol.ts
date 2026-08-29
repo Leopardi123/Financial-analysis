@@ -5,6 +5,10 @@ export async function loadProjectsForSymbol(symbol: string): Promise<Array<{ pro
   const loaded: Array<{ projectId: string; rawJson: Record<string, unknown> }> = [];
 
   for (const project of projects) {
+    if (project.disabled) {
+      continue;
+    }
+
     const row = await getCompanyProject(symbol, project.project_id);
     if (!row) {
       continue;
