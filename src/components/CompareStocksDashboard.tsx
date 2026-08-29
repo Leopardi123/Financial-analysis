@@ -162,7 +162,7 @@ function validValuationMarkers(snapshot: SnapshotWithValuationSeries): Valuation
 
 function nextRelevantProjectMarker(snapshot: SnapshotWithValuationSeries, currentYear = new Date().getUTCFullYear()): ValuationMarker | null {
   const markers = validValuationMarkers(snapshot).sort((a, b) => (markerYear(a) ?? Infinity) - (markerYear(b) ?? Infinity));
-  return markers.find((marker) => (markerYear(marker) ?? -Infinity) > currentYear) ?? markers[0] ?? null;
+  return markers.find((marker) => (markerYear(marker) ?? -Infinity) > currentYear) ?? null;
 }
 
 function canonicalMarkerTarget(marker: ValuationMarker | null): number | null {
