@@ -205,6 +205,13 @@ function peakSixTimesValuePerShare(snapshot: SnapshotWithValuationSeries, scale 
   return peak;
 }
 
+function targetCurrencyToUsd(snapshot: SnapshotWithValuationSeries, targetCurrencyValue: number | null): number | null {
+  if (!finite(targetCurrencyValue)) return null;
+  const fx = readFinite(snapshot.fx_USD_to_TargetCurrency);
+  if (!finite(fx) || fx <= 0) return null;
+  return targetCurrencyValue / fx;
+}
+
 function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   const s = row.snapshot;
   if (!s) return '—';
@@ -220,7 +227,8 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   const annualReturn = finite(target) && finite(row.price) && row.price > 0 && finite(yearsToProduction) && yearsToProduction > 0 ? (target / row.price) ** (1 / yearsToProduction) - 1 : null;
   const peak6xPerShare = peakSixTimesValuePerShare(s, scale);
   const peak6xVsPrice = finite(peak6xPerShare) && finite(row.price) && row.price > 0 ? peak6xPerShare / row.price : null;
-  const initialCapexUsd = marker?.lista2Metrics?.InitialCAPEX_incremental_USD ?? null;
+  const initialCapexTargetCurrency = marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null;
+  const initialCapexUsd = targetCurrencyToUsd(s, initialCapexTargetCurrency);
   const sharesPf = postFinancingShares(s, row.manualExtraShares);
 
   switch (key) {
