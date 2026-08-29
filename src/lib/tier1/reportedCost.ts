@@ -39,22 +39,16 @@ function parseRaw(rawJson: unknown): Record<string, unknown> {
 }
 
 /**
- * Optional raw project_json evidence contract:
- * economicsBreakdown.reportedCostMetrics: [
- *   {
- *     metric: 'C1_CU_USD_PER_LB',
- *     basisId: 'S_AND_P_CO_PRODUCT_C1_CU',
- *     value: 1.32,
- *     unit: 'USD/lb',
- *     costBaseYear: 2025,
- *     sourceId: 'santa-cruz-pfs-2025',
- *     pageOrTable: 'Table 18-5'
- *   }
- * ]
+ * Best-available reported-cost reader for Tier.
  *
- * The Tier engine never infers basisId from the metric name. The evidence must
- * state the verified definition explicitly so reported AISC/C1 can be compared
- * only to the same benchmark definition.
+ * project_json describes the current project model; it does not need to carry
+ * benchmark-specific proof fields in order for Tier to use an explicit cost
+ * disclosed in the JSON. metric + value + unit are the only required fields.
+ * Legacy basis/year/source fields are accepted as optional diagnostics.
+ *
+ * If more than one usable entry exists for the same metric, the last usable
+ * entry wins. This lets the JSON carry a newer current estimate without making
+ * an older report value a hard guard on the current model.
  */
 export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Tier1CostMetric): ReportedCostEvidence {
   const root = parseRaw(rawJson);
@@ -85,76 +79,58 @@ export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Ti
       reason: `Ingen rapporterad ${expectedMetric} finns i economicsBreakdown.reportedCostMetrics.`,
     };
   }
-  if (matches.length !== 1) {
+
+  const usable = matches.filter((entry) => {
+    const metric = entry.metric;
+    const value = entry.value;
+    const unit = entry.unit;
+    return typeof metric === 'string'
+      && VALID_METRICS.has(metric as Tier1CostMetric)
+      && finite(value)
+      && value >= 0
+      && (unit === 'USD/lb' || unit === 'USD/toz');
+  });
+
+  if (usable.length === 0) {
     return {
       status: 'INVALID', metric: expectedMetric, basisId: null, value: null, unit: null,
       costBaseYear: null, sourceId: null, pageOrTable: null,
-      reason: `Exakt en rapporterad ${expectedMetric} krävs; ${matches.length} poster hittades.`,
+      reason: `Rapporterad ${expectedMetric} finns men saknar användbart value/unit.`,
     };
   }
 
-  const entry = matches[0];
-  const metric = entry.metric;
-  const basisId = entry.basisId;
-  const value = entry.value;
-  const unit = entry.unit;
-  const costBaseYear = entry.costBaseYear;
+  const entry = usable[usable.length - 1];
+  const rawBasisId = entry.basisId;
+  const basisId = typeof rawBasisId === 'string' && VALID_BASIS_IDS.has(rawBasisId as Tier1CostBasisId)
+    ? rawBasisId as Tier1CostBasisId
+    : null;
+  const rawCostBaseYear = entry.costBaseYear;
+  const costBaseYear = Number.isInteger(rawCostBaseYear) && (rawCostBaseYear as number) >= 1900 && (rawCostBaseYear as number) <= 2100
+    ? rawCostBaseYear as number
+    : null;
   const sourceId = typeof entry.sourceId === 'string' && entry.sourceId.trim() ? entry.sourceId.trim() : null;
   const pageOrTable = typeof entry.pageOrTable === 'string' && entry.pageOrTable.trim() ? entry.pageOrTable.trim() : null;
+  const value = entry.value as number;
+  const unit = entry.unit as 'USD/lb' | 'USD/toz';
 
-  if (typeof metric !== 'string' || !VALID_METRICS.has(metric as Tier1CostMetric)) {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: null, value: null, unit: null,
-      costBaseYear: null, sourceId, pageOrTable,
-      reason: `Ogiltig rapporterad cost metric: ${String(metric)}.`,
-    };
-  }
-  if (typeof basisId !== 'string' || !VALID_BASIS_IDS.has(basisId as Tier1CostBasisId)) {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: null, value: finite(value) ? value : null, unit: null,
-      costBaseYear: null, sourceId, pageOrTable,
-      reason: `Ogiltig eller saknad cost basisId för ${expectedMetric}; definition får inte gissas.`,
-    };
-  }
-  if (!finite(value) || value < 0) {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: basisId as Tier1CostBasisId, value: null, unit: null,
-      costBaseYear: null, sourceId, pageOrTable,
-      reason: `Rapporterat ${expectedMetric}-värde måste vara ett ändligt tal ≥0.`,
-    };
-  }
-  if (unit !== 'USD/lb' && unit !== 'USD/toz') {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: basisId as Tier1CostBasisId, value, unit: null,
-      costBaseYear: null, sourceId, pageOrTable,
-      reason: `Rapporterad enhet för ${expectedMetric} måste vara USD/lb eller USD/toz.`,
-    };
-  }
-  if (!Number.isInteger(costBaseYear) || (costBaseYear as number) < 1900 || (costBaseYear as number) > 2100) {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: basisId as Tier1CostBasisId, value, unit,
-      costBaseYear: null, sourceId, pageOrTable,
-      reason: `costBaseYear saknas eller är ogiltigt för rapporterad ${expectedMetric}.`,
-    };
-  }
-  if (!sourceId || !pageOrTable) {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: basisId as Tier1CostBasisId, value, unit,
-      costBaseYear: costBaseYear as number, sourceId, pageOrTable,
-      reason: `Rapporterad ${expectedMetric} kräver sourceId och exakt pageOrTable.`,
-    };
-  }
+  const optionalContext = [
+    sourceId ? `källa ${sourceId}` : null,
+    pageOrTable ? pageOrTable : null,
+    costBaseYear ? `kostnadsår ${costBaseYear}` : null,
+  ].filter(Boolean).join(', ');
 
   return {
     status: 'AVAILABLE',
     metric: expectedMetric,
-    basisId: basisId as Tier1CostBasisId,
+    basisId,
     value,
     unit,
-    costBaseYear: costBaseYear as number,
+    costBaseYear,
     sourceId,
     pageOrTable,
-    reason: `Rapporterad ${expectedMetric} används direkt från ${sourceId}, ${pageOrTable}; definitionsbasis ${basisId}.`,
+    reason: optionalContext
+      ? `Rapporterad ${expectedMetric} används som bästa tillgängliga kostnadsuppgift (${optionalContext}).`
+      : `Rapporterad ${expectedMetric} används som bästa tillgängliga kostnadsuppgift i project_json.`,
   };
 }
 
