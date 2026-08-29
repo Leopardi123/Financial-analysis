@@ -1,0 +1,49 @@
+name: Temporary CAPEX contract revert
+
+on:
+  push:
+    branches:
+      - codex/tier1-simplify-single-source
+    paths:
+      - .github/workflows/temp-capex-contract-revert.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/tier1-simplify-single-source
+          fetch-depth: 0
+      - name: Restore supported canonical CAPEX conversion
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/components/CompareStocksDashboard.tsx')
+          text = path.read_text()
+          anchor = '''function getMetric(row: PreRevenueCompany, key: MetricKey): string {'''
+          helper = '''function targetCurrencyToUsd(snapshot: SnapshotWithValuationSeries, targetCurrencyValue: number | null): number | null {\n  if (!finite(targetCurrencyValue)) return null;\n  const fx = readFinite(snapshot.fx_USD_to_TargetCurrency);\n  if (!finite(fx) || fx <= 0) return null;\n  return targetCurrencyValue / fx;\n}\n\n'''
+          if helper in text:
+              raise SystemExit('targetCurrencyToUsd helper already exists unexpectedly')
+          if text.count(anchor) != 1:
+              raise SystemExit(f'Expected one getMetric anchor, found {text.count(anchor)}')
+          text = text.replace(anchor, helper + anchor, 1)
+          old = '''  const initialCapexUsd = marker?.lista2Metrics?.InitialCAPEX_incremental_USD ?? null;'''
+          new = '''  const initialCapexTargetCurrency = marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null;\n  const initialCapexUsd = targetCurrencyToUsd(s, initialCapexTargetCurrency);'''
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one unsupported USD marker access, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- src/components/CompareStocksDashboard.tsx
+      - name: Commit intended change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/CompareStocksDashboard.tsx
+          git commit -m "fix(compare): respect existing Corporate CAPEX marker contract"
+          git push origin HEAD:codex/tier1-simplify-single-source
