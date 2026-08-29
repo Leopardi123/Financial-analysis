@@ -142,16 +142,27 @@ function computeAuEqProductionStats(values: Array<number | null> | undefined): A
   };
 }
 
+function markerYear(marker: ValuationMarker | null | undefined): number | null {
+  if (!marker) return null;
+  const raw = marker.yearLabelUsed;
+  if (finite(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function validValuationMarkers(snapshot: SnapshotWithValuationSeries): ValuationMarker[] {
   const markers = snapshot.modeledValuationTimeline?.markers;
   return Array.isArray(markers)
-    ? markers.filter((marker) => finite(marker.yearLabelUsed) && finite(marker.value_low) && finite(marker.value_high))
+    ? markers.filter((marker) => markerYear(marker) !== null && finite(marker.value_low) && finite(marker.value_high))
     : [];
 }
 
 function nextRelevantProjectMarker(snapshot: SnapshotWithValuationSeries, currentYear = new Date().getUTCFullYear()): ValuationMarker | null {
-  const markers = validValuationMarkers(snapshot).sort((a, b) => (a.yearLabelUsed as number) - (b.yearLabelUsed as number));
-  return markers.find((marker) => (marker.yearLabelUsed as number) > currentYear) ?? markers[0] ?? null;
+  const markers = validValuationMarkers(snapshot).sort((a, b) => (markerYear(a) ?? Infinity) - (markerYear(b) ?? Infinity));
+  return markers.find((marker) => (markerYear(marker) ?? -Infinity) > currentYear) ?? markers[0] ?? null;
 }
 
 function canonicalMarkerTarget(marker: ValuationMarker | null): number | null {
@@ -210,7 +221,7 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   const marker = nextRelevantProjectMarker(s);
   const rawTarget = canonicalMarkerTarget(marker);
   const target = finite(rawTarget) ? rawTarget * scale : null;
-  const targetYear = marker && finite(marker.yearLabelUsed) ? marker.yearLabelUsed : row.productionStartYear;
+  const targetYear = markerYear(marker) ?? row.productionStartYear;
   const currentYear = new Date().getUTCFullYear();
   const yearsToProduction = finite(targetYear) && targetYear > currentYear ? targetYear - currentYear : null;
   const annualReturn = finite(target) && finite(row.price) && row.price > 0 && finite(yearsToProduction) && yearsToProduction > 0 ? (target / row.price) ** (1 / yearsToProduction) - 1 : null;
@@ -317,7 +328,7 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
       price,
       sharesCurrent,
       targetCurrency,
-      productionStartYear: nextMarker && finite(nextMarker.yearLabelUsed) ? nextMarker.yearLabelUsed : null,
+      productionStartYear: markerYear(nextMarker),
       manualExtraShares,
       metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.'),
     };
