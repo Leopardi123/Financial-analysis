@@ -8,7 +8,7 @@ import { extraSharesStorageKey, parseExtraShares } from '../lib/market/extraShar
 import '../styles/compareStocks.css';
 
 type CompareTab = 'producer' | 'pre-revenue';
-type MetricKey = 'pNav' | 'evEbitdaPeak' | 'targetPrice' | 'annualReturn' | 'tier' | 'irr' | 'payback' | 'lom' | 'initialCapex' | 'capexAnnualAueq' | 'annualAueq' | 'aueq10y' | 'aueqLom' | 'inSituAueq' | 'aueqPerShare' | 'mcap10yAueq' | 'mcapLomAueq' | 'evLomAueq';
+type MetricKey = 'pNav' | 'evEbitdaPeak' | 'targetPrice' | 'annualReturn' | 'tier' | 'irr' | 'payback' | 'lom' | 'initialCapex' | 'capexAnnualAueq' | 'annualAueq' | 'aueq10y' | 'aueqLom' | 'aueqPerShare' | 'mcap10yAueq' | 'mcapLomAueq' | 'evLomAueq';
 type MetricColumn = readonly [key: MetricKey, label: string, help: string];
 type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 
@@ -34,6 +34,7 @@ type PreRevenueCompany = {
 };
 
 type AuEqProductionStats = { lomAuEq: number; tenYearAuEq: number; annualAuEq: number; productionYears: number };
+type ValuationMarker = NonNullable<CorporateSnapshot['modeledValuationTimeline']>['markers'][number];
 
 const METRIC_GROUPS: readonly MetricGroup[] = [
   { label: 'VÄRDERING IDAG', columns: [
@@ -41,23 +42,22 @@ const METRIC_GROUPS: readonly MetricGroup[] = [
     ['evEbitdaPeak', 'Peak 6x / pris', 'Högsta 6x EV/EBITDA-värde per aktie från Corporate-grafen relativt dagens pris'],
   ] },
   { label: 'TARGET / RE-RATING', columns: [
-    ['targetPrice', 'Target / pris', 'Corporate target price relativt dagens pris, justerat för manuellt tillagda extra aktier'],
-    ['annualReturn', 'Årlig avk. → prod.', 'Annualiserad utveckling från dagens pris till Corporate target vid produktion'],
+    ['targetPrice', 'Target / pris', 'Corporate target price vid nästa relevanta projektstart relativt dagens pris, justerat för manuellt tillagda extra aktier'],
+    ['annualReturn', 'Årlig avk. → prod.', 'Annualiserad utveckling från dagens pris till Corporate target vid nästa framtida projektstart'],
   ] },
   { label: 'PROJEKTKVALITET', columns: [
-    ['tier', 'Tier', 'Tier 1/2/3 för industriell projektkvalitet. Produktionsskala, LOM och after-tax IRR sätter Tier-taket; Tier 1 kräver även verifierad Q1-kostnadsposition och positiv NPV10 i tre års historiskt kalibrerad relativ lågcykel. Mycket liten produktion (<0,40x combined scale) ger alltid högst Tier 3.'],
+    ['tier', 'Tier', 'Tier 1/2/3 för industriell projektkvalitet. Produktionsskala, LOM och after-tax IRR sätter Tier-taket; Tier 1 kräver även Q1-kostnadsposition och positiv NPV10 i tre års historiskt kalibrerad relativ lågcykel. Mycket liten produktion (<0,40x combined scale) ger alltid högst Tier 3.'],
     ['irr', 'IRR', 'Kanonisk Corporate IRR'],
     ['payback', 'Payback', 'Kanonisk Corporate payback'],
     ['lom', 'LOM', 'Antal år med positiv canonical payable AuEq-produktion'],
-    ['initialCapex', 'Initial CAPEX', 'Initial construction CAPEX från Corporate canonical timeline'],
+    ['initialCapex', 'Initial CAPEX', 'Initial construction CAPEX från Corporate canonical timeline, visad i USD för jämförbarhet'],
     ['capexAnnualAueq', 'CAPEX / annual AuEq', 'Kanonisk Corporate Lista 3-metrik i USD per AuEq oz'],
   ] },
   { label: 'SKALA', columns: [
     ['annualAueq', 'Annual AuEq', 'LOM payable AuEq dividerat med antal år med positiv canonical payable AuEq-produktion'],
     ['aueq10y', '10y AuEq', 'Canonical payable AuEq under de första upp till tio produktionsåren'],
     ['aueqLom', 'LOM AuEq', 'Canonical payable AuEq över hela produktionsperioden'],
-    ['inSituAueq', 'In-situ AuEq', 'Geologisk in-situ AuEq; visas endast när Corporate exponerar måttet kanoniskt'],
-    ['aueqPerShare', 'AuEq / aktie', 'In-situ AuEq per aktie; visas endast när Corporate exponerar måttet kanoniskt'],
+    ['aueqPerShare', 'AuEq / aktie', 'LOM payable AuEq dividerat med canonical aktier efter modellerad finansiering och manuellt tillagda extra aktier'],
   ] },
   { label: 'RELATIV VÄRDERING', columns: [
     ['mcap10yAueq', 'MCap / 10y AuEq', 'Market cap per canonical 10y payable AuEq'],
@@ -142,13 +142,22 @@ function computeAuEqProductionStats(values: Array<number | null> | undefined): A
   };
 }
 
-function firstProductionYear(snapshot: CorporateSnapshot): number | null {
-  const years = snapshot.series?.yearsByPeriod ?? snapshot.aggregation?.corporateYearsByPeriod ?? [];
-  const aueq = snapshot.aggregation?.payableAuEqOz_total ?? [];
-  for (let i = 0; i < aueq.length; i += 1) {
-    if (finite(aueq[i]) && (aueq[i] as number) > 0 && finite(years[i])) return years[i] as number;
-  }
-  return null;
+function validValuationMarkers(snapshot: SnapshotWithValuationSeries): ValuationMarker[] {
+  const markers = snapshot.modeledValuationTimeline?.markers;
+  return Array.isArray(markers)
+    ? markers.filter((marker) => finite(marker.yearLabelUsed) && finite(marker.value_low) && finite(marker.value_high))
+    : [];
+}
+
+function nextRelevantProjectMarker(snapshot: SnapshotWithValuationSeries, currentYear = new Date().getUTCFullYear()): ValuationMarker | null {
+  const markers = validValuationMarkers(snapshot).sort((a, b) => (a.yearLabelUsed as number) - (b.yearLabelUsed as number));
+  return markers.find((marker) => (marker.yearLabelUsed as number) > currentYear) ?? markers[0] ?? null;
+}
+
+function canonicalMarkerTarget(marker: ValuationMarker | null): number | null {
+  if (!marker) return null;
+  if (finite(marker.value_mid_if_any)) return marker.value_mid_if_any;
+  return finite(marker.value_low) && finite(marker.value_high) ? (marker.value_low + marker.value_high) / 2 : null;
 }
 
 function extraShareScale(snapshot: SnapshotWithValuationSeries, extraShares: number): number {
@@ -185,20 +194,31 @@ function peakSixTimesValuePerShare(snapshot: SnapshotWithValuationSeries, scale 
   return peak;
 }
 
+function targetCurrencyToUsd(snapshot: SnapshotWithValuationSeries, targetCurrencyValue: number | null): number | null {
+  if (!finite(targetCurrencyValue)) return null;
+  const fx = readFinite(snapshot.fx_USD_to_TargetCurrency);
+  if (!finite(fx) || fx <= 0) return null;
+  return targetCurrencyValue / fx;
+}
+
 function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   const s = row.snapshot;
   if (!s) return '—';
   const lista3 = s.corporate?.lista3Metrics;
   const aueq = computeAuEqProductionStats(s.aggregation?.payableAuEqOz_total);
   const scale = extraShareScale(s, row.manualExtraShares);
-  const marker = s.modeledValuationTimeline?.markers?.find((item) => finite(item.value_high) && finite(item.value_low)) ?? null;
-  const rawTarget = marker && finite(marker.value_high) && finite(marker.value_low) ? (marker.value_high + marker.value_low) / 2 : null;
+  const marker = nextRelevantProjectMarker(s);
+  const rawTarget = canonicalMarkerTarget(marker);
   const target = finite(rawTarget) ? rawTarget * scale : null;
-  const yearsToProduction = row.productionStartYear && row.productionStartYear > new Date().getUTCFullYear() ? row.productionStartYear - new Date().getUTCFullYear() : null;
+  const targetYear = marker && finite(marker.yearLabelUsed) ? marker.yearLabelUsed : row.productionStartYear;
+  const currentYear = new Date().getUTCFullYear();
+  const yearsToProduction = finite(targetYear) && targetYear > currentYear ? targetYear - currentYear : null;
   const annualReturn = finite(target) && finite(row.price) && row.price > 0 && finite(yearsToProduction) && yearsToProduction > 0 ? (target / row.price) ** (1 / yearsToProduction) - 1 : null;
   const peak6xPerShare = peakSixTimesValuePerShare(s, scale);
   const peak6xVsPrice = finite(peak6xPerShare) && finite(row.price) && row.price > 0 ? peak6xPerShare / row.price : null;
-  const initialCapex = marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null;
+  const initialCapexTargetCurrency = marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null;
+  const initialCapexUsd = targetCurrencyToUsd(s, initialCapexTargetCurrency);
+  const sharesPf = postFinancingShares(s, row.manualExtraShares);
 
   switch (key) {
     case 'pNav': return formatMultiple(pNavPostFinancing(s, row.price, row.manualExtraShares));
@@ -209,13 +229,12 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
     case 'irr': return formatPct(lista3?.IRR ?? s.project?.modeled?.npvSpotRange?.base?.irr ?? null);
     case 'payback': return finite(s.Payback_real_years) ? `${formatNumber(s.Payback_real_years, 1)} år` : finite(s.Payback_approx_years) ? `${formatNumber(s.Payback_approx_years, 1)} år` : '—';
     case 'lom': return aueq ? `${aueq.productionYears} år` : '—';
-    case 'initialCapex': return formatMoney(initialCapex, row.targetCurrency);
+    case 'initialCapex': return formatMoney(initialCapexUsd, 'USD');
     case 'capexAnnualAueq': return finite(lista3?.CAPEX_per_Annual_AuEq) ? `${formatNumber(lista3.CAPEX_per_Annual_AuEq)} USD/oz` : '—';
     case 'annualAueq': return aueq ? `${formatNumber(aueq.annualAuEq)} oz` : '—';
     case 'aueq10y': return aueq ? `${formatNumber(aueq.tenYearAuEq)} oz` : '—';
     case 'aueqLom': return aueq ? `${formatNumber(aueq.lomAuEq)} oz` : '—';
-    case 'inSituAueq': return '—';
-    case 'aueqPerShare': return '—';
+    case 'aueqPerShare': return aueq && finite(sharesPf) && sharesPf > 0 ? `${formatNumber(aueq.lomAuEq / sharesPf, 4)} oz/aktie` : '—';
     case 'mcap10yAueq': return aueq && finite(s.MarketCap_TargetCurrency) && aueq.tenYearAuEq > 0 ? formatMoney(s.MarketCap_TargetCurrency / aueq.tenYearAuEq, row.targetCurrency) : '—';
     case 'mcapLomAueq': return aueq && finite(s.MarketCap_TargetCurrency) && aueq.lomAuEq > 0 ? formatMoney(s.MarketCap_TargetCurrency / aueq.lomAuEq, row.targetCurrency) : '—';
     case 'evLomAueq': return aueq && finite(s.EV_TargetCurrency) && aueq.lomAuEq > 0 ? formatMoney(s.EV_TargetCurrency / aueq.lomAuEq, row.targetCurrency) : '—';
@@ -290,6 +309,7 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
     });
     const body = await response.json() as SnapshotResponse;
     const snapshot = response.ok && body.ok && body.snapshot ? body.snapshot : null;
+    const nextMarker = snapshot ? nextRelevantProjectMarker(snapshot) : null;
     return {
       ...company,
       projects,
@@ -297,7 +317,7 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
       price,
       sharesCurrent,
       targetCurrency,
-      productionStartYear: snapshot ? firstProductionYear(snapshot) : null,
+      productionStartYear: nextMarker && finite(nextMarker.yearLabelUsed) ? nextMarker.yearLabelUsed : null,
       manualExtraShares,
       metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.'),
     };
