@@ -1,3 +1,5 @@
+import type { ValuationConvergence } from './valuationConvergence.ts';
+
 export type VerificationState = 'verified' | 'unverified';
 
 export type ManagementRating = 'unassessed' | 'weak' | 'adequate' | 'strong' | 'exceptional';
@@ -32,7 +34,7 @@ export type InvestmentScoreInputs = {
   tier: 1 | 2 | 3 | null;
   pNav: number | null;
   peak6xVsPrice: number | null;
-  valuationConvergenceScore1Pass: boolean | null;
+  valuationConvergence: ValuationConvergence;
   lomYears: number | null;
   cycleResistanceTier1Pass: boolean | null;
   downsideRobustnessPass: boolean | null;
@@ -70,6 +72,7 @@ export type InvestmentScoreComponentBreakdown = {
   assetQuality?: number | null;
   valuation?: number | null;
   rerating?: number | null;
+  valuationConvergence?: ValuationConvergence | null;
   managementRating?: ManagementRating | null;
   managementAdjustment?: number | null;
   optionalityRating?: OptionalityRating | null;
