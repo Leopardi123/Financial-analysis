@@ -1,10 +1,11 @@
 import { getLatestPriceCached } from './latestCache.js';
 import { getPriceKeyDefinition, type PriceKey } from './keys.js';
 import { fetchFredCommodityPriceSeries, getFredCommodityPriceMapping } from './providers/fred.js';
+import { fetchImfCommodityPriceSeries, getImfCommodityPriceMapping } from './providers/imfCommodity.js';
 import { getProviderMapping, type ProviderMapping } from './registry/getPriceKeyMeta.js';
 import { convertPriceToCanonical } from './units/convert.js';
 
-export type CanonicalPriceProvider = 'FMP' | 'FRED';
+export type CanonicalPriceProvider = 'FMP' | 'FRED' | 'IMF';
 export type CanonicalPriceType = 'market_quote' | 'monthly_period_average';
 
 export type PriceProviderDescriptor = {
@@ -23,6 +24,7 @@ type LatestDeps = {
   getProviderMappingFn: typeof getProviderMapping;
   getLatestPriceCachedFn: typeof getLatestPriceCached;
   fetchFredCommodityPriceSeriesFn: typeof fetchFredCommodityPriceSeries;
+  fetchImfCommodityPriceSeriesFn: typeof fetchImfCommodityPriceSeries;
 };
 
 function withDefaults(deps: Partial<LatestDeps>): LatestDeps {
@@ -30,6 +32,7 @@ function withDefaults(deps: Partial<LatestDeps>): LatestDeps {
     getProviderMappingFn: deps.getProviderMappingFn ?? getProviderMapping,
     getLatestPriceCachedFn: deps.getLatestPriceCachedFn ?? getLatestPriceCached,
     fetchFredCommodityPriceSeriesFn: deps.fetchFredCommodityPriceSeriesFn ?? fetchFredCommodityPriceSeries,
+    fetchImfCommodityPriceSeriesFn: deps.fetchImfCommodityPriceSeriesFn ?? fetchImfCommodityPriceSeries,
   };
 }
 
@@ -51,6 +54,13 @@ function normalizeProvider(mapping: ProviderMapping, priceKey: string): PricePro
   if (provider === 'FRED') {
     return {
       provider: 'FRED',
+      source_symbol: mapping.provider_symbol,
+      price_type: 'monthly_period_average',
+    };
+  }
+  if (provider === 'IMF') {
+    return {
+      provider: 'IMF',
       source_symbol: mapping.provider_symbol,
       price_type: 'monthly_period_average',
     };
@@ -86,18 +96,58 @@ export async function getLatestCanonicalPrice(
     };
   }
 
-  const fredMapping = getFredCommodityPriceMapping(priceKey);
-  if (!fredMapping) {
-    throw new Error(`No verified FRED commodity mapping found for price key: ${priceKey}`);
+  const definition = getPriceKeyDefinition(priceKey);
+
+  if (descriptor.provider === 'FRED') {
+    const fredMapping = getFredCommodityPriceMapping(priceKey);
+    if (!fredMapping) {
+      throw new Error(`No verified FRED commodity mapping found for price key: ${priceKey}`);
+    }
+    if (mapping.provider_symbol !== fredMapping.fredSeriesId) {
+      throw new Error(
+        `FRED provider mapping mismatch for ${priceKey}: database=${mapping.provider_symbol}, registry=${fredMapping.fredSeriesId}`,
+      );
+    }
+
+    const rows = await resolvedDeps.fetchFredCommodityPriceSeriesFn(
+      fredMapping,
+      { fromUtc: subtractUtcMonths(anchorDateUtc, 18), toUtc: anchorDateUtc },
+    );
+    const eligible = rows.filter((row) => row.dateUtc <= anchorDateUtc);
+    const latest = eligible.length > 0 ? eligible[eligible.length - 1] : null;
+    if (!latest) {
+      return {
+        ...descriptor,
+        price: null,
+        asof_utc: null,
+        asof_period: null,
+      };
+    }
+
+    return {
+      ...descriptor,
+      price: convertPriceToCanonical({
+        value: latest.close,
+        fromUnit: fredMapping.providerUnit,
+        canonicalUnit: definition.canonicalUnit,
+      }),
+      asof_utc: latest.dateUtc,
+      asof_period: latest.sourcePeriod,
+    };
   }
-  if (mapping.provider_symbol !== fredMapping.fredSeriesId) {
+
+  const imfMapping = getImfCommodityPriceMapping(priceKey);
+  if (!imfMapping) {
+    throw new Error(`No verified IMF commodity mapping found for price key: ${priceKey}`);
+  }
+  if (mapping.provider_symbol !== imfMapping.datasetSeriesId) {
     throw new Error(
-      `FRED provider mapping mismatch for ${priceKey}: database=${mapping.provider_symbol}, registry=${fredMapping.fredSeriesId}`,
+      `IMF provider mapping mismatch for ${priceKey}: database=${mapping.provider_symbol}, registry=${imfMapping.datasetSeriesId}`,
     );
   }
 
-  const rows = await resolvedDeps.fetchFredCommodityPriceSeriesFn(
-    fredMapping,
+  const rows = await resolvedDeps.fetchImfCommodityPriceSeriesFn(
+    imfMapping,
     { fromUtc: subtractUtcMonths(anchorDateUtc, 18), toUtc: anchorDateUtc },
   );
   const eligible = rows.filter((row) => row.dateUtc <= anchorDateUtc);
@@ -111,12 +161,11 @@ export async function getLatestCanonicalPrice(
     };
   }
 
-  const definition = getPriceKeyDefinition(priceKey);
   return {
     ...descriptor,
     price: convertPriceToCanonical({
       value: latest.close,
-      fromUnit: fredMapping.providerUnit,
+      fromUnit: imfMapping.providerUnit,
       canonicalUnit: definition.canonicalUnit,
     }),
     asof_utc: latest.dateUtc,

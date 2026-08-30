@@ -1,11 +1,12 @@
 import { batch } from "../../../../api/_db.js";
 import { PRICE_KEY_DEFINITIONS, type PriceKind } from "../keys.js";
 import { FRED_COMMODITY_PRICE_MAPPINGS } from "../providers/fred.js";
+import { IMF_COMMODITY_PRICE_MAPPINGS } from "../providers/imfCommodity.js";
 import { PRICE_TABLES } from "./schema.js";
 
 interface ProviderMapping {
   priceKey: string;
-  provider: "FMP" | "FRED";
+  provider: "FMP" | "FRED" | "IMF";
   providerSymbol: string;
   providerKind: PriceKind;
   notes: string;
@@ -43,9 +44,18 @@ const FRED_PROVIDER_MAPPINGS: readonly ProviderMapping[] = FRED_COMMODITY_PRICE_
   notes: `unit=${mapping.providerUnit}; ${mapping.description}; frequency=${mapping.frequency}; not spot`,
 }));
 
+const IMF_PROVIDER_MAPPINGS: readonly ProviderMapping[] = IMF_COMMODITY_PRICE_MAPPINGS.map((mapping) => ({
+  priceKey: mapping.priceKey,
+  provider: "IMF" as const,
+  providerSymbol: mapping.datasetSeriesId,
+  providerKind: "commodity" as const,
+  notes: `unit=${mapping.providerUnit}; ${mapping.description}; frequency=${mapping.frequency}; official IMF monthly workbook; not spot`,
+}));
+
 export const DEFAULT_PROVIDER_MAPPINGS: readonly ProviderMapping[] = [
   ...FMP_PROVIDER_MAPPINGS,
   ...FRED_PROVIDER_MAPPINGS,
+  ...IMF_PROVIDER_MAPPINGS,
 ];
 
 export async function seedPriceRegistry(): Promise<void> {

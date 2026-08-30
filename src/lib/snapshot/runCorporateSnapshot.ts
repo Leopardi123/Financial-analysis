@@ -424,6 +424,7 @@ function validateProjectIdentities(input: {
   capexUSD: Array<number | null>;
   totalCapexUSD: Array<number | null>;
   workingCapitalDeltaUSD: Array<number | null>;
+  terminalProceedsUSD: Array<number | null>;
   sustainingCapexUSD: Array<number | null>;
   reclamationUSD: Array<number | null>;
   byproductCreditsUSD: Array<number | null>;
@@ -521,6 +522,7 @@ function validateProjectIdentities(input: {
     const fcffActual = toFiniteOrNull(input.fcffUSD[t]);
     const capex = toFiniteOrNull(input.capexUSD[t]);
     const wc = toFiniteOrNull(input.workingCapitalDeltaUSD[t]);
+    const terminalProceeds = toFiniteOrNull(input.terminalProceedsUSD[t]);
     const tax = toFiniteOrNull(input.taxUSD[t]);
     if (
       ebitActual !== null
@@ -528,9 +530,10 @@ function validateProjectIdentities(input: {
       && dep !== null
       && capex !== null
       && wc !== null
+      && terminalProceeds !== null
       && fcffActual !== null
     ) {
-      const expected = ebitActual - tax + dep - capex - wc;
+      const expected = ebitActual - tax + dep - capex - wc + terminalProceeds;
       if (Math.abs(expected - fcffActual) > EPS_USD) {
         diagnostics.push(formatFail(t, 'FCFF identity', expected, fcffActual));
         checks.fcff = 'fail';
@@ -1866,18 +1869,34 @@ export async function runCorporateSnapshotPipeline(args: {
             return operatingEarnings - dep;
           });
           const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
-          const taxByRule = taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
-          const effectiveTaxRate = ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
+          const hasExplicitTaxCashFlow = Array.isArray(resolved.phase1.taxCashFlowUSD);
+          const hasTerminalProceeds = Array.isArray(resolved.phase1.terminalProceedsUSD);
+          // Preserve the legacy snapshot rule exactly when explicit tax is absent.
+          // Opt-in explicit tax consumes canonical Phase1 taxUSD so construction
+          // credits and operating tax payments retain their disclosed cash signs.
+          const taxByRule = hasExplicitTaxCashFlow
+            ? sanitizeSeries(out.phase1.taxUSD)
+            : taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
+          const effectiveTaxRate = hasExplicitTaxCashFlow
+            ? sanitizeSeries(out.phase1.effectiveTaxRate)
+            : ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
+          const terminalProceedsUSD_effective = hasTerminalProceeds
+            ? sanitizeSeries(out.phase1.terminalProceedsUSD_effective ?? new Array<number | null>(projectLength).fill(null))
+            : new Array<number | null>(projectLength).fill(0);
           const fcffByCentralEbit = ebitUSD.map((ebit, t) => {
             if (ebit === null) return null;
+            if (hasExplicitTaxCashFlow && taxByRule[t] === null) return null;
+            if (hasTerminalProceeds && terminalProceedsUSD_effective[t] === null) return null;
             const tax = taxByRule[t] ?? 0;
             const dep = depreciationUSD[t] ?? 0;
             const cx = capexUSD_used[t] ?? 0;
             const dWC = workingCapitalDeltaUSD_effective[t] ?? 0;
+            const terminal = terminalProceedsUSD_effective[t] ?? 0;
             // Reclamation is already included in EBITDA/EBIT and must not be deducted twice in FCFF.
-            return ebit - tax + dep - cx - dWC;
+            // Terminal proceeds are non-operating cash and enter only at FCFF level.
+            return ebit - tax + dep - cx - dWC + terminal;
           });
-          const usesTaxRateRule = taxRate !== null;
+          const usesTaxRateRule = !hasExplicitTaxCashFlow && taxRate !== null;
           const taxExpectedFromCentralEbit = ebitUSD.map((ebit) => (ebit === null || taxRate === null ? null : Math.max(0, ebit) * taxRate));
           const taxDiffFromCentralRule = taxByRule.map((tax, t) => {
             const expected = taxExpectedFromCentralEbit[t];
@@ -1893,18 +1912,19 @@ export async function runCorporateSnapshotPipeline(args: {
           diagnostics.warnings.push(`[${projectId}] sustaining-adjusted operating earnings source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits`);
           diagnostics.warnings.push(`[${projectId}] EBITDA source path=totalRevenue - operatingCosts - siteG&A - royalties - reclamation + byproductCredits (informational/valuation only)`);
           diagnostics.warnings.push(`[${projectId}] ebit source path=sustainingAdjustedOperatingEarnings - depreciation`);
-          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - capex - workingCapitalDelta (sustaining CAPEX and reclamation already included in operating earnings)`);
+          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - capex - workingCapitalDelta + terminalProceeds (sustaining CAPEX and reclamation already included in operating earnings)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
           diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
-          diagnostics.warnings.push(`[${projectId}] tax source of truth=phase1.taxUSD (derived from economics.taxRate + taxableIncomeUSD)`);
-          diagnostics.warnings.push(`[${projectId}] tax rule=taxUSD[t]=max(0, EBIT[t])*taxRate`);
-          diagnostics.warnings.push(`[${projectId}] tax rate source=${usesTaxRateRule ? 'economics.taxRate' : 'missing economics.taxRate (tax series unresolved)'}`);
+          diagnostics.warnings.push(`[${projectId}] tax source of truth=${hasExplicitTaxCashFlow ? 'phase1.taxUSD from explicit taxCashFlowUSD' : 'snapshot taxRate rule'}`);
+          diagnostics.warnings.push(`[${projectId}] tax rule=${hasExplicitTaxCashFlow ? 'taxUSD[t]=-taxCashFlowUSD[t]' : 'taxUSD[t]=max(0, EBIT[t])*taxRate'}`);
+          diagnostics.warnings.push(`[${projectId}] tax rate source=${hasExplicitTaxCashFlow ? 'explicit tax cash-flow series' : usesTaxRateRule ? 'economics.taxRate' : 'missing economics.taxRate (legacy zero-tax FCFF behavior preserved)'}`);
+          diagnostics.warnings.push(`[${projectId}] terminal proceeds source=${hasTerminalProceeds ? 'phase1.terminalProceedsUSD_effective' : 'absent (0)'}`);
           diagnostics.warnings.push(`[${projectId}] tax consistency maxAbsDiff(actual-vs-expectedFromCentralEbit)=${taxDiffMaxAbs}`);
           const focusPeriods = [2, 3, 4].filter((t) => t >= 0 && t < projectLength);
           for (const t of focusPeriods) {
             diagnostics.warnings.push(
-              `[${projectId}] central-ebit-trace t=${t} revenue=${String(centralRevenueUSD[t])} operatingCosts=${String(operatingCostsUSD[t])} siteGandA=${String(siteGandA_USD[t])} royalties=${String(royaltiesUSD[t])} depreciationRaw=${String(parsed.context.series?.depreciationUSD?.[t] ?? null)} depreciationNormalized=${String(depreciationUSD[t] ?? 0)} ebit=${String(ebitUSD[t])} tax=${String(taxByRule[t])} fcff=${String(fcffByCentralEbit[t])}`,
+              `[${projectId}] central-ebit-trace t=${t} revenue=${String(centralRevenueUSD[t])} operatingCosts=${String(operatingCostsUSD[t])} siteGandA=${String(siteGandA_USD[t])} royalties=${String(royaltiesUSD[t])} depreciationRaw=${String(parsed.context.series?.depreciationUSD?.[t] ?? null)} depreciationNormalized=${String(depreciationUSD[t] ?? 0)} ebit=${String(ebitUSD[t])} tax=${String(taxByRule[t])} terminalProceeds=${String(terminalProceedsUSD_effective[t])} fcff=${String(fcffByCentralEbit[t])}`,
             );
           }
           if (projectEconomicsBreakdown?.taxesDetail) {
@@ -1935,6 +1955,7 @@ export async function runCorporateSnapshotPipeline(args: {
             capexUSD: capexUSD_used,
             totalCapexUSD: sanitizeSeries(out.phase1.totalCapexUSD),
             workingCapitalDeltaUSD: workingCapitalDeltaUSD_effective,
+            terminalProceedsUSD: terminalProceedsUSD_effective,
             sustainingCapexUSD,
             reclamationUSD,
             byproductCreditsUSD,

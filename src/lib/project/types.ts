@@ -10,6 +10,19 @@ export type ProjectPhase1Input = {
   masterN: number;
   productionStartPeriod: number;
   taxRate?: number | null;
+  /**
+   * Optional report-locked tax cash-flow series. Positive values are tax cash
+   * inflows/credits; negative values are cash tax payments. When supplied this
+   * is mutually exclusive with taxRate and drives FCFF directly without
+   * changing EBITDA/EBIT.
+   */
+  taxCashFlowUSD?: (number | null)[] | null;
+  /**
+   * Optional report-locked non-operating terminal proceeds, e.g. salvage value.
+   * Positive values are FCFF cash inflows and do not change revenue, EBITDA,
+   * EBIT, taxable income or tax.
+   */
+  terminalProceedsUSD?: (number | null)[] | null;
   capexUSD: (number | null)[];
   revenueUSD: (number | null)[];
   operatingCostsUSD: (number | null)[];
@@ -31,10 +44,13 @@ export type ProjectPhase1Output = {
   ebitUSD: (number | null)[];
   taxableIncomeUSD: (number | null)[];
   effectiveTaxRate: (number | null)[];
+  /** Positive = tax expense/payment; negative = tax credit/inflow. */
   taxUSD: (number | null)[];
   nopatUSD: (number | null)[];
   fcffUSD: (number | null)[];
   workingCapitalDeltaUSD_effective: (number | null)[];
+  /** Optional to preserve compatibility with existing typed fixtures/mocks. */
+  terminalProceedsUSD_effective?: (number | null)[];
 };
 
 export type ProjectPhase2Input = {

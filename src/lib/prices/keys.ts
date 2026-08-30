@@ -89,6 +89,13 @@ export const PRICE_KEY_DEFINITIONS: readonly PriceKeyDefinition[] = [
     description: "Tin benchmark price in USD per pound",
   },
   {
+    priceKey: "MO_USD_TONNE",
+    kind: "commodity",
+    canonicalUnit: "USD_per_tonne",
+    decimals: 6,
+    description: "Molybdenum benchmark price in USD per metric tonne (IMF Primary Commodity Prices basis)",
+  },
+  {
     priceKey: "IRON_ORE_USD_TONNE",
     kind: "commodity",
     canonicalUnit: "USD_per_tonne",
