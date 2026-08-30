@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import InvestmentScoreEvidenceDialog from '../components/investmentScore/InvestmentScoreEvidenceDialog.tsx';
 import {
   deleteCompanyProject,
   getCompanyProject,
@@ -135,6 +136,7 @@ export default function CompanyProjectsEditorPage() {
   const [projects, setProjects] = useState<CompanyProjectSummary[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [evidenceProject, setEvidenceProject] = useState<CompanyProjectSummary | null>(null);
 
   const [isNewDraft, setIsNewDraft] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -612,6 +614,7 @@ export default function CompanyProjectsEditorPage() {
                 </div>
                 <div className="project-row-actions">
                   <button type="button" onClick={() => void loadExistingProject(project.project_id)}>Edit</button>
+                  <button type="button" onClick={() => setEvidenceProject(project)}>Kvalitativ bedömning</button>
                   <button type="button" onClick={() => void handleSetProjectDisabled(project, !project.disabled)}>
                     {project.disabled ? 'Aktivera' : 'Inaktivera'}
                   </button>
@@ -750,6 +753,15 @@ export default function CompanyProjectsEditorPage() {
           <p className="save-meta">Last successful save (UTC): <strong>{lastSavedAtUtc ?? '—'}</strong></p>
         </section>
       </div>
+
+      {evidenceProject && (
+        <InvestmentScoreEvidenceDialog
+          symbol={symbol}
+          projectId={evidenceProject.project_id}
+          projectName={evidenceProject.project_name}
+          onClose={() => setEvidenceProject(null)}
+        />
+      )}
     </div>
   );
 }
