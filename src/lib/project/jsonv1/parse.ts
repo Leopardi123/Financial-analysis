@@ -51,25 +51,26 @@ function parseStrictOptionalSeries(
 }
 
 /**
- * Backwards-compatible parser overlay for report-locked cash-flow fields.
- * The preserved legacy parser remains authoritative for every pre-existing
- * project field. If neither overlay field exists, the parsed result is returned
- * unchanged, which keeps existing Project/Corporate calculations on the old path.
+ * Backwards-compatible parser overlay for report evidence and terminal cash flow.
+ *
+ * `series.taxCashFlowUSD` is validated here as report-deck reconciliation evidence,
+ * but is deliberately NOT copied into canonical Project/Corporate runtime inputs.
+ * Normal runtime tax must continue to be derived dynamically from the runtime tax
+ * model (currently economics.taxRate where available) after canonical prices have
+ * produced runtime EBIT. Keeping the report tax series in raw JSON lets a separate
+ * reconciliation/control path consume it without freezing spot tax.
+ *
+ * `series.terminalProceedsUSD` is different: salvage/disposal proceeds are genuine
+ * project cash-flow timing inputs and remain part of normal runtime FCFF.
  */
 export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   const parsed = parseProjectJsonV1Legacy(raw);
   const expectedLength = parsed.engineInput.masterN + 1;
-  const taxCashFlowUSD = parseStrictOptionalSeries(raw, 'taxCashFlowUSD', expectedLength);
+
+  // Hard validation only. Do not inject report tax cash flow into runtime engine input.
+  parseStrictOptionalSeries(raw, 'taxCashFlowUSD', expectedLength);
+
   const terminalProceedsUSD = parseStrictOptionalSeries(raw, 'terminalProceedsUSD', expectedLength);
-
-  if (taxCashFlowUSD !== null) {
-    if (parsed.engineInputWithoutPrices.taxRate !== null) {
-      throw new Error('series.taxCashFlowUSD is mutually exclusive with economics.taxRate');
-    }
-    parsed.engineInput.phase1.taxCashFlowUSD = [...taxCashFlowUSD];
-    parsed.engineInputWithoutPrices.phase1.taxCashFlowUSD = [...taxCashFlowUSD];
-  }
-
   if (terminalProceedsUSD !== null) {
     parsed.engineInput.phase1.terminalProceedsUSD = [...terminalProceedsUSD];
     parsed.engineInputWithoutPrices.phase1.terminalProceedsUSD = [...terminalProceedsUSD];
