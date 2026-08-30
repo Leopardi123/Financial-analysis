@@ -1,4 +1,4 @@
-import { aggregateManagementRating, aggregateOptionalityRating } from './manualEvidence.ts';
+import { aggregateOptionalityRating } from './manualEvidence.ts';
 import type { InvestmentScoreInputs, ManagementRating, OptionalityRating } from './types.ts';
 
 export type ProvisionalRawScoreResult = {
@@ -14,12 +14,18 @@ export type ProvisionalRawScoreResult = {
 };
 
 const ASSET_QUALITY: Record<1 | 2 | 3, number> = { 1: 2, 2: 4.5, 3: 7.5 };
-const MANAGEMENT: Record<Exclude<ManagementRating, 'unassessed'>, number> = {
+const MANAGEMENT_SCORE: Record<Exclude<ManagementRating, 'unassessed'>, number> = {
   weak: 9,
   adequate: 5.5,
   strong: 3,
   exceptional: 1.5,
 };
+const MANAGEMENT_DIMENSION_WEIGHTS = {
+  executionTrackRecord: 0.40,
+  capitalAllocation: 0.20,
+  deliveryCredibility: 0.20,
+  technicalTeamFit: 0.20,
+} as const;
 const OPTIONALITY_BONUS: Record<Exclude<OptionalityRating, 'unassessed'>, number> = {
   none: 0,
   some: -0.15,
@@ -59,6 +65,31 @@ function reratingFromPeak6x(peak6xVsPrice: number | null): number | null {
 }
 
 /**
+ * Continuous management contribution for raw score.
+ *
+ * Unlike the conservative aggregate used by hard gates, this preserves the
+ * information in all four assessed dimensions. Relevant execution carries
+ * 40 %, while capital allocation, delivery and technical/team fit carry 20 %
+ * each. An unassessed dimension keeps the continuous management component
+ * unverified; no neutral proxy is inserted.
+ */
+function managementContinuousScore(input: InvestmentScoreInputs): number | null {
+  const evidence = input.management;
+  if (!evidence) return null;
+  const dimensions = [
+    [evidence.executionTrackRecord.rating, MANAGEMENT_DIMENSION_WEIGHTS.executionTrackRecord],
+    [evidence.capitalAllocation.rating, MANAGEMENT_DIMENSION_WEIGHTS.capitalAllocation],
+    [evidence.deliveryCredibility.rating, MANAGEMENT_DIMENSION_WEIGHTS.deliveryCredibility],
+    [evidence.technicalTeamFit.rating, MANAGEMENT_DIMENSION_WEIGHTS.technicalTeamFit],
+  ] as const;
+  if (dimensions.some(([rating]) => rating === 'unassessed')) return null;
+  return dimensions.reduce((sum, [rating, weight]) => {
+    const assessed = rating as Exclude<ManagementRating, 'unassessed'>;
+    return sum + MANAGEMENT_SCORE[assessed] * weight;
+  }, 0);
+}
+
+/**
  * Calibration-only v0 continuous score. Lower is better.
  * Weights follow the agreed conceptual split: asset quality 30 %, valuation
  * 30 %, rerating 25 %, management 15 %. Optionality is a positive-only bonus.
@@ -69,9 +100,8 @@ export function computeProvisionalRawScoreV0(input: InvestmentScoreInputs): Prov
   const assetQuality = input.tier === null ? null : ASSET_QUALITY[input.tier];
   const valuation = valuationFromPNav(input.pNav);
   const rerating = reratingFromPeak6x(input.peak6xVsPrice);
-  const managementRating = aggregateManagementRating(input.management);
+  const management = managementContinuousScore(input);
   const optionalityRating = aggregateOptionalityRating(input.optionality);
-  const management = managementRating && managementRating !== 'unassessed' ? MANAGEMENT[managementRating] : null;
   const optionalityAdjustment = optionalityRating && optionalityRating !== 'unassessed'
     ? OPTIONALITY_BONUS[optionalityRating]
     : null;
@@ -79,7 +109,7 @@ export function computeProvisionalRawScoreV0(input: InvestmentScoreInputs): Prov
   if (assetQuality === null) diagnostics.push('Raw score: Tier saknas.');
   if (valuation === null) diagnostics.push('Raw score: P/NAV PF saknas.');
   if (rerating === null) diagnostics.push('Raw score: Peak 6x / pris saknas.');
-  if (management === null) diagnostics.push('Raw score: management är Ej verifierad.');
+  if (management === null) diagnostics.push('Raw score: management är Ej verifierad. Alla fyra dimensioner måste vara bedömda; ingen neutral proxy används.');
   if (optionalityAdjustment === null) diagnostics.push('Raw score: optionality är Ej bedömd; ingen bonus tillämpas.');
 
   if (assetQuality === null || valuation === null || rerating === null || management === null) {
@@ -97,6 +127,7 @@ export function computeProvisionalRawScoreV0(input: InvestmentScoreInputs): Prov
     components: { assetQuality, valuation, rerating, management, optionalityAdjustment },
     diagnostics: [
       ...diagnostics,
+      'v0 calibration: continuous management uses execution 40 %, capital allocation 20 %, delivery 20 % and technical/team fit 20 %; hard-gate management remains separately conservative.',
       'v0 calibration: raw score weights/breakpoints are provisional and must be recalibrated against real project JSON.',
     ],
   };
