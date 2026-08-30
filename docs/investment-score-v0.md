@@ -1,6 +1,6 @@
 # Investment Score v0
 
-Status: implementation foundation. Thresholds marked preliminary must be calibrated against real project JSON before the feature is considered complete.
+Status: implementation foundation. Thresholds marked preliminary must be calibrated against real project JSON before the feature is considered complete. Runtime/build verification is still pending; do not treat this branch as verified until tests/CI run successfully.
 
 ## Purpose
 
