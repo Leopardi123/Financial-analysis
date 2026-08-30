@@ -7,6 +7,8 @@ import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancin
 import type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';
 import { extraSharesStorageKey, parseExtraShares } from '../lib/market/extraShares.ts';
 import { getPriceKeyDefinition } from '../lib/prices/keys.ts';
+import { canonicalUnitForMetal } from '../lib/units/metalUnits.ts';
+import { convertPriceToCanonical } from '../lib/units/conversion.ts';
 import '../styles/compareStocks.css';
 
 type CompareTab = 'producer' | 'pre-revenue';
@@ -114,34 +116,48 @@ function metalRecordValue<T>(record: Record<string, T> | undefined, metal: strin
   return key === undefined ? undefined : record[key];
 }
 
+function outputEqUnitAndDivisor(metal: string): { unit: 'oz' | 't'; divisor: number } {
+  const canonicalQtyUnit = canonicalUnitForMetal(metal);
+  if (canonicalQtyUnit === 'toz') return { unit: 'oz', divisor: 1 };
+  if (canonicalQtyUnit === 'lb') return { unit: 't', divisor: LB_PER_TONNE };
+  return { unit: 't', divisor: 1 };
+}
+
 function eqSeries(snapshot: SnapshotWithValuationSeries, metal: string): { values: Array<number | null>; unit: 'oz' | 't' } | null {
   const revenue = snapshot.series?.totalRevenue_USD ?? snapshot.aggregation?.grossRevenueUSD_total;
+  if (!Array.isArray(revenue)) return null;
+
+  const display = outputEqUnitAndDivisor(metal);
   const seriesPrices = metalRecordValue(snapshot.series?.priceUsedByMetal_USD, metal);
   const unitAudit = metalRecordValue(snapshot.series?.unitAudit?.metals, metal);
-  if (Array.isArray(revenue) && Array.isArray(seriesPrices) && revenue.length === seriesPrices.length && unitAudit) {
-    const canonicalPriceUnit = unitAudit.canonicalPriceUnit;
-    const divisor = canonicalPriceUnit === 'lb' ? LB_PER_TONNE : 1;
-    const unit: 'oz' | 't' = canonicalPriceUnit === 'toz' ? 'oz' : 't';
+  if (Array.isArray(seriesPrices) && revenue.length === seriesPrices.length && unitAudit?.priceUnit) {
     return {
-      unit,
-      values: revenue.map((value, index) => finite(value) && value >= 0 && finite(seriesPrices[index]) && (seriesPrices[index] as number) > 0 ? (value / (seriesPrices[index] as number)) / divisor : null),
+      unit: display.unit,
+      values: revenue.map((value, index) => {
+        const sourcePrice = seriesPrices[index];
+        if (!finite(value) || value < 0 || !finite(sourcePrice) || sourcePrice <= 0) return null;
+        const canonicalPrice = convertPriceToCanonical(metal, sourcePrice, unitAudit.priceUnit);
+        return finite(canonicalPrice) && canonicalPrice > 0 ? (value / canonicalPrice) / display.divisor : null;
+      }),
     };
   }
 
   const priceKey = metalRecordValue(snapshot.aggregation?.priceKeyByMetal, metal);
   const prices = metalRecordValue(snapshot.aggregation?.priceUSDByMetal, metal) ?? (metal.trim().toLowerCase() === 'au' ? snapshot.aggregation?.auPriceUSDPerOz : undefined);
-  if (!Array.isArray(revenue) || !Array.isArray(prices) || revenue.length !== prices.length) return null;
-  let canonicalUnit: 'USD_per_toz' | 'USD_per_lb' | 'USD_per_tonne';
+  if (!Array.isArray(prices) || revenue.length !== prices.length) return null;
+  let priceUnit: string | null = null;
   try {
-    const resolvedUnit = priceKey ? getPriceKeyDefinition(priceKey).canonicalUnit : metal.trim().toLowerCase() === 'au' ? 'USD_per_toz' : null;
-    if (resolvedUnit !== 'USD_per_toz' && resolvedUnit !== 'USD_per_lb' && resolvedUnit !== 'USD_per_tonne') return null;
-    canonicalUnit = resolvedUnit;
+    priceUnit = priceKey ? getPriceKeyDefinition(priceKey).canonicalUnit.replace('_per_', '_') : metal.trim().toLowerCase() === 'au' ? 'USD_toz' : null;
   } catch { return null; }
-  const divisor = canonicalUnit === 'USD_per_lb' ? LB_PER_TONNE : 1;
-  const unit: 'oz' | 't' = canonicalUnit === 'USD_per_toz' ? 'oz' : 't';
+  if (!priceUnit) return null;
   return {
-    unit,
-    values: revenue.map((value, index) => finite(value) && value >= 0 && finite(prices[index]) && (prices[index] as number) > 0 ? (value / (prices[index] as number)) / divisor : null),
+    unit: display.unit,
+    values: revenue.map((value, index) => {
+      const sourcePrice = prices[index];
+      if (!finite(value) || value < 0 || !finite(sourcePrice) || sourcePrice <= 0) return null;
+      const canonicalPrice = convertPriceToCanonical(metal, sourcePrice, priceUnit as string);
+      return finite(canonicalPrice) && canonicalPrice > 0 ? (value / canonicalPrice) / display.divisor : null;
+    }),
   };
 }
 
