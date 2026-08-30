@@ -27,6 +27,7 @@ export type InvestmentScoreInputs = {
   tier: 1 | 2 | 3 | null;
   pNav: number | null;
   peak6xVsPrice: number | null;
+  valuationConvergenceScore1Pass: boolean | null;
   lomYears: number | null;
   cycleResistanceTier1Pass: boolean | null;
   downsideRobustnessPass: boolean | null;
