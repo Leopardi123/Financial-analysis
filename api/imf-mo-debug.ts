@@ -28,13 +28,19 @@ export default async function handler(req: any, res: any): Promise<void> {
     });
     const text = await response.text();
     const rows = parseImfCommoditySdmxResponse(text, mapping);
+    const obsIndex = text.indexOf('<Obs');
+    const namespacedObsIndex = text.search(/<[^>]*:Obs\b/);
+    const sampleIndex = obsIndex >= 0 ? obsIndex : namespacedObsIndex;
     res.status(200).json({
       ok: response.ok,
       status: response.status,
       contentType: response.headers.get('content-type'),
       url,
       mapping,
-      bodyPrefix: text.slice(0, 2000),
+      bodyLength: text.length,
+      bodyPrefix: text.slice(0, 1200),
+      firstObsIndex: sampleIndex,
+      obsSample: sampleIndex >= 0 ? text.slice(sampleIndex, sampleIndex + 2000) : null,
       parsedCount: rows.length,
       first: rows[0] ?? null,
       last: rows[rows.length - 1] ?? null,
