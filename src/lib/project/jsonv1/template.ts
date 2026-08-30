@@ -68,9 +68,9 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
 
 /**
  * Keep the default project JSON template equivalent in its active calculation
- * fields. Both report-locked overlays are opt-in and are not inserted into new
- * legacy-style project JSONs.
+ * fields. Both report-locked overlays are opt-in and do not alter calculation
+ * behavior. Metadata guidance is still exposed in newly created templates.
  */
 export function getProjectJsonV1Template(): ProjectJsonV1 {
-  return getProjectJsonV1TemplateLegacy();
+  return buildProjectJsonV1Template(getProjectJsonV1TemplateLegacy());
 }
