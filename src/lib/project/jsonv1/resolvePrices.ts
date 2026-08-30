@@ -29,7 +29,7 @@ export type MetalPriceDiagnostic = {
   manualFallbackAvailable: boolean;
   manualFallbackValue: number | null;
   fallbackUsed: boolean;
-  priceSourceUsed: 'fmp' | 'fred' | 'manual' | 'missing' | 'expired' | 'scenario-series';
+  priceSourceUsed: 'fmp' | 'fred' | 'imf' | 'manual' | 'missing' | 'expired' | 'scenario-series';
   manualEnteredAtUtc?: string | null;
   manualExpiresAtUtc?: string | null;
   reason: string;
@@ -368,7 +368,9 @@ export async function resolveProjectPricesToEngineInput(
         ? `FMP Legacy market price available for ${priceKey}.`
         : resolved.source === 'fred'
           ? `FRED/IMF monthly benchmark available for ${priceKey}.`
-          : `Missing provider price for ${priceKey}.`);
+          : resolved.source === 'imf'
+            ? `IMF Primary Commodity Prices monthly benchmark available for ${priceKey}.`
+            : `Missing provider price for ${priceKey}.`);
       manualFallbackValue = manualEntry?.value ?? null;
       manualFallbackAvailable = typeof manualEntry?.value === 'number' && Number.isFinite(manualEntry.value);
       manualEnteredAtUtc = manualEntry?.enteredAtUtc ?? null;
@@ -451,7 +453,7 @@ export async function resolveProjectPricesToEngineInput(
   }
 
   const metalsUsingLivePrices = Object.entries(metalPriceDiagnostics)
-    .filter(([, item]) => item.priceSourceUsed === 'fmp' || item.priceSourceUsed === 'fred')
+    .filter(([, item]) => item.priceSourceUsed === 'fmp' || item.priceSourceUsed === 'fred' || item.priceSourceUsed === 'imf')
     .map(([metal]) => metal)
     .sort((a, b) => a.localeCompare(b));
   const metalsUsingManualFallback = Object.entries(metalPriceDiagnostics)
