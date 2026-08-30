@@ -51,6 +51,8 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     throw new Error(TAX_MODE_CONFLICT_ERROR);
   }
 
+  const hasTerminalProceeds = input.terminalProceedsUSD !== undefined && input.terminalProceedsUSD !== null;
+
   const revenueUSD = normalizeSeriesLength(input.revenueUSD, length, 'revenueUSD');
   const operatingCostsUSD = normalizeSeriesLength(input.operatingCostsUSD, length, 'operatingCostsUSD');
   const sustainingCapexUSD = normalizeSeriesLength(input.sustainingCapexUSD, length, 'sustainingCapexUSD');
@@ -64,6 +66,9 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const taxCashFlowUSD = hasExplicitTaxCashFlow
     ? normalizeSeriesLength(input.taxCashFlowUSD, length, 'taxCashFlowUSD')
     : null;
+  const terminalProceedsUSD = hasTerminalProceeds
+    ? normalizeSeriesLength(input.terminalProceedsUSD, length, 'terminalProceedsUSD')
+    : null;
 
   const sustainingCostUSD: (number | null)[] = new Array(length).fill(null);
   const sustainingAdjustedOperatingEarningsUSD: (number | null)[] = new Array(length).fill(null);
@@ -76,6 +81,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const nopatUSD: (number | null)[] = new Array(length).fill(null);
   const fcffUSD: (number | null)[] = new Array(length).fill(null);
   const workingCapitalDeltaUSD_effective: (number | null)[] = new Array(length).fill(0);
+  const terminalProceedsUSD_effective: (number | null)[] = new Array(length).fill(0);
 
   for (let t = 0; t < length; t += 1) {
     const r = safeValue(revenueUSD, t);
@@ -87,18 +93,21 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     const bp = safeValue(byproductCreditsUSD, t);
     const dep = safeValue(depreciationUSD, t);
     const dWC = safeValue(workingCapitalDeltaUSD, t);
+    const terminal = hasTerminalProceeds ? terminalProceedsUSD?.[t] ?? null : 0;
     const cx = capexUSD[t];
     if (cx !== null && cx < 0) {
       throw new Error(CAPEX_NEGATIVE_ERROR);
     }
     workingCapitalDeltaUSD_effective[t] = dWC;
 
+    if (!isFiniteNumber(terminal)) {
+      terminalProceedsUSD_effective[t] = null;
+    } else {
+      terminalProceedsUSD_effective[t] = terminal;
+    }
+
     const sustainingValue = op + sc + ga + roy + rec - bp;
-    // Project-specific operating earnings after sustaining investment.  This is
-    // deliberately not EBITDA and remains the basis for EBIT/tax in this phase.
     const sustainingAdjustedOperatingEarningsValue = r - op - sc - ga - roy - rec + bp;
-    // Informational/valuation EBITDA excludes sustaining CAPEX.  Do not use this
-    // parallel series for EBIT, tax, NOPAT or FCFF without a separate policy change.
     const ebitdaValue = r - op - ga - roy - rec + bp;
     const ebitValue = sustainingAdjustedOperatingEarningsValue - dep;
 
@@ -131,9 +140,6 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
         fcffUSD[t] = null;
         continue;
       }
-      // taxUSD preserves the existing output sign convention: positive is a
-      // tax expense/payment, negative is a tax credit. Input cash-flow signs are
-      // the opposite because positive taxCashFlowUSD is an inflow.
       const taxValue = -explicitTaxCashFlowAtT;
       taxUSD[t] = Number.isFinite(taxValue) ? taxValue : null;
       effectiveTaxRate[t] = ebitAtT > 0 && taxUSD[t] !== null ? (taxUSD[t] as number) / ebitAtT : null;
@@ -175,16 +181,16 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
 
     const totalCapexValue = cx + sc;
     totalCapexUSD[t] = Number.isFinite(totalCapexValue) ? totalCapexValue : null;
-    if (totalCapexUSD[t] == null) {
+    if (totalCapexUSD[t] == null || terminalProceedsUSD_effective[t] == null) {
       fcffUSD[t] = null;
       continue;
     }
 
     const nopatAtT = nopatUSD[t] as number;
-    // Reclamation is already included in EBITDA/EBIT above and must not be deducted twice in FCFF.
-    // Sustaining CAPEX is already deducted in sustaining-adjusted operating
-    // earnings.  FCFF therefore deducts only capexUSD here, exactly once.
-    const fcffValue = nopatAtT + dep - cx - dWC;
+    // Reclamation and sustaining CAPEX are already included in operating earnings.
+    // Terminal proceeds are deliberately added only here so salvage/other disposal
+    // cash flows cannot distort revenue, EBITDA, EBIT or the tax base.
+    const fcffValue = nopatAtT + dep - cx - dWC + (terminalProceedsUSD_effective[t] as number);
     fcffUSD[t] = Number.isFinite(fcffValue) ? fcffValue : null;
   }
 
@@ -201,6 +207,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     nopatUSD,
     fcffUSD,
     workingCapitalDeltaUSD_effective,
+    terminalProceedsUSD_effective,
   };
 }
 
