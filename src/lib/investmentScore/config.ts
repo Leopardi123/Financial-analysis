@@ -1,6 +1,6 @@
 export const INVESTMENT_SCORE_CONFIG = {
   score1: {
-    pNavMax: 0.15,
+    valuationConvergenceRequired: 'EXTREME',
     tierRequired: 1,
     managementRequired: 'exceptional',
     lomDirectYears: 30,
@@ -9,8 +9,7 @@ export const INVESTMENT_SCORE_CONFIG = {
     requireNoFatalFlaw: true,
   },
   score2: {
-    pNavMax: 0.25,
-    peak6xVsPriceMin: 3,
+    valuationConvergenceRequired: 'VERY_STRONG',
     tierRequired: 1,
     managementMinimum: 'strong',
     lomDirectYears: 20,
@@ -19,8 +18,7 @@ export const INVESTMENT_SCORE_CONFIG = {
     requireNoFatalFlaw: true,
   },
   score3: {
-    pNavMax: 0.40,
-    peak6xVsPriceMin: 2,
+    valuationConvergenceRequired: 'STRONG',
     tierMax: 2,
     managementMinimum: 'adequate',
     requireDownsideRobustness: true,
