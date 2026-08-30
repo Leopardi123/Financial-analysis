@@ -4,6 +4,7 @@ import {
   aggregateOptionalityRating,
   exactFitManagementPass,
 } from './manualEvidence.ts';
+import { valuationConvergencePasses } from './valuationConvergence.ts';
 import type {
   GateCheck,
   InvestmentScoreInputs,
@@ -80,19 +81,25 @@ function deriveManualRatings(input: InvestmentScoreInputs): DerivedManualRatings
   };
 }
 
+function convergenceCheck(
+  input: InvestmentScoreInputs,
+  required: 'EXTREME' | 'VERY_STRONG' | 'STRONG',
+): GateCheck {
+  return check(
+    'valuationConvergence',
+    `${required.replace('_', ' ')} valuation convergence`,
+    valuationConvergencePasses(input.valuationConvergence, required),
+    input.valuationConvergence,
+    required,
+    'Canonical convergence requires both P/NAV PF and Peak 6x / pris to reach the centrally defined level; the two legs cannot compensate for each other.',
+  );
+}
+
 function score1Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings): ScoreGateResult {
   const c = INVESTMENT_SCORE_CONFIG.score1;
   return gate(1, [
     check('tier', 'Tier 1 required', input.tier === null ? null : input.tier === c.tierRequired, input.tier, c.tierRequired),
-    check('pNav', 'Extreme P/NAV', finite(input.pNav) ? input.pNav <= c.pNavMax : null, input.pNav, `<= ${c.pNavMax}`),
-    check(
-      'valuationConvergence',
-      'Independent valuation convergence',
-      input.valuationConvergenceScore1Pass,
-      input.valuationConvergenceScore1Pass,
-      true,
-      'Must be produced by a separately verified canonical convergence rule.',
-    ),
+    convergenceCheck(input, c.valuationConvergenceRequired),
     check(
       'management',
       'Exceptional management',
@@ -126,8 +133,7 @@ function score2Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings):
   const c = INVESTMENT_SCORE_CONFIG.score2;
   return gate(2, [
     check('tier', 'Tier 1 required', input.tier === null ? null : input.tier === c.tierRequired, input.tier, c.tierRequired),
-    check('pNav', 'P/NAV', finite(input.pNav) ? input.pNav <= c.pNavMax : null, input.pNav, `<= ${c.pNavMax}`),
-    check('peak6xVsPrice', 'Peak 6x / price confirmation', finite(input.peak6xVsPrice) ? input.peak6xVsPrice >= c.peak6xVsPriceMin : null, input.peak6xVsPrice, `>= ${c.peak6xVsPriceMin}`),
+    convergenceCheck(input, c.valuationConvergenceRequired),
     check('management', 'Strong management minimum', managementAtLeast(manual.managementRating, c.managementMinimum), manual.managementRating, `>= ${c.managementMinimum}`),
     check(
       'longevityOptionality',
@@ -145,8 +151,7 @@ function score3Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings):
   const c = INVESTMENT_SCORE_CONFIG.score3;
   return gate(3, [
     check('tier', 'Tier 1-2 required', input.tier === null ? null : input.tier <= c.tierMax, input.tier, `<= ${c.tierMax}`),
-    check('pNav', 'P/NAV', finite(input.pNav) ? input.pNav <= c.pNavMax : null, input.pNav, `<= ${c.pNavMax}`),
-    check('peak6xVsPrice', 'Peak 6x / price confirmation', finite(input.peak6xVsPrice) ? input.peak6xVsPrice >= c.peak6xVsPriceMin : null, input.peak6xVsPrice, `>= ${c.peak6xVsPriceMin}`),
+    convergenceCheck(input, c.valuationConvergenceRequired),
     check('management', 'Adequate management minimum', managementAtLeast(manual.managementRating, c.managementMinimum), manual.managementRating, `>= ${c.managementMinimum}`),
     check('downsideRobustness', 'Downside robustness', input.downsideRobustnessPass, input.downsideRobustnessPass, true),
     check('fatalFlaw', 'No fatal flaw', input.fatalFlaw === null ? null : input.fatalFlaw === false, input.fatalFlaw, false),
@@ -162,6 +167,10 @@ function clampRawScore(rawScore: number | null): number | null {
  * v0 hard-gate engine. It deliberately does not derive valuation or Tier from
  * UI state. Manual overlay aggregates are derived here from evidence so UI
  * cannot inject a precomputed management/optionality class.
+ *
+ * Valuation convergence is a canonical categorical input produced from the
+ * same P/NAV PF and Peak 6x / pris definitions used by Compare Stocks. Score
+ * gates consume only that category; threshold math is not duplicated here.
  *
  * The 4-10 continuous mapping remains provisional; hard gates can only make a
  * score worse, never better.
@@ -182,6 +191,7 @@ export function computeInvestmentScore(input: InvestmentScoreInputs): Investment
     .flatMap((result) => result.checks.filter((item) => item.passed === null).map((item) => `Score ${result.score}: ${item.label}`));
 
   const components = {
+    valuationConvergence: input.valuationConvergence,
     managementRating: manual.managementRating,
     optionalityRating: manual.optionalityRating,
   };
