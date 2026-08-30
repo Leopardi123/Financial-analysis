@@ -6,6 +6,7 @@ import { computeInvestmentScore } from '../../lib/investmentScore/engine.ts';
 import { computeProvisionalRawScoreV0 } from '../../lib/investmentScore/rawScore.ts';
 import type { InvestmentScoreResult } from '../../lib/investmentScore/types.ts';
 import type { Tier1PreRevenueAssessment } from '../../lib/tier1/preRevenue.ts';
+import '../../styles/investment-score-cell.css';
 
 type SnapshotWithValuationSeries = CorporateSnapshot & Record<string, unknown> & {
   corporateValuationTimeSeries?: { rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }> };
