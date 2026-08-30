@@ -22,11 +22,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - name: Apply deterministic patch
         run: python .github/scripts/apply-berg-snapshot-fix.py
       - name: Install
-        run: npm ci
+        run: npm install
       - name: Run focused and prebuild tests
         run: npm run prebuild
       - name: Typecheck and build
