@@ -1,5 +1,6 @@
 import { getPriceKeyDefinition } from '../../prices/keys.ts';
 import { isFredCommodityPriceKey } from '../../prices/providers/fred.ts';
+import { isImfCommodityPriceKey } from '../../prices/providers/imfCommodity.ts';
 
 export type ManualMetalPriceEntry = {
   metalKey: string;
@@ -38,7 +39,9 @@ function toUnitLabel(priceKey: string): string | null {
 }
 
 function providerLabel(priceKey: string): string {
-  return isFredCommodityPriceKey(priceKey) ? 'FRED/IMF monthly benchmark' : 'FMP Legacy price';
+  if (isFredCommodityPriceKey(priceKey)) return 'FRED/IMF monthly benchmark';
+  if (isImfCommodityPriceKey(priceKey)) return 'IMF Primary Commodity Prices monthly benchmark';
+  return 'FMP Legacy price';
 }
 
 export function isManualMetalPriceValid(entry: ManualMetalPriceEntry | null | undefined, nowUtcIso: string = new Date().toISOString()): boolean {
@@ -57,18 +60,18 @@ export function resolveMetalPrice(args: {
 }): ResolvedMetalPrice {
   const nowUtcIso = args.nowUtcIso ?? new Date().toISOString();
   const unit = args.manualEntry?.unit ?? toUnitLabel(args.metalKey);
-  const isFred = isFredCommodityPriceKey(args.metalKey);
+  const isMonthlyBenchmark = isFredCommodityPriceKey(args.metalKey) || isImfCommodityPriceKey(args.metalKey);
   const provider = providerLabel(args.metalKey);
 
   if (isFinitePositive(args.fmpSpotValue)) {
     return {
       value: args.fmpSpotValue,
-      source: isFred ? 'fred' : 'fmp',
+      source: isMonthlyBenchmark ? 'fred' : 'fmp',
       metal: args.metal,
       unit,
       enteredAtUtc: null,
       expiresAtUtc: null,
-      reason: isFred ? `${provider} available.` : null,
+      reason: isMonthlyBenchmark ? `${provider} available.` : null,
       actionRequired: false,
     };
   }
