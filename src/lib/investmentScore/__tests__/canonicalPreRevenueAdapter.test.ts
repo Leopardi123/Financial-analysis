@@ -63,22 +63,15 @@ function tierAssessment(args: {
     fatalFlaw: false,
   });
 
-  // Compare Stocks P/NAV PF: price * (modeled PF + manual extra shares) / NAV.
   assert.equal(result.inputs.pNav, 0.25);
-
-  // Compare Stocks Peak 6x / price: per-share 6x series scaled for extra shares.
-  // 10 * (100 / 125) / 2 = 4x.
   assert.equal(result.inputs.peak6xVsPrice, 4);
-
-  // 0.25x P/NAV + 4x Peak 6x / price reaches VERY_STRONG, not EXTREME.
   assert.equal(result.inputs.valuationConvergence, 'VERY_STRONG');
   assert.equal(result.sources.valuationConvergence, 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE');
-
-  // Positive canonical payable AuEq years are counted, not calendar span length.
   assert.equal(result.inputs.lomYears, 3);
   assert.equal(result.inputs.tier, 1);
   assert.equal(result.inputs.cycleResistanceTier1Pass, true);
-  assert.equal(result.inputs.downsideRobustnessPass, null);
+  assert.equal(result.inputs.downsideRobustnessPass, true, 'Score-3 downside robustness reuses the canonical Tier cycle gate during v0 calibration');
+  assert.equal(result.sources.downsideRobustnessPass, 'TIER1_PRE_REVENUE_CYCLE_GATE_V0_CALIBRATION');
   assert.equal(result.inputs.rawScore, null);
   assert.equal(result.sources.pNav, 'COMPARE_STOCKS_PNAV_PF');
   assert.equal(result.sources.peak6xVsPrice, 'COMPARE_STOCKS_PEAK_6X_VS_PRICE');
@@ -106,8 +99,10 @@ function tierAssessment(args: {
   assert.equal(result.inputs.lomYears, null);
   assert.equal(result.inputs.tier, null);
   assert.equal(result.inputs.cycleResistanceTier1Pass, null);
+  assert.equal(result.inputs.downsideRobustnessPass, null);
   assert.equal(result.sources.pNav, 'UNAVAILABLE');
   assert.equal(result.sources.valuationConvergence, 'UNAVAILABLE');
+  assert.equal(result.sources.downsideRobustnessPass, 'UNAVAILABLE');
   assert.ok(result.diagnostics.some((item) => item.includes('Ej verifierad')));
 }
 
@@ -125,5 +120,6 @@ function tierAssessment(args: {
   assert.equal(result.inputs.tier, null);
   assert.equal(result.inputs.valuationConvergence, 'NOT_VERIFIED');
   assert.equal(result.inputs.cycleResistanceTier1Pass, false);
+  assert.equal(result.inputs.downsideRobustnessPass, false, 'failed Tier cycle gate also fails Score-3 downside robustness during v0 calibration');
   assert.equal(result.inputs.fatalFlaw, true);
 }
