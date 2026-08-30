@@ -180,7 +180,8 @@ function clampRawScore(rawScore: number | null): number | null {
  * gates consume only that category; threshold math is not duplicated here.
  *
  * The 4-10 continuous mapping remains provisional; hard gates can only make a
- * score worse, never better.
+ * score worse, never better. The continuous score is mapped to the nearest
+ * integer; hard gates are then applied as a lower bound on quality.
  */
 export function computeInvestmentScore(input: InvestmentScoreInputs): InvestmentScoreResult {
   const rawScore = clampRawScore(input.rawScore);
@@ -216,7 +217,7 @@ export function computeInvestmentScore(input: InvestmentScoreInputs): Investment
     };
   }
 
-  const provisionalRounded = Math.ceil(rawScore);
+  const provisionalRounded = Math.round(rawScore);
   const investmentScore = Math.max(bestAllowedScore, provisionalRounded);
 
   return {
@@ -227,7 +228,7 @@ export function computeInvestmentScore(input: InvestmentScoreInputs): Investment
     gates,
     gateFailures,
     diagnostics: [
-      'v0: mappingen för Score 4-10 är preliminär och ska kalibreras mot test-JSON.',
+      'v0: rawScore mappas till närmaste heltal; Score 1-3 begränsas därefter av hårda gates. Mappingen ska fortsatt kalibreras mot riktiga project JSON.',
       ...unknownRequired.map((value) => `Ej verifierad: ${value}.`),
     ],
     components,
