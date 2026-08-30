@@ -88,7 +88,7 @@ replace_once(
             ? sanitizeSeries(out.phase1.effectiveTaxRate)
             : ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
           const terminalProceedsUSD_effective = hasTerminalProceeds
-            ? sanitizeSeries(out.phase1.terminalProceedsUSD_effective)
+            ? sanitizeSeries(out.phase1.terminalProceedsUSD_effective ?? new Array<number | null>(projectLength).fill(null))
             : new Array<number | null>(projectLength).fill(0);
           const fcffByCentralEbit = ebitUSD.map((ebit, t) => {
             if (ebit === null) return null;
