@@ -5,6 +5,8 @@ import { convertMass, convertPreciousQuantity } from '../prices/units.ts';
 export type ReportedCostEvidence = {
   status: 'AVAILABLE' | 'NOT_AVAILABLE' | 'INVALID';
   metric: Tier1CostMetric;
+  reportedLabel: string | null;
+  definitionNotes: string | null;
   basisId: Tier1CostBasisId | null;
   value: number | null;
   unit: 'USD/lb' | 'USD/toz' | null;
@@ -38,16 +40,36 @@ function parseRaw(rawJson: unknown): Record<string, unknown> {
   return record(rawJson);
 }
 
+function emptyEvidence(status: 'NOT_AVAILABLE' | 'INVALID', metric: Tier1CostMetric, reason: string): ReportedCostEvidence {
+  return {
+    status,
+    metric,
+    reportedLabel: null,
+    definitionNotes: null,
+    basisId: null,
+    value: null,
+    unit: null,
+    costBaseYear: null,
+    sourceId: null,
+    pageOrTable: null,
+    reason,
+  };
+}
+
 /**
  * Best-available reported-cost reader for Tier.
  *
- * project_json describes the current project model; it does not need to carry
- * benchmark-specific proof fields in order for Tier to use an explicit cost
- * disclosed in the JSON. metric + value + unit are the only required fields.
- * Legacy basis/year/source fields are accepted as optional diagnostics.
+ * `metric` selects the canonical Tier benchmark that the reported measure is
+ * economically comparable to. It does not assert that the technical report
+ * uses that exact terminology. `reportedLabel` and `definitionNotes` preserve
+ * the report's actual wording and any material definition differences.
+ *
+ * metric + value + unit remain the only required fields so existing project
+ * JSON stays backwards compatible. Source/page and terminology fields are
+ * optional diagnostics/evidence.
  *
  * Negative reported costs are valid evidence. By-product-heavy copper projects
- * can legitimately disclose negative C1 cash costs, so rejecting values below
+ * can legitimately disclose negative cash costs, so rejecting values below
  * zero would incorrectly turn a verified low-cost project into NOT_VERIFIED.
  *
  * If more than one usable entry exists for the same metric, the last usable
@@ -59,29 +81,17 @@ export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Ti
   const economicsBreakdown = record(root.economicsBreakdown);
   const rawEntries = economicsBreakdown.reportedCostMetrics;
   if (rawEntries === undefined || rawEntries === null) {
-    return {
-      status: 'NOT_AVAILABLE', metric: expectedMetric, basisId: null, value: null, unit: null,
-      costBaseYear: null, sourceId: null, pageOrTable: null,
-      reason: `Ingen rapporterad ${expectedMetric} finns i economicsBreakdown.reportedCostMetrics.`,
-    };
+    return emptyEvidence('NOT_AVAILABLE', expectedMetric, `Ingen rapporterad kostnadsuppgift mappad till ${expectedMetric} finns i economicsBreakdown.reportedCostMetrics.`);
   }
   if (!Array.isArray(rawEntries)) {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: null, value: null, unit: null,
-      costBaseYear: null, sourceId: null, pageOrTable: null,
-      reason: 'economicsBreakdown.reportedCostMetrics måste vara en array.',
-    };
+    return emptyEvidence('INVALID', expectedMetric, 'economicsBreakdown.reportedCostMetrics måste vara en array.');
   }
 
   const matches = rawEntries
     .map((item) => record(item))
     .filter((item) => item.metric === expectedMetric);
   if (matches.length === 0) {
-    return {
-      status: 'NOT_AVAILABLE', metric: expectedMetric, basisId: null, value: null, unit: null,
-      costBaseYear: null, sourceId: null, pageOrTable: null,
-      reason: `Ingen rapporterad ${expectedMetric} finns i economicsBreakdown.reportedCostMetrics.`,
-    };
+    return emptyEvidence('NOT_AVAILABLE', expectedMetric, `Ingen rapporterad kostnadsuppgift mappad till ${expectedMetric} finns i economicsBreakdown.reportedCostMetrics.`);
   }
 
   const usable = matches.filter((entry) => {
@@ -95,11 +105,7 @@ export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Ti
   });
 
   if (usable.length === 0) {
-    return {
-      status: 'INVALID', metric: expectedMetric, basisId: null, value: null, unit: null,
-      costBaseYear: null, sourceId: null, pageOrTable: null,
-      reason: `Rapporterad ${expectedMetric} finns men saknar användbart value/unit.`,
-    };
+    return emptyEvidence('INVALID', expectedMetric, `Rapporterad kostnadsuppgift mappad till ${expectedMetric} finns men saknar användbart value/unit.`);
   }
 
   const entry = usable[usable.length - 1];
@@ -113,10 +119,13 @@ export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Ti
     : null;
   const sourceId = typeof entry.sourceId === 'string' && entry.sourceId.trim() ? entry.sourceId.trim() : null;
   const pageOrTable = typeof entry.pageOrTable === 'string' && entry.pageOrTable.trim() ? entry.pageOrTable.trim() : null;
+  const reportedLabel = typeof entry.reportedLabel === 'string' && entry.reportedLabel.trim() ? entry.reportedLabel.trim() : null;
+  const definitionNotes = typeof entry.definitionNotes === 'string' && entry.definitionNotes.trim() ? entry.definitionNotes.trim() : null;
   const value = entry.value as number;
   const unit = entry.unit as 'USD/lb' | 'USD/toz';
 
   const optionalContext = [
+    reportedLabel ? `rapportmått “${reportedLabel}”` : null,
     sourceId ? `källa ${sourceId}` : null,
     pageOrTable ? pageOrTable : null,
     costBaseYear ? `kostnadsår ${costBaseYear}` : null,
@@ -125,6 +134,8 @@ export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Ti
   return {
     status: 'AVAILABLE',
     metric: expectedMetric,
+    reportedLabel,
+    definitionNotes,
     basisId,
     value,
     unit,
@@ -132,8 +143,8 @@ export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Ti
     sourceId,
     pageOrTable,
     reason: optionalContext
-      ? `Rapporterad ${expectedMetric} används som bästa tillgängliga kostnadsuppgift (${optionalContext}).`
-      : `Rapporterad ${expectedMetric} används som bästa tillgängliga kostnadsuppgift i project_json.`,
+      ? `Bästa tillgängliga rapporterade kostnadsuppgift används mot canonical Tier-benchmark ${expectedMetric} (${optionalContext}).`
+      : `Bästa tillgängliga rapporterade kostnadsuppgift används mot canonical Tier-benchmark ${expectedMetric}.`,
   };
 }
 
