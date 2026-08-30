@@ -82,8 +82,20 @@ All must pass:
 - Tier 1-2.
 - At least `STRONG` canonical valuation convergence.
 - Management >= Adequate/Good; final minimum to be calibrated.
-- Downside robustness passes a canonical test.
+- Downside robustness passes.
 - No identified fatal flaw.
+
+### v0 downside-robustness calibration rule
+
+For the first real-JSON calibration, Score 3 deliberately uses **the exact same canonical Tier cycle gate** already used as cycle resistance for Scores 1-2. No second stress model is introduced yet.
+
+That means:
+
+- Tier cycle gate `PASS` -> Score-3 `downsideRobustnessPass = true`.
+- Tier cycle gate `FAIL` -> Score-3 `downsideRobustnessPass = false`.
+- Tier cycle gate `NOT_VERIFIED` -> Score-3 downside robustness is `Ej verifierad`.
+
+This is a calibration starting point, not a claim that Score 3 permanently needs the same severity as Scores 1-2. After running a mixed set of real project JSONs, the central rule may be relaxed or replaced if it makes Score 3 systematically too restrictive. Any such change must happen in the canonical Investment Score adapter/rule only; no project-specific exception is allowed.
 
 ## Scores 4-10
 
