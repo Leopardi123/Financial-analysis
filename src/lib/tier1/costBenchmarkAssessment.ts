@@ -48,6 +48,10 @@ function digitisedBoundaryNote(value: number, benchmark: Tier1CostBenchmark): st
  * available project cost; benchmark read-off uncertainty is diagnostic rather
  * than a hard guard. Invalid/missing values, units and benchmark boundaries
  * remain fail-closed.
+ *
+ * Negative reported C1 values are legitimate for by-product-heavy mines and
+ * remain directly comparable to a homogeneous C1 curve. Do not reject them
+ * merely for being below zero.
  */
 export function assessCostAgainstBenchmark(args: {
   primaryMetal: Tier1Metal;
@@ -92,7 +96,7 @@ export function assessCostAgainstBenchmark(args: {
     };
   }
 
-  if (!finite(args.value) || args.value < 0) {
+  if (!finite(args.value)) {
     return {
       status: 'NOT_VERIFIED', tier: null, value: null,
       threshold: benchmark.q1Max, unit: benchmark.unit,
@@ -122,9 +126,6 @@ export function assessCostAgainstBenchmark(args: {
     };
   }
 
-  // Best-available policy: use the digitised point estimate for classification.
-  // boundaryUncertaintyAbs is retained for disclosure/diagnostics, not as a
-  // second hard guard that can erase an otherwise usable project cost.
   const classified = classifyCostAgainstPercentiles({
     value: args.value,
     p25Max: benchmark.q1Max,

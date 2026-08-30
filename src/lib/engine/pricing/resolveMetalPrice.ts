@@ -13,7 +13,7 @@ export type ManualMetalPriceEntry = {
 
 export type ResolvedMetalPrice = {
   value: number | null;
-  source: 'fmp' | 'fred' | 'manual' | 'missing' | 'expired';
+  source: 'fmp' | 'fred' | 'imf' | 'manual' | 'missing' | 'expired';
   metal: string;
   unit: string | null;
   enteredAtUtc: string | null;
@@ -60,13 +60,15 @@ export function resolveMetalPrice(args: {
 }): ResolvedMetalPrice {
   const nowUtcIso = args.nowUtcIso ?? new Date().toISOString();
   const unit = args.manualEntry?.unit ?? toUnitLabel(args.metalKey);
-  const isMonthlyBenchmark = isFredCommodityPriceKey(args.metalKey) || isImfCommodityPriceKey(args.metalKey);
+  const isFredBenchmark = isFredCommodityPriceKey(args.metalKey);
+  const isImfBenchmark = isImfCommodityPriceKey(args.metalKey);
+  const isMonthlyBenchmark = isFredBenchmark || isImfBenchmark;
   const provider = providerLabel(args.metalKey);
 
   if (isFinitePositive(args.fmpSpotValue)) {
     return {
       value: args.fmpSpotValue,
-      source: isMonthlyBenchmark ? 'fred' : 'fmp',
+      source: isImfBenchmark ? 'imf' : isFredBenchmark ? 'fred' : 'fmp',
       metal: args.metal,
       unit,
       enteredAtUtc: null,

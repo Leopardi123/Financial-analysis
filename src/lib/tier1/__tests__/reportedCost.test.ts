@@ -17,6 +17,30 @@ assert.equal(minimal.value, 1.21);
 assert.equal(minimal.basisId, null);
 assert.equal(minimal.costBaseYear, null);
 
+const negativeCopperC1 = extractReportedCostEvidence({
+  economicsBreakdown: {
+    reportedCostMetrics: [{
+      metric: 'C1_CU_USD_PER_LB',
+      value: -0.17,
+      unit: 'USD/lb',
+    }],
+  },
+}, 'C1_CU_USD_PER_LB');
+assert.equal(negativeCopperC1.status, 'AVAILABLE');
+assert.equal(negativeCopperC1.value, -0.17);
+
+const negativeCopperC1Gate = assessCostAgainstBenchmark({
+  primaryMetal: 'Cu',
+  primaryMetalRevenueShare: 0.55,
+  metric: 'C1_CU_USD_PER_LB',
+  value: -0.17,
+  benchmark: TIER1_COST_BENCHMARKS.Cu,
+  nowUtc: '2026-08-30T00:00:00Z',
+});
+assert.equal(negativeCopperC1Gate.status, 'PASS');
+assert.equal(negativeCopperC1Gate.tier, 1);
+assert.equal(negativeCopperC1Gate.value, -0.17);
+
 const legacyRich = extractReportedCostEvidence({
   economicsBreakdown: {
     reportedCostMetrics: [{
@@ -36,8 +60,6 @@ assert.equal(legacyRich.basisId, 'S_AND_P_CO_PRODUCT_AISC_AU');
 assert.equal(legacyRich.costBaseYear, 2025);
 assert.equal(legacyRich.pageOrTable, 'Table 19-6, p. 158');
 
-// A newer usable entry later in the JSON wins without requiring the old report
-// value to remain a hard guard on the current model.
 const updated = extractReportedCostEvidence({
   economicsBreakdown: {
     reportedCostMetrics: [

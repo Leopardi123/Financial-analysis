@@ -81,7 +81,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/refresh-companies": () => import("../src/server/routes/admin/refresh-companies.js"),
   "admin/fx/ingest": () => import("../src/server/routes/admin/fx-ingest.js"),
   "admin/macro/ingest": () => import("../src/server/routes/admin/macro-ingest.js"),
-  "admin/macro/run-engine": () => import("../src/server/routes/admin/macro-run-engine.js"),
+  "admin/macro/run-engine": () => import("../src/server/routes/admin/macro/run-engine.js"),
   "admin/rebuild-macro-snapshot": () => import("../src/server/routes/admin/rebuild-macro-snapshot.js"),
   "admin/refresh-price-screen": () => import("../src/server/routes/admin/refresh-price-screen.js"),
   companies: () => import("../src/server/routes/companies.js"),
@@ -235,7 +235,7 @@ export default async function handler(req: any, res: any) {
         price: number | null;
         asof_utc: string | null;
         asof_period: string | null;
-        provider: "FMP" | "FRED" | null;
+        provider: "FMP" | "FRED" | "IMF" | null;
         source_symbol: string | null;
         price_type: "market_quote" | "monthly_period_average" | null;
       };
