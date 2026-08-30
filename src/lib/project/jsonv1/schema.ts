@@ -97,14 +97,21 @@ export type ProjectJsonV1 = {
       notes?: string | null;
     } | null;
     /**
-     * Optional current reported cost used by Tier as best-available project
-     * information. Keep this intentionally small: metric + value + unit.
-     * The benchmark definition belongs to the Tier engine, not project_json.
+     * Optional reported project cost used by Tier as best-available evidence.
+     * `metric` selects the canonical Tier benchmark the reported measure is
+     * economically comparable to; it does not assert that the report itself
+     * uses that exact label. Preserve the report's wording in reportedLabel and
+     * explain material definition differences in definitionNotes. Only map a
+     * reported measure when its economic basis is sufficiently comparable.
      */
     reportedCostMetrics?: Array<{
       metric: ProjectReportedCostMetric;
+      reportedLabel?: string | null;
       value: number;
       unit: 'USD/lb' | 'USD/toz';
+      definitionNotes?: string | null;
+      sourceId?: string | null;
+      pageOrTable?: string | null;
     }> | null;
     cogs?: {
       miningUSD?: Array<number | null>;
