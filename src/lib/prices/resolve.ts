@@ -3,6 +3,7 @@ import { convertPriceToCanonical } from './units/convert.ts';
 import { getPriceKeyMeta, getProviderMapping } from './registry/getPriceKeyMeta.ts';
 import { buildHistoricalWindowUtc, fetchHistorical, getLegacyQuote, resolveLegacyCommodityCloseOnOrBefore, type ProviderPriceRow } from './providers/fmp.ts';
 import { fetchFredCommodityPriceSeries, getFredCommodityPriceMapping } from './providers/fred.ts';
+import { fetchImfCommodityPriceSeries, getImfCommodityPriceMapping } from './providers/imfCommodity.ts';
 import { downsampleDailyToMonthlyEom, findLastMonthlyDate, getMonthlySeries, upsertMonthlySeries } from './store/monthly.ts';
 import { getLegacySymbolForPriceKey } from './providers/legacyCommoditySymbolMap.ts';
 
@@ -12,7 +13,7 @@ export type PriceScenario =
   | { mode: 'fixed'; fixedByKey: Record<string, number> };
 
 export type ResolvedPriceSeriesMeta = {
-  provider: 'FMP_LEGACY' | 'FRED_IMF' | 'FIXED' | 'STORED_MONTHLY';
+  provider: 'FMP_LEGACY' | 'FRED_IMF' | 'IMF' | 'FIXED' | 'STORED_MONTHLY';
   sourceIdentifier: string | null;
   priceType: 'market_close' | 'monthly_period_average' | 'fixed' | 'stored_monthly';
   asOfDateUtc: string | null;
@@ -31,6 +32,7 @@ type ResolveDeps = {
   getProviderMappingFn: typeof getProviderMapping;
   fetchHistoricalFn: typeof fetchHistorical;
   fetchFredCommodityPriceSeriesFn: typeof fetchFredCommodityPriceSeries;
+  fetchImfCommodityPriceSeriesFn: typeof fetchImfCommodityPriceSeries;
   upsertMonthlySeriesFn: typeof upsertMonthlySeries;
   getMonthlySeriesFn: typeof getMonthlySeries;
   getLegacyQuoteFn: typeof getLegacyQuote;
@@ -44,6 +46,7 @@ function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
     getProviderMappingFn: deps.getProviderMappingFn ?? getProviderMapping,
     fetchHistoricalFn: deps.fetchHistoricalFn ?? fetchHistorical,
     fetchFredCommodityPriceSeriesFn: deps.fetchFredCommodityPriceSeriesFn ?? fetchFredCommodityPriceSeries,
+    fetchImfCommodityPriceSeriesFn: deps.fetchImfCommodityPriceSeriesFn ?? fetchImfCommodityPriceSeries,
     upsertMonthlySeriesFn: deps.upsertMonthlySeriesFn ?? upsertMonthlySeries,
     getMonthlySeriesFn: deps.getMonthlySeriesFn ?? getMonthlySeries,
     getLegacyQuoteFn: deps.getLegacyQuoteFn ?? getLegacyQuote,
@@ -176,6 +179,81 @@ async function resolveFredCommoditySeries(
   return { values, warnings: [...new Set(warnings)], meta };
 }
 
+async function resolveImfCommoditySeries(
+  priceKey: string,
+  anchorDatesUtc: string[],
+  scenario: Exclude<PriceScenario, { mode: 'fixed' }>,
+  deps: ResolveDeps,
+): Promise<ResolvedPriceSeries> {
+  const mapping = getImfCommodityPriceMapping(priceKey);
+  if (!mapping) {
+    throw new Error(`No verified IMF commodity mapping for ${priceKey}`);
+  }
+
+  const sortedAnchors = [...anchorDatesUtc].sort();
+  const minAnchor = sortedAnchors[0];
+  const maxAnchor = sortedAnchors[sortedAnchors.length - 1];
+  const today = todayUtcDateString();
+  const providerTo = maxAnchor > today ? today : maxAnchor;
+  const providerFrom = scenario.mode === 'percentile'
+    ? subtractUtcYears(minAnchor > today ? today : minAnchor, scenario.lookbackYears)
+    : subtractUtcMonths(providerTo, 18);
+  const definition = getPriceKeyDefinition(priceKey);
+  const providerRows = await deps.fetchImfCommodityPriceSeriesFn(mapping, { fromUtc: providerFrom, toUtc: providerTo });
+  const rows = providerRows.map((row) => ({
+    ...row,
+    value: convertPriceToCanonical({
+      value: row.close,
+      fromUnit: mapping.providerUnit,
+      canonicalUnit: definition.canonicalUnit,
+    }),
+  }));
+  const warnings: string[] = [];
+  const latestEligible = rows.filter((row) => row.dateUtc <= providerTo);
+  const latestSource = latestEligible.length > 0 ? latestEligible[latestEligible.length - 1] : null;
+  const meta: ResolvedPriceSeriesMeta = {
+    provider: 'IMF',
+    sourceIdentifier: mapping.datasetSeriesId,
+    priceType: 'monthly_period_average',
+    asOfDateUtc: latestSource?.dateUtc ?? null,
+    asOfPeriod: latestSource?.sourcePeriod ?? null,
+  };
+
+  if (scenario.mode === 'spot') {
+    const values = anchorDatesUtc.map((anchorDateUtc) => {
+      const effectiveAnchor = anchorDateUtc > today ? today : anchorDateUtc;
+      const eligible = rows.filter((row) => row.dateUtc <= effectiveAnchor);
+      return eligible.length > 0 ? eligible[eligible.length - 1].value : null;
+    });
+
+    if (latestSource) {
+      warnings.push(`IMF monthly benchmark ${mapping.datasetSeriesId}: period-average as-of ${latestSource.sourcePeriod}; scenario=spot uses the latest available monthly benchmark, not a spot quote.`);
+    } else {
+      warnings.push(`No IMF monthly benchmark available for ${mapping.datasetSeriesId} on or before ${providerTo}`);
+    }
+    return { values, warnings, meta };
+  }
+
+  const values = anchorDatesUtc.map((anchorDateUtc) => {
+    const effectiveAnchor = anchorDateUtc > today ? today : anchorDateUtc;
+    const windowStart = subtractUtcYears(effectiveAnchor, scenario.lookbackYears);
+    const windowValues = rows
+      .filter((row) => row.dateUtc >= windowStart && row.dateUtc <= effectiveAnchor)
+      .map((row) => row.value)
+      .sort((a, b) => a - b);
+
+    if (windowValues.length === 0) {
+      warnings.push(`No IMF monthly observations in trailing ${scenario.lookbackYears}y window for ${mapping.datasetSeriesId} <= ${effectiveAnchor}`);
+      return null;
+    }
+
+    const idx = Math.floor((scenario.percentile / 100) * (windowValues.length - 1));
+    return windowValues[idx];
+  });
+
+  return { values, warnings: [...new Set(warnings)], meta };
+}
+
 export async function resolvePriceSeries(
   args: {
     price_key: string;
@@ -212,6 +290,10 @@ export async function resolvePriceSeries(
 
   if (getFredCommodityPriceMapping(args.price_key)) {
     return resolveFredCommoditySeries(args.price_key, args.anchorDatesUtc, args.scenario, resolvedDeps);
+  }
+
+  if (getImfCommodityPriceMapping(args.price_key)) {
+    return resolveImfCommoditySeries(args.price_key, args.anchorDatesUtc, args.scenario, resolvedDeps);
   }
 
   const warnings: string[] = [];
