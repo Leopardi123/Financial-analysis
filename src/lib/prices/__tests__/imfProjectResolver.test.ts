@@ -1,3 +1,4 @@
+import { resolveMetalPrice } from '../../engine/pricing/resolveMetalPrice.ts';
 import { resolvePriceSeries } from '../resolve.ts';
 import {
   buildImfCommoditySdmxUrl,
@@ -99,6 +100,14 @@ function assert(condition: unknown, message: string): void {
     spot.warnings.some((warning) => warning.includes('latest available monthly benchmark')),
     'spot mode explains that IMF value is a monthly benchmark rather than a spot quote',
   );
+
+  const projectPrice = resolveMetalPrice({
+    metal: 'Mo',
+    metalKey: 'MO_USD_TONNE',
+    fmpSpotValue: spot.values[0] ?? null,
+  });
+  assertEqual(projectPrice.source, 'imf', 'project price provenance must preserve IMF rather than relabel the monthly benchmark as FRED');
+  assert(projectPrice.reason?.includes('IMF Primary Commodity Prices') === true, 'project price reason names IMF Primary Commodity Prices');
 
   const percentile = await resolvePriceSeries(
     {
