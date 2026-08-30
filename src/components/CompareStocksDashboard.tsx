@@ -115,15 +115,27 @@ function metalRecordValue<T>(record: Record<string, T> | undefined, metal: strin
 }
 
 function eqSeries(snapshot: SnapshotWithValuationSeries, metal: string): { values: Array<number | null>; unit: 'oz' | 't' } | null {
-  const revenue = snapshot.aggregation?.grossRevenueUSD_total;
+  const revenue = snapshot.series?.totalRevenue_USD ?? snapshot.aggregation?.grossRevenueUSD_total;
+  const seriesPrices = metalRecordValue(snapshot.series?.priceUsedByMetal_USD, metal);
+  const unitAudit = metalRecordValue(snapshot.series?.unitAudit?.metals, metal);
+  if (Array.isArray(revenue) && Array.isArray(seriesPrices) && revenue.length === seriesPrices.length && unitAudit) {
+    const canonicalPriceUnit = unitAudit.canonicalPriceUnit;
+    const divisor = canonicalPriceUnit === 'lb' ? LB_PER_TONNE : 1;
+    const unit: 'oz' | 't' = canonicalPriceUnit === 'toz' ? 'oz' : 't';
+    return {
+      unit,
+      values: revenue.map((value, index) => finite(value) && value >= 0 && finite(seriesPrices[index]) && (seriesPrices[index] as number) > 0 ? (value / (seriesPrices[index] as number)) / divisor : null),
+    };
+  }
+
   const priceKey = metalRecordValue(snapshot.aggregation?.priceKeyByMetal, metal);
   const prices = metalRecordValue(snapshot.aggregation?.priceUSDByMetal, metal) ?? (metal.trim().toLowerCase() === 'au' ? snapshot.aggregation?.auPriceUSDPerOz : undefined);
   if (!Array.isArray(revenue) || !Array.isArray(prices) || revenue.length !== prices.length) return null;
   let canonicalUnit: 'USD_per_toz' | 'USD_per_lb' | 'USD_per_tonne';
   try {
-    const unit = priceKey ? getPriceKeyDefinition(priceKey).canonicalUnit : metal.trim().toLowerCase() === 'au' ? 'USD_per_toz' : null;
-    if (unit !== 'USD_per_toz' && unit !== 'USD_per_lb' && unit !== 'USD_per_tonne') return null;
-    canonicalUnit = unit;
+    const resolvedUnit = priceKey ? getPriceKeyDefinition(priceKey).canonicalUnit : metal.trim().toLowerCase() === 'au' ? 'USD_per_toz' : null;
+    if (resolvedUnit !== 'USD_per_toz' && resolvedUnit !== 'USD_per_lb' && resolvedUnit !== 'USD_per_tonne') return null;
+    canonicalUnit = resolvedUnit;
   } catch { return null; }
   const divisor = canonicalUnit === 'USD_per_lb' ? LB_PER_TONNE : 1;
   const unit: 'oz' | 't' = canonicalUnit === 'USD_per_toz' ? 'oz' : 't';
