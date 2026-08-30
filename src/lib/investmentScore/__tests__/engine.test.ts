@@ -90,6 +90,31 @@ const base: InvestmentScoreInputs = {
 }
 
 {
+  const warintzaOptionality: OptionalityEvidence = {
+    resourceExpansion: { rating: 'exceptional' },
+    minePlanConversion: { rating: 'exceptional' },
+    expansionDebottlenecking: { rating: 'strong' },
+    districtStrategic: { rating: 'exceptional' },
+  };
+  const result = computeInvestmentScore({ ...base, rawScore: 1, lomYears: 22, optionality: warintzaOptionality });
+  const longevity = result.gates.score1.checks.find((item) => item.key === 'longevityOptionality');
+  assert.equal(longevity?.passed, true, 'Warintza-like 3/4 exceptional optionality must satisfy the 20y LOM exception');
+  assert.equal(result.components.optionalityRating, 'strong', 'hard-gate exception must not alter the conservative continuous optionality aggregate');
+}
+
+{
+  const bergOptionality: OptionalityEvidence = {
+    resourceExpansion: { rating: 'strong' },
+    minePlanConversion: { rating: 'strong' },
+    expansionDebottlenecking: { rating: 'some' },
+    districtStrategic: { rating: 'exceptional' },
+  };
+  const result = computeInvestmentScore({ ...base, rawScore: 1, lomYears: 28, optionality: bergOptionality });
+  const longevity = result.gates.score1.checks.find((item) => item.key === 'longevityOptionality');
+  assert.equal(longevity?.passed, false, 'one exceptional optionality dimension must not waive the 30y direct LOM requirement');
+}
+
+{
   const result = computeInvestmentScore({ ...base, rawScore: 1, lomYears: 19, optionality: optionality('exceptional') });
   assert.equal(result.gates.score1.passed, false);
 }
