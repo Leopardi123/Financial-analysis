@@ -97,9 +97,28 @@ That means:
 
 This is a calibration starting point, not a claim that Score 3 permanently needs the same severity as Scores 1-2. After running a mixed set of real project JSONs, the central rule may be relaxed or replaced if it makes Score 3 systematically too restrictive. Any such change must happen in the canonical Investment Score adapter/rule only; no project-specific exception is allowed.
 
-## Scores 4-10
+## Scores 4-10 · continuous v0 calibration
 
-Primarily continuous and deliberately not locked yet. The v0 engine may use a provisional mapping for diagnostics, but no 4-10 boundary is final until calibration with real project JSON.
+The current raw score is calibration-only and uses the conceptual split:
+
+- Asset quality 30 %.
+- Valuation 30 %.
+- Rerating 25 %.
+- Management 15 %.
+- Optionality is a positive-only bonus overlay.
+
+Continuous management deliberately differs from the conservative hard-gate aggregate. It preserves all four assessed dimensions instead of flooring them into one class:
+
+- Relevant execution track record: 40 % of the management component.
+- Capital allocation / shareholder alignment: 20 %.
+- Delivery / credibility: 20 %.
+- Technical / team fit: 20 %.
+
+The rating-to-score calibration remains `Exceptional 1.5`, `Strong 3`, `Adequate 5.5`, `Weak 9`. If any management dimension is `unassessed`, the continuous management component remains `Ej verifierad`; no neutral proxy is inserted.
+
+Raw score is mapped to the nearest integer (`Math.round`) before hard gates are applied. Example: 7.02 -> 7, 7.50 -> 8. Hard gates can still make the final score worse, never better.
+
+These breakpoints, dimension weights and the 4-10 mapping remain provisional until calibration against real project JSON.
 
 ## Manual evidence
 
@@ -134,7 +153,7 @@ This split avoids duplicating company management ratings across several projects
 
 ### UI staging
 
-`InvestmentScoreEvidenceDialog` is implemented as an isolated component but is deliberately not mounted into the existing Project editor yet. The first persistence/API layer and dialog can therefore be reviewed and tested without changing current Project, Corporate or Compare Stocks render paths. Wiring it to the project-list button is a separate additive step after this foundation is verified.
+The qualitative evidence dialog is mounted additively in the project editor. PRE REVENUE Compare Stocks has an Investment Score column whose cells open a read-only score breakdown popup. The popup displays canonical engine output and evidence; it must not implement separate scoring logic.
 
 ## Required diagnostics
 
