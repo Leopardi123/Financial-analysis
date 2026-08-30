@@ -31,7 +31,13 @@ export type InvestmentScoreInputs = {
   cycleResistanceTier1Pass: boolean | null;
   downsideRobustnessPass: boolean | null;
   fatalFlaw: boolean | null;
+
+  /** Canonical aggregate produced by the Investment Score engine layer, never by UI. */
+  managementRating: ManagementRating | null;
   management: ManagementEvidence | null;
+
+  /** Canonical aggregate produced by the Investment Score engine layer, never by UI. */
+  optionalityRating: OptionalityRating | null;
   optionality: OptionalityEvidence | null;
 
   /**
