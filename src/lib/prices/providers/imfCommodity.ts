@@ -44,13 +44,19 @@ export function isImfCommodityPriceKey(priceKey: string): boolean {
   return IMF_COMMODITY_PRICE_MAP.has(priceKey);
 }
 
-function toMonthEndUtc(sourcePeriod: string): string | null {
-  const match = /^(\d{4})-(\d{2})$/.exec(sourcePeriod.trim());
+function parseMonthlyPeriod(rawPeriod: string): { dateUtc: string; sourcePeriod: string } | null {
+  // IMF PCPS SDMX 2.1 currently emits monthly periods as YYYY-Mmm
+  // (for example 2026-M07), while CSV/older fixtures may use YYYY-MM.
+  // Normalize both to the canonical YYYY-MM source period used elsewhere.
+  const match = /^(\d{4})-(?:M)?(\d{2})$/.exec(rawPeriod.trim());
   if (!match) return null;
   const year = Number(match[1]);
   const month = Number(match[2]);
   if (!Number.isInteger(year) || month < 1 || month > 12) return null;
-  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  return {
+    dateUtc: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
+    sourcePeriod: `${year}-${String(month).padStart(2, '0')}`,
+  };
 }
 
 function parseCsvLine(line: string): string[] {
@@ -93,11 +99,10 @@ export function parseImfCommoditySdmxCsv(
   for (const line of lines.slice(1)) {
     const cells = parseCsvLine(line);
     if (indicatorIndex >= 0 && cells[indicatorIndex]?.trim() !== mapping.datasetSeriesId) continue;
-    const sourcePeriod = cells[timeIndex]?.trim() ?? '';
-    const dateUtc = toMonthEndUtc(sourcePeriod);
+    const period = parseMonthlyPeriod(cells[timeIndex]?.trim() ?? '');
     const close = Number(cells[valueIndex]);
-    if (!dateUtc || !Number.isFinite(close)) continue;
-    rows.push({ dateUtc, close, sourcePeriod });
+    if (!period || !Number.isFinite(close)) continue;
+    rows.push({ ...period, close });
   }
   return rows.sort((a, b) => a.dateUtc.localeCompare(b.dateUtc));
 }
@@ -115,20 +120,22 @@ function parseXmlAttributes(input: string): Record<string, string> {
 export function parseImfCommoditySdmxXml(text: string): ImfCommodityPriceRow[] {
   const rows: ImfCommodityPriceRow[] = [];
 
+  // Live IMF PCPS structure-specific SDMX 2.1 example:
+  // <Obs TIME_PERIOD="2026-M07" OBS_VALUE="66881.54062478261" ... />
   const obsTagPattern = /<(?:\w+:)?Obs\b([^>]*)\/?\s*>/g;
   let obsMatch: RegExpExecArray | null;
   while ((obsMatch = obsTagPattern.exec(text)) !== null) {
     const attrs = parseXmlAttributes(obsMatch[1]);
-    const sourcePeriod = attrs.TIME_PERIOD;
-    const dateUtc = sourcePeriod ? toMonthEndUtc(sourcePeriod) : null;
+    const period = attrs.TIME_PERIOD ? parseMonthlyPeriod(attrs.TIME_PERIOD) : null;
     const close = Number(attrs.OBS_VALUE);
-    if (!dateUtc || !Number.isFinite(close)) continue;
-    rows.push({ dateUtc, close, sourcePeriod });
+    if (!period || !Number.isFinite(close)) continue;
+    rows.push({ ...period, close });
   }
   if (rows.length > 0) {
     return rows.sort((a, b) => a.dateUtc.localeCompare(b.dateUtc));
   }
 
+  // Generic SDMX-ML 2.1 fallback: ObsDimension/ObsValue child elements.
   const genericObsPattern = /<(?:\w+:)?Obs\b[^>]*>([\s\S]*?)<\/(?:\w+:)?Obs>/g;
   let genericMatch: RegExpExecArray | null;
   while ((genericMatch = genericObsPattern.exec(text)) !== null) {
@@ -136,11 +143,11 @@ export function parseImfCommoditySdmxXml(text: string): ImfCommodityPriceRow[] {
     const dimensionMatch = /<(?:\w+:)?ObsDimension\b([^>]*)\/?\s*>/.exec(body);
     const valueMatch = /<(?:\w+:)?ObsValue\b([^>]*)\/?\s*>/.exec(body);
     if (!dimensionMatch || !valueMatch) continue;
-    const sourcePeriod = parseXmlAttributes(dimensionMatch[1]).value;
-    const dateUtc = sourcePeriod ? toMonthEndUtc(sourcePeriod) : null;
+    const rawPeriod = parseXmlAttributes(dimensionMatch[1]).value;
+    const period = rawPeriod ? parseMonthlyPeriod(rawPeriod) : null;
     const close = Number(parseXmlAttributes(valueMatch[1]).value);
-    if (!dateUtc || !Number.isFinite(close)) continue;
-    rows.push({ dateUtc, close, sourcePeriod });
+    if (!period || !Number.isFinite(close)) continue;
+    rows.push({ ...period, close });
   }
   return rows.sort((a, b) => a.dateUtc.localeCompare(b.dateUtc));
 }
@@ -173,7 +180,8 @@ export async function fetchImfCommodityPriceSeries(
   const url = buildImfCommoditySdmxUrl(mapping, args);
   const response = await (deps.fetchFn ?? fetch)(url, {
     headers: {
-      Accept: 'text/csv, application/vnd.sdmx.structurespecificdata+xml;version=2.1, application/xml;q=0.8',
+      // Request the format whose live IMF PCPS response shape is covered by tests.
+      Accept: 'application/vnd.sdmx.structurespecificdata+xml;version=2.1',
     },
   });
   if (!response.ok) {
