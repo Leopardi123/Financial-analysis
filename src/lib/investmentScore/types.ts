@@ -23,6 +23,11 @@ export type OptionalityEvidence = {
   districtStrategic: ManualAssessment<OptionalityRating>;
 };
 
+export type InvestmentScoreManualEvidence = {
+  management: ManagementEvidence | null;
+  optionality: OptionalityEvidence | null;
+};
+
 export type InvestmentScoreInputs = {
   tier: 1 | 2 | 3 | null;
   pNav: number | null;
@@ -33,12 +38,8 @@ export type InvestmentScoreInputs = {
   downsideRobustnessPass: boolean | null;
   fatalFlaw: boolean | null;
 
-  /** Canonical aggregate produced by the Investment Score engine layer, never by UI. */
-  managementRating: ManagementRating | null;
+  /** Manual evidence only. Aggregate ratings are derived centrally by the engine. */
   management: ManagementEvidence | null;
-
-  /** Canonical aggregate produced by the Investment Score engine layer, never by UI. */
-  optionalityRating: OptionalityRating | null;
   optionality: OptionalityEvidence | null;
 
   /**
@@ -69,7 +70,9 @@ export type InvestmentScoreComponentBreakdown = {
   assetQuality?: number | null;
   valuation?: number | null;
   rerating?: number | null;
+  managementRating?: ManagementRating | null;
   managementAdjustment?: number | null;
+  optionalityRating?: OptionalityRating | null;
   optionalityAdjustment?: number | null;
 };
 
