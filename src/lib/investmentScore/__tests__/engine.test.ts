@@ -44,10 +44,20 @@ const base: InvestmentScoreInputs = {
   const result = computeInvestmentScore(base);
   assert.equal(result.gates.score1.passed, true);
   assert.equal(result.bestAllowedScore, 1);
-  assert.equal(result.investmentScore, 2, 'raw continuous score still determines position within the allowed class');
+  assert.equal(result.investmentScore, 1, 'raw continuous score maps to nearest integer when hard gates permit it');
   assert.equal(result.components.valuationConvergence, 'EXTREME');
   assert.equal(result.components.managementRating, 'exceptional');
   assert.equal(result.components.optionalityRating, 'strong');
+}
+
+{
+  const result = computeInvestmentScore({ ...base, rawScore: 7.02, tier: 3, valuationConvergence: 'MIXED' });
+  assert.equal(result.investmentScore, 7, '7.02 should map to 7 rather than being systematically rounded upward');
+}
+
+{
+  const result = computeInvestmentScore({ ...base, rawScore: 7.5, tier: 3, valuationConvergence: 'MIXED' });
+  assert.equal(result.investmentScore, 8, 'half-step maps upward with standard nearest-integer rounding');
 }
 
 {
