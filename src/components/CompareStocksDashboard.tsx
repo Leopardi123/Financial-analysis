@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import ProducerCompareDashboard from './ProducerCompareDashboard.tsx';
 import Tier1StatusCell from './Tier1StatusCell.tsx';
+import InvestmentScoreCell from './investmentScore/InvestmentScoreCell.tsx';
 import { listCompanyProjects, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
 import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancingStateStore.ts';
 import type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';
@@ -8,7 +9,7 @@ import { extraSharesStorageKey, parseExtraShares } from '../lib/market/extraShar
 import '../styles/compareStocks.css';
 
 type CompareTab = 'producer' | 'pre-revenue';
-type MetricKey = 'pNav' | 'evEbitdaPeak' | 'targetPrice' | 'annualReturn' | 'tier' | 'irr' | 'payback' | 'lom' | 'initialCapex' | 'capexAnnualAueq' | 'annualAueq' | 'aueq10y' | 'aueqLom' | 'aueqPerShare' | 'mcap10yAueq' | 'mcapLomAueq' | 'evLomAueq';
+type MetricKey = 'investmentScore' | 'pNav' | 'evEbitdaPeak' | 'targetPrice' | 'annualReturn' | 'tier' | 'irr' | 'payback' | 'lom' | 'initialCapex' | 'capexAnnualAueq' | 'annualAueq' | 'aueq10y' | 'aueqLom' | 'aueqPerShare' | 'mcap10yAueq' | 'mcapLomAueq' | 'evLomAueq';
 type MetricColumn = readonly [key: MetricKey, label: string, help: string];
 type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 
@@ -37,6 +38,9 @@ type AuEqProductionStats = { lomAuEq: number; tenYearAuEq: number; annualAuEq: n
 type ValuationMarker = NonNullable<CorporateSnapshot['modeledValuationTimeline']>['markers'][number];
 
 const METRIC_GROUPS: readonly MetricGroup[] = [
+  { label: 'INVESTERING', columns: [
+    ['investmentScore', 'Inv. score', 'Investment Score 1–10. Lägre är bättre. Bygger på canonical Tier, P/NAV PF, Peak 6x / pris, cycle/downside, management, optionality och fatal-flaw-evidence. v0 är kalibreringsversion.'],
+  ] },
   { label: 'VÄRDERING IDAG', columns: [
     ['pNav', 'P/NAV PF', 'Dagens aktiekurs dividerad med NAV per aktie efter modellerad finansiering och manuellt tillagda extra aktier'],
     ['evEbitdaPeak', 'Peak 6x / pris', 'Högsta 6x EV/EBITDA-värde per aktie från Corporate-grafen relativt dagens pris'],
@@ -232,6 +236,7 @@ function getMetric(row: PreRevenueCompany, key: MetricKey): string {
   const sharesPf = postFinancingShares(s, row.manualExtraShares);
 
   switch (key) {
+    case 'investmentScore': return '—';
     case 'pNav': return formatMultiple(pNavPostFinancing(s, row.price, row.manualExtraShares));
     case 'evEbitdaPeak': return finite(peak6xPerShare) && finite(peak6xVsPrice) ? `${formatMoney(peak6xPerShare, row.targetCurrency)} · ${formatMultiple(peak6xVsPrice)}` : '—';
     case 'targetPrice': return finite(target) && finite(row.price) && row.price > 0 ? `${formatMoney(target, row.targetCurrency)} · ${formatMultiple(target / row.price)}` : '—';
@@ -374,7 +379,12 @@ function PreRevenueCompareDashboard() {
     {!loading && !error && <div className="pre-revenue-compare__table-wrap"><table className="pre-revenue-compare__table"><thead><tr className="pre-revenue-compare__group-row"><th>BOLAG</th>{METRIC_GROUPS.map((group) => <th key={group.label} colSpan={group.columns.length}>{group.label}</th>)}</tr><tr><th>Bolag</th>{metricColumns.map(([, label, help]) => <th key={label} title={help}>{label}</th>)}</tr></thead><tbody>
       {rows.map((row) => <tr key={row.ticker}><td className="pre-revenue-compare__company-cell"><a className="pre-revenue-compare__company-link" href={`/company/${encodeURIComponent(row.ticker)}/corporate`}><strong>{row.name}</strong></a>{row.metricError && <small className="pre-revenue-compare__company-error" title={row.metricError}> · Ej beräkningsbar</small>}<div className="pre-revenue-compare__company-meta"><span>{row.ticker}</span><span>{row.projects.length} {row.projects.length === 1 ? 'projekt' : 'projekt'} · {row.projects.map((project) => project.project_name || project.project_id).join(' · ')}</span></div></td>{metricColumns.map(([key]) => {
         const value = getMetric(row, key);
-        return <td className={key !== 'tier' && value === '—' ? 'pre-revenue-compare__pending' : undefined} key={`${row.ticker}-${key}`}>{key === 'tier' ? <Tier1StatusCell symbol={row.ticker} /> : value}</td>;
+        const content = key === 'investmentScore'
+          ? <InvestmentScoreCell symbol={row.ticker} projectIds={row.projects.map((project) => project.project_id)} snapshot={row.snapshot} priceCurrentTargetCurrency={row.price} manualExtraShares={row.manualExtraShares} />
+          : key === 'tier'
+            ? <Tier1StatusCell symbol={row.ticker} />
+            : value;
+        return <td className={key !== 'tier' && key !== 'investmentScore' && value === '—' ? 'pre-revenue-compare__pending' : undefined} key={`${row.ticker}-${key}`}>{content}</td>;
       })}</tr>)}
       {rows.length === 0 && <tr><td colSpan={1 + metricColumns.length}>Inga bolag med sparade modellerade projekt hittades.</td></tr>}
     </tbody></table></div>}
