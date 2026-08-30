@@ -17,6 +17,12 @@ export type ProjectPhase1Input = {
    * changing EBITDA/EBIT.
    */
   taxCashFlowUSD?: (number | null)[] | null;
+  /**
+   * Optional report-locked non-operating terminal proceeds, e.g. salvage value.
+   * Positive values are FCFF cash inflows and do not change revenue, EBITDA,
+   * EBIT, taxable income or tax.
+   */
+  terminalProceedsUSD?: (number | null)[] | null;
   capexUSD: (number | null)[];
   revenueUSD: (number | null)[];
   operatingCostsUSD: (number | null)[];
@@ -43,6 +49,7 @@ export type ProjectPhase1Output = {
   nopatUSD: (number | null)[];
   fcffUSD: (number | null)[];
   workingCapitalDeltaUSD_effective: (number | null)[];
+  terminalProceedsUSD_effective: (number | null)[];
 };
 
 export type ProjectPhase2Input = {
