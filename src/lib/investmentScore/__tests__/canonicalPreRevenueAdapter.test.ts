@@ -7,14 +7,6 @@ function tierAssessment(args: {
   cycleStatus?: 'PASS' | 'FAIL' | 'NOT_VERIFIED';
   cycleTier?: 1 | 2 | 3 | null;
 } = {}): Tier1PreRevenueAssessment {
-  const unavailable = {
-    status: 'NOT_VERIFIED' as const,
-    tier: null,
-    value: null,
-    threshold: null,
-    unit: null,
-    reason: 'test',
-  };
   return {
     status: args.status ?? 'TIER_1',
     classificationReason: 'test',
@@ -78,11 +70,14 @@ function tierAssessment(args: {
   // 10 * (100 / 125) / 2 = 4x.
   assert.equal(result.inputs.peak6xVsPrice, 4);
 
+  // 0.25x P/NAV + 4x Peak 6x / price reaches VERY_STRONG, not EXTREME.
+  assert.equal(result.inputs.valuationConvergence, 'VERY_STRONG');
+  assert.equal(result.sources.valuationConvergence, 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE');
+
   // Positive canonical payable AuEq years are counted, not calendar span length.
   assert.equal(result.inputs.lomYears, 3);
   assert.equal(result.inputs.tier, 1);
   assert.equal(result.inputs.cycleResistanceTier1Pass, true);
-  assert.equal(result.inputs.valuationConvergenceScore1Pass, null);
   assert.equal(result.inputs.downsideRobustnessPass, null);
   assert.equal(result.inputs.rawScore, null);
   assert.equal(result.sources.pNav, 'COMPARE_STOCKS_PNAV_PF');
@@ -107,10 +102,12 @@ function tierAssessment(args: {
 
   assert.equal(result.inputs.pNav, null);
   assert.equal(result.inputs.peak6xVsPrice, null);
+  assert.equal(result.inputs.valuationConvergence, 'NOT_VERIFIED');
   assert.equal(result.inputs.lomYears, null);
   assert.equal(result.inputs.tier, null);
   assert.equal(result.inputs.cycleResistanceTier1Pass, null);
   assert.equal(result.sources.pNav, 'UNAVAILABLE');
+  assert.equal(result.sources.valuationConvergence, 'UNAVAILABLE');
   assert.ok(result.diagnostics.some((item) => item.includes('Ej verifierad')));
 }
 
@@ -126,6 +123,7 @@ function tierAssessment(args: {
   });
 
   assert.equal(result.inputs.tier, null);
+  assert.equal(result.inputs.valuationConvergence, 'NOT_VERIFIED');
   assert.equal(result.inputs.cycleResistanceTier1Pass, false);
   assert.equal(result.inputs.fatalFlaw, true);
 }
