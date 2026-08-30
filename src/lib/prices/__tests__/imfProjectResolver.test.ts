@@ -41,29 +41,39 @@ function assert(condition: unknown, message: string): void {
   assertEqual(csvRows[2]?.close, 66882, 'SDMX CSV parser latest Mo value');
   assertEqual(csvRows[2]?.dateUtc, '2026-07-31', 'SDMX CSV parser month end');
 
-  const xml = `<?xml version="1.0"?><DataSet><Series COUNTRY="G001" INDICATOR="PLMMODY" DATA_TRANSFORMATION="USD" FREQUENCY="M"><Obs TIME_PERIOD="2026-06" OBS_VALUE="66690"/><Obs TIME_PERIOD="2026-07" OBS_VALUE="66882"/></Series></DataSet>`;
-  const xmlRows = parseImfCommoditySdmxResponse(xml, mapping!);
-  assertEqual(xmlRows.length, 2, 'SDMX XML parser observation count');
-  assertEqual(xmlRows[1]?.close, 66882, 'SDMX XML parser latest Mo value');
+  // Exact monthly period shape observed from the live IMF PCPS 9.0.0 SDMX 2.1 API on 2026-08-30.
+  const liveShapeXml = `<?xml version='1.0' encoding='UTF-8'?><message:StructureSpecificData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message"><message:DataSet><Series COUNTRY="G001" INDICATOR="PLMMODY" DATA_TRANSFORMATION="USD" FREQUENCY="M"><Obs TIME_PERIOD="2026-M05" OBS_VALUE="65640.0140147619"/><Obs TIME_PERIOD="2026-M06" OBS_VALUE="66689.83431"/><Obs TIME_PERIOD="2026-M07" OBS_VALUE="66881.54062478261"/></Series></message:DataSet></message:StructureSpecificData>`;
+  const xmlRows = parseImfCommoditySdmxResponse(liveShapeXml, mapping!);
+  assertEqual(xmlRows.length, 3, 'live-shape SDMX XML parser observation count');
+  assertEqual(xmlRows[2]?.close, 66881.54062478261, 'live-shape SDMX XML parser latest Mo value');
+  assertEqual(xmlRows[2]?.dateUtc, '2026-07-31', 'live-shape SDMX XML parser month end');
+  assertEqual(xmlRows[2]?.sourcePeriod, '2026-07', 'live-shape SDMX XML parser canonical source period');
 
   let requestedUrl = '';
+  let requestedAccept = '';
   const fetched = await fetchImfCommodityPriceSeries(
     mapping!,
     { fromUtc: '2026-05-01', toUtc: '2026-07-31' },
     {
-      fetchFn: async (input) => {
+      fetchFn: async (input, init) => {
         requestedUrl = String(input);
-        return new Response(csv, { status: 200, headers: { 'Content-Type': 'text/csv' } });
+        requestedAccept = new Headers(init?.headers).get('Accept') ?? '';
+        return new Response(liveShapeXml, {
+          status: 200,
+          headers: { 'Content-Type': 'application/vnd.sdmx.structurespecificdata+xml;version=2.1' },
+        });
       },
     },
   );
   assertEqual(requestedUrl, url, 'provider requests the verified IMF SDMX URL');
-  assertEqual(fetched.length, 3, 'provider returns historical monthly observations');
+  assertEqual(requestedAccept, 'application/vnd.sdmx.structurespecificdata+xml;version=2.1', 'provider requests deterministic structure-specific SDMX XML');
+  assertEqual(fetched.length, 3, 'provider returns live-shape historical monthly observations');
+  assertEqual(fetched[2]?.close, 66881.54062478261, 'provider preserves live IMF value');
 
   const rows = [
-    { dateUtc: '2026-05-31', close: 65640, sourcePeriod: '2026-05' },
-    { dateUtc: '2026-06-30', close: 66690, sourcePeriod: '2026-06' },
-    { dateUtc: '2026-07-31', close: 66882, sourcePeriod: '2026-07' },
+    { dateUtc: '2026-05-31', close: 65640.0140147619, sourcePeriod: '2026-05' },
+    { dateUtc: '2026-06-30', close: 66689.83431, sourcePeriod: '2026-06' },
+    { dateUtc: '2026-07-31', close: 66881.54062478261, sourcePeriod: '2026-07' },
   ];
 
   const spot = await resolvePriceSeries(
@@ -82,7 +92,7 @@ function assert(condition: unknown, message: string): void {
     },
   );
 
-  assertEqual(spot.values[0], 66882, 'spot mode uses latest available IMF monthly benchmark');
+  assertEqual(spot.values[0], 66881.54062478261, 'spot mode uses latest available IMF monthly benchmark');
   assertEqual(spot.meta?.provider, 'IMF', 'resolver exposes IMF provider metadata');
   assertEqual(spot.meta?.sourceIdentifier, 'PLMMODY', 'resolver exposes verified IMF source identifier');
   assert(
@@ -102,6 +112,6 @@ function assert(condition: unknown, message: string): void {
     },
   );
 
-  assertEqual(percentile.values[0], 66690, 'percentile mode uses IMF monthly observations');
+  assertEqual(percentile.values[0], 66689.83431, 'percentile mode uses IMF monthly observations');
   console.log('IMF project resolver tests passed');
 })();
