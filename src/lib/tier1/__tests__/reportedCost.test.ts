@@ -17,6 +17,18 @@ assert.equal(minimal.value, 1.21);
 assert.equal(minimal.basisId, null);
 assert.equal(minimal.costBaseYear, null);
 
+const negativeCopperC1 = extractReportedCostEvidence({
+  economicsBreakdown: {
+    reportedCostMetrics: [{
+      metric: 'C1_CU_USD_PER_LB',
+      value: -0.17,
+      unit: 'USD/lb',
+    }],
+  },
+}, 'C1_CU_USD_PER_LB');
+assert.equal(negativeCopperC1.status, 'AVAILABLE');
+assert.equal(negativeCopperC1.value, -0.17);
+
 const legacyRich = extractReportedCostEvidence({
   economicsBreakdown: {
     reportedCostMetrics: [{
