@@ -65,7 +65,7 @@ function metricGroups(referenceMetal: string): readonly MetricGroup[] {
       ['tier', 'Tier', 'Tier 1/2/3 för industriell projektkvalitet. Produktionsskala, LOM och after-tax IRR sätter Tier-taket; Tier 1 kräver även Q1-kostnadsposition och positiv NPV10 i tre års historiskt kalibrerad relativ lågcykel.'],
       ['irr', 'IRR', 'Kanonisk Corporate IRR'],
       ['payback', 'Payback', 'Kanonisk Corporate payback'],
-      ['lom', 'LOM', `Antal år med positiv canonical payable ${eq}-produktion`],
+      ['lom', 'LOM', 'Antal år med positiv canonical payable produktion; oberoende av vald Eq-visningsmetall'],
       ['initialCapex', 'Initial CAPEX', 'Initial construction CAPEX från Corporate canonical timeline, visad i USD för jämförbarhet'],
       ['capexAnnualAueq', `CAPEX / annual ${eq}`, `Initial CAPEX i USD dividerat med annual ${eq}`],
     ] },
@@ -106,14 +106,22 @@ const formatPct = (value: number | null) => finite(value) ? `${(value * 100).toL
 const formatMultiple = (value: number | null) => finite(value) ? `${value.toLocaleString('sv-SE', { maximumFractionDigits: 2 })}x` : '—';
 const formatMoney = (value: number | null, currency: string | null) => finite(value) ? `${formatNumber(value)}${currency ? ` ${currency}` : ''}` : '—';
 
+function metalRecordValue<T>(record: Record<string, T> | undefined, metal: string): T | undefined {
+  if (!record) return undefined;
+  if (Object.prototype.hasOwnProperty.call(record, metal)) return record[metal];
+  const normalized = metal.trim().toLowerCase();
+  const key = Object.keys(record).find((candidate) => candidate.trim().toLowerCase() === normalized);
+  return key === undefined ? undefined : record[key];
+}
+
 function eqSeries(snapshot: SnapshotWithValuationSeries, metal: string): { values: Array<number | null>; unit: 'oz' | 't' } | null {
   const revenue = snapshot.aggregation?.grossRevenueUSD_total;
-  const priceKey = snapshot.aggregation?.priceKeyByMetal?.[metal];
-  const prices = snapshot.aggregation?.priceUSDByMetal?.[metal] ?? (metal === 'Au' ? snapshot.aggregation?.auPriceUSDPerOz : undefined);
+  const priceKey = metalRecordValue(snapshot.aggregation?.priceKeyByMetal, metal);
+  const prices = metalRecordValue(snapshot.aggregation?.priceUSDByMetal, metal) ?? (metal.trim().toLowerCase() === 'au' ? snapshot.aggregation?.auPriceUSDPerOz : undefined);
   if (!Array.isArray(revenue) || !Array.isArray(prices) || revenue.length !== prices.length) return null;
   let canonicalUnit: 'USD_per_toz' | 'USD_per_lb' | 'USD_per_tonne';
   try {
-    const unit = priceKey ? getPriceKeyDefinition(priceKey).canonicalUnit : metal === 'Au' ? 'USD_per_toz' : null;
+    const unit = priceKey ? getPriceKeyDefinition(priceKey).canonicalUnit : metal.trim().toLowerCase() === 'au' ? 'USD_per_toz' : null;
     if (unit !== 'USD_per_toz' && unit !== 'USD_per_lb' && unit !== 'USD_per_tonne') return null;
     canonicalUnit = unit;
   } catch { return null; }
@@ -135,6 +143,13 @@ function computeEqProductionStats(snapshot: SnapshotWithValuationSeries, metal: 
   if (productionValues.length === 0) return null;
   const lomEq = productionValues.reduce((sum, value) => sum + value, 0);
   return { lomEq, tenYearEq: productionValues.slice(0, 10).reduce((sum, value) => sum + value, 0), annualEq: lomEq / productionValues.length, productionYears: productionValues.length, unit: eq.unit };
+}
+
+function canonicalProductionYears(snapshot: SnapshotWithValuationSeries): number | null {
+  const payable = snapshot.aggregation?.payableAuEqOz_total;
+  if (!Array.isArray(payable)) return null;
+  const count = payable.filter((value) => finite(value) && value > 0).length;
+  return count > 0 ? count : null;
 }
 
 function markerYear(marker: ValuationMarker | null | undefined): number | null { if (!marker) return null; const raw = marker.yearLabelUsed; if (finite(raw)) return raw; if (typeof raw === 'string' && raw.trim()) { const parsed = Number(raw); return Number.isFinite(parsed) ? parsed : null; } return null; }
@@ -165,7 +180,7 @@ function getMetric(row: PreRevenueCompany, key: MetricKey, referenceMetal: strin
     case 'tier': return '—';
     case 'irr': return formatPct(lista3?.IRR ?? s.project?.modeled?.npvSpotRange?.base?.irr ?? null);
     case 'payback': return finite(s.Payback_real_years) ? `${formatNumber(s.Payback_real_years, 1)} år` : finite(s.Payback_approx_years) ? `${formatNumber(s.Payback_approx_years, 1)} år` : '—';
-    case 'lom': return eq ? `${eq.productionYears} år` : '—';
+    case 'lom': { const years = canonicalProductionYears(s); return finite(years) ? `${years} år` : '—'; }
     case 'initialCapex': return formatMoney(initialCapexUsd, 'USD');
     case 'capexAnnualAueq': return eq && finite(initialCapexUsd) && eq.annualEq > 0 ? `${formatNumber(initialCapexUsd / eq.annualEq)} USD/${unit}` : '—';
     case 'annualAueq': return eq ? `${formatNumber(eq.annualEq)} ${unit}` : '—';
