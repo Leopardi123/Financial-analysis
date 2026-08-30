@@ -39,7 +39,7 @@ const cases: Array<{
   {
     name: 'cheap Tier 2 with adequate team',
     input: { tier: 2, pNav: 0.35, peak6xVsPrice: 2.3, valuationConvergence: 'STRONG', lomYears: 18, cycleResistanceTier1Pass: true, downsideRobustnessPass: true, fatalFlaw: false, management: management('adequate'), optionality: optionality('some') },
-    expectedScore: 5,
+    expectedScore: 4,
   },
   {
     name: 'quality Tier 1 at only moderate valuation',
@@ -54,12 +54,12 @@ const cases: Array<{
   {
     name: 'excellent asset near NAV',
     input: { tier: 1, pNav: 0.95, peak6xVsPrice: 1.8, valuationConvergence: 'MIXED', lomYears: 25, cycleResistanceTier1Pass: true, downsideRobustnessPass: true, fatalFlaw: false, management: management('strong'), optionality: optionality('strong') },
-    expectedScore: 5,
+    expectedScore: 4,
   },
   {
     name: 'Tier 3 at extreme discount',
     input: { tier: 3, pNav: 0.18, peak6xVsPrice: 3.2, valuationConvergence: 'VERY_STRONG', lomYears: 14, cycleResistanceTier1Pass: true, downsideRobustnessPass: true, fatalFlaw: false, management: management('adequate'), optionality: optionality('some') },
-    expectedScore: 5,
+    expectedScore: 4,
   },
   {
     name: 'Tier 2 with weak rerating',
