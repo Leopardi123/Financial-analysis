@@ -153,7 +153,14 @@ function score3Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings):
     check('tier', 'Tier 1-2 required', input.tier === null ? null : input.tier <= c.tierMax, input.tier, `<= ${c.tierMax}`),
     convergenceCheck(input, c.valuationConvergenceRequired),
     check('management', 'Adequate management minimum', managementAtLeast(manual.managementRating, c.managementMinimum), manual.managementRating, `>= ${c.managementMinimum}`),
-    check('downsideRobustness', 'Downside robustness', input.downsideRobustnessPass, input.downsideRobustnessPass, true),
+    check(
+      'downsideRobustness',
+      'Downside robustness',
+      input.downsideRobustnessPass,
+      input.downsideRobustnessPass,
+      true,
+      'v0 calibration: this currently reuses the exact canonical Tier cycle gate. Recalibrate only through the central adapter/rule after real project JSON testing.',
+    ),
     check('fatalFlaw', 'No fatal flaw', input.fatalFlaw === null ? null : input.fatalFlaw === false, input.fatalFlaw, false),
   ]);
 }
