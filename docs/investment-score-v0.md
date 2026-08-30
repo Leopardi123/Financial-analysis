@@ -95,11 +95,15 @@ Manual evidence is intentionally stored outside `project_json` so the scoring ov
 - Management is company/team evidence and is stored once per ticker/symbol.
 - Optionality is project evidence and is stored per symbol + project_id.
 - Fatal-flaw assessment is project evidence and is stored per symbol + project_id.
-- A future project-list popup may edit both scopes in one dialog, but it only writes evidence. It must not calculate aggregate ratings or Investment Score.
+- A project-list popup may edit both scopes in one dialog, but it only writes evidence. It must not calculate aggregate ratings or Investment Score.
 - Aggregate management/optionality classes are derived only inside `src/lib/investmentScore`.
 - An `unassessed` dimension makes the relevant aggregate unverified; it is never silently treated as neutral/none.
 
 This split avoids duplicating company management ratings across several projects while retaining project-specific optionality.
+
+### UI staging
+
+`InvestmentScoreEvidenceDialog` is implemented as an isolated component but is deliberately not mounted into the existing Project editor yet. The first persistence/API layer and dialog can therefore be reviewed and tested without changing current Project, Corporate or Compare Stocks render paths. Wiring it to the project-list button is a separate additive step after this foundation is verified.
 
 ## Required diagnostics
 
