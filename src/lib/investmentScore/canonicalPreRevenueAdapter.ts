@@ -41,6 +41,7 @@ export type CanonicalPreRevenueAdapterResult = {
     lomYears: 'COMPARE_STOCKS_CANONICAL_PAYABLE_AUEQ_PRODUCTION_YEARS' | 'UNAVAILABLE';
     tier: 'TIER1_PRE_REVENUE_ASSESSMENT' | 'UNAVAILABLE';
     cycleResistanceTier1Pass: 'TIER1_PRE_REVENUE_CYCLE_GATE' | 'UNAVAILABLE';
+    downsideRobustnessPass: 'TIER1_PRE_REVENUE_CYCLE_GATE_V0_CALIBRATION' | 'UNAVAILABLE';
   };
 };
 
@@ -164,11 +165,12 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
   if (tier === null) diagnostics.push('Tier: Ej verifierad från Tier1 pre-revenue assessment.');
   if (cycleResistance === null) diagnostics.push('Cykelresistens: Ej verifierad från Tier1 cycle gate.');
 
-  // Deliberately NOT inferred here:
-  // - downsideRobustnessPass for Score 3 has not yet been defined as equivalent
-  //   to the stricter Tier cycle gate;
-  // - rawScore awaits 4-10 calibration.
-  diagnostics.push('Score-3 downside robustness och rawScore lämnas Ej verifierade tills respektive kanonisk regel är definierad.');
+  // v0 calibration rule: Score-3 downside robustness deliberately reuses the
+  // exact same canonical Tier cycle gate as Scores 1-2. This is not claimed to
+  // be a permanently separate robustness model; it is an explicit starting
+  // assumption to be calibrated against real project JSON before final lock.
+  diagnostics.push('v0 kalibrering: Score-3 downside robustness = samma canonical Tier cycle gate som cykelresistens. Regeln ska omprövas mot test-JSON.');
+  diagnostics.push('rawScore lämnas Ej verifierad tills 4-10-modellen är kalibrerad.');
 
   return {
     inputs: {
@@ -178,7 +180,7 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
       valuationConvergence: convergence.classification,
       lomYears,
       cycleResistanceTier1Pass: cycleResistance,
-      downsideRobustnessPass: null,
+      downsideRobustnessPass: cycleResistance,
       fatalFlaw: args.fatalFlaw,
       management: args.management,
       optionality: args.optionality,
@@ -192,6 +194,7 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
       lomYears: lomYears === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_CANONICAL_PAYABLE_AUEQ_PRODUCTION_YEARS',
       tier: tier === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_ASSESSMENT',
       cycleResistanceTier1Pass: cycleResistance === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_CYCLE_GATE',
+      downsideRobustnessPass: cycleResistance === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_CYCLE_GATE_V0_CALIBRATION',
     },
   };
 }
