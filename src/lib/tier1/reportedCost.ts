@@ -46,6 +46,10 @@ function parseRaw(rawJson: unknown): Record<string, unknown> {
  * disclosed in the JSON. metric + value + unit are the only required fields.
  * Legacy basis/year/source fields are accepted as optional diagnostics.
  *
+ * Negative reported costs are valid evidence. By-product-heavy copper projects
+ * can legitimately disclose negative C1 cash costs, so rejecting values below
+ * zero would incorrectly turn a verified low-cost project into NOT_VERIFIED.
+ *
  * If more than one usable entry exists for the same metric, the last usable
  * entry wins. This lets the JSON carry a newer current estimate without making
  * an older report value a hard guard on the current model.
@@ -87,7 +91,6 @@ export function extractReportedCostEvidence(rawJson: unknown, expectedMetric: Ti
     return typeof metric === 'string'
       && VALID_METRICS.has(metric as Tier1CostMetric)
       && finite(value)
-      && value >= 0
       && (unit === 'USD/lb' || unit === 'USD/toz');
   });
 
