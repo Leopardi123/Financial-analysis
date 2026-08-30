@@ -38,6 +38,7 @@ All must pass:
 - P/NAV <= 0.15x, or a separately defined equivalent producer valuation rule.
 - Independent valuation convergence verified by a canonical rule.
 - Exceptional management.
+- Relevant execution track record itself must be Exceptional: Score 1 requires exact-fit prior execution, not merely a high management average.
 - LOM >= 30 years, or LOM >= 20 years plus exceptional optionality.
 - Tier-1 cycle resistance.
 - No identified fatal flaw.
@@ -86,6 +87,19 @@ Optionality dimensions:
 4. District / strategic optionality
 
 Each assessment stores rating, assessment date and optional note. `unassessed` is distinct from a bad rating.
+
+### Evidence ownership and persistence
+
+Manual evidence is intentionally stored outside `project_json` so the scoring overlay cannot alter or contaminate the technical-report evidence contract.
+
+- Management is company/team evidence and is stored once per ticker/symbol.
+- Optionality is project evidence and is stored per symbol + project_id.
+- Fatal-flaw assessment is project evidence and is stored per symbol + project_id.
+- A future project-list popup may edit both scopes in one dialog, but it only writes evidence. It must not calculate aggregate ratings or Investment Score.
+- Aggregate management/optionality classes are derived only inside `src/lib/investmentScore`.
+- An `unassessed` dimension makes the relevant aggregate unverified; it is never silently treated as neutral/none.
+
+This split avoids duplicating company management ratings across several projects while retaining project-specific optionality.
 
 ## Required diagnostics
 
