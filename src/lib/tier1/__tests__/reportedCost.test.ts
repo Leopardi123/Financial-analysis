@@ -16,6 +16,37 @@ assert.equal(minimal.status, 'AVAILABLE');
 assert.equal(minimal.value, 1.21);
 assert.equal(minimal.basisId, null);
 assert.equal(minimal.costBaseYear, null);
+assert.equal(minimal.reportedLabel, null);
+
+const comparableArcticCashCost = extractReportedCostEvidence({
+  economicsBreakdown: {
+    reportedCostMetrics: [{
+      metric: 'C1_CU_USD_PER_LB',
+      reportedLabel: 'Cash Costs, Net of By-product Credits',
+      value: 0.72,
+      unit: 'USD/lb',
+      definitionNotes: 'FS wording; used as best available reported cash-cost measure for Cu C1 benchmarking.',
+      sourceId: 'arctic-fs-2023',
+      pageOrTable: 'Table 22-2, p.390',
+    }],
+  },
+}, 'C1_CU_USD_PER_LB');
+assert.equal(comparableArcticCashCost.status, 'AVAILABLE');
+assert.equal(comparableArcticCashCost.value, 0.72);
+assert.equal(comparableArcticCashCost.reportedLabel, 'Cash Costs, Net of By-product Credits');
+assert.match(comparableArcticCashCost.definitionNotes ?? '', /best available reported cash-cost measure/);
+assert.match(comparableArcticCashCost.reason, /rapportmått “Cash Costs, Net of By-product Credits”/);
+
+const comparableArcticGate = assessCostAgainstBenchmark({
+  primaryMetal: 'Cu',
+  primaryMetalRevenueShare: 0.608,
+  metric: 'C1_CU_USD_PER_LB',
+  value: comparableArcticCashCost.value!,
+  benchmark: TIER1_COST_BENCHMARKS.Cu,
+  nowUtc: '2026-08-30T00:00:00Z',
+});
+assert.equal(comparableArcticGate.status, 'PASS');
+assert.equal(comparableArcticGate.tier, 1);
 
 const negativeCopperC1 = extractReportedCostEvidence({
   economicsBreakdown: {

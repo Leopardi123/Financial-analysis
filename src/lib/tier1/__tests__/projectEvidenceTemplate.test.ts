@@ -30,9 +30,11 @@ const source = {
     meta: { defaultSource: 'PFS', notes: 'locked' },
     reportedCostMetrics: [{
       metric: 'C1_CU_USD_PER_LB',
+      reportedLabel: 'Cash Costs, Net of By-product Credits',
       value: 1.22,
       unit: 'USD/lb',
-      // Legacy Tier-only evidence is deliberately ignored by the template.
+      definitionNotes: 'Report wording differs from canonical Tier label but is economically comparable.',
+      // Benchmark-specific legacy proof remains deliberately ignored.
       basisId: 'S_AND_P_CO_PRODUCT_C1_CU',
       costBaseYear: 2025,
       sourceId: 'pfs-2025',
@@ -47,13 +49,16 @@ const source = {
 const template = buildProjectJsonV1Template(source) as any;
 assert.equal(template.economicsBreakdown.reportedCostMetrics.length, 1);
 assert.equal(template.economicsBreakdown.reportedCostMetrics[0].metric, 'C1_CU_USD_PER_LB');
+assert.equal(template.economicsBreakdown.reportedCostMetrics[0].reportedLabel, 'Cash Costs, Net of By-product Credits');
 assert.equal(template.economicsBreakdown.reportedCostMetrics[0].value, 1.22);
 assert.equal(template.economicsBreakdown.reportedCostMetrics[0].unit, 'USD/lb');
+assert.equal(template.economicsBreakdown.reportedCostMetrics[0].definitionNotes, 'Report wording differs from canonical Tier label but is economically comparable.');
+assert.equal(template.economicsBreakdown.reportedCostMetrics[0].sourceId, 'pfs-2025');
+assert.equal(template.economicsBreakdown.reportedCostMetrics[0].pageOrTable, 'Table 18-5');
 assert.equal('basisId' in template.economicsBreakdown.reportedCostMetrics[0], false);
 assert.equal('costBaseYear' in template.economicsBreakdown.reportedCostMetrics[0], false);
-assert.equal('sourceId' in template.economicsBreakdown.reportedCostMetrics[0], false);
-assert.equal('pageOrTable' in template.economicsBreakdown.reportedCostMetrics[0], false);
 assert.equal('costBaseYear' in template.economicsBreakdown.meta, false);
 assert.equal('reconciliation' in template, false);
+assert.match(template.economicsBreakdown._description_reportedCostMetrics, /canonical Tier benchmark/);
 
 console.log('projectEvidenceTemplate.test.ts passed');
