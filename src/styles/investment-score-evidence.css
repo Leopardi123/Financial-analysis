@@ -1,0 +1,113 @@
+.investment-score-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4vh 16px;
+  overflow-y: auto;
+}
+
+.investment-score-dialog {
+  width: min(1040px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--panel-bg, #fff);
+  color: inherit;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.25);
+}
+
+.investment-score-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.investment-score-dialog-header h2,
+.investment-score-dialog-header p,
+.investment-score-dialog h3 {
+  margin-top: 0;
+}
+
+.investment-score-dialog-header > button {
+  font-size: 24px;
+  line-height: 1;
+  min-width: 36px;
+}
+
+.investment-score-dialog-note {
+  margin: 12px 0 20px;
+  padding: 10px 12px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.investment-score-evidence-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.25fr) minmax(120px, 0.55fr) minmax(135px, 0.55fr) minmax(260px, 1.4fr);
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.investment-score-evidence-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.investment-score-evidence-label small {
+  opacity: 0.72;
+  line-height: 1.35;
+}
+
+.investment-score-evidence-row select,
+.investment-score-evidence-row input,
+.investment-score-evidence-row textarea,
+.investment-score-fatal-flaw select,
+.investment-score-fatal-flaw textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.investment-score-fatal-flaw {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.4fr);
+  gap: 12px;
+}
+
+.investment-score-fatal-flaw label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.investment-score-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.investment-score-dialog-status.error {
+  color: #b42318;
+}
+
+.investment-score-dialog-status.ok {
+  color: #067647;
+}
+
+@media (max-width: 800px) {
+  .investment-score-evidence-row,
+  .investment-score-fatal-flaw {
+    grid-template-columns: 1fr;
+  }
+}
