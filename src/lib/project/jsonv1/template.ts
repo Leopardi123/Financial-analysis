@@ -6,6 +6,12 @@ import {
 
 type ProjectJsonV1Template = ProjectJsonV1 & Record<string, unknown>;
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 /**
  * Backwards-compatible template overlay.
  *
@@ -32,6 +38,30 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
   if (existing?.series.terminalProceedsUSD !== undefined) {
     series.terminalProceedsUSD = [...existing.series.terminalProceedsUSD];
   }
+
+  const economicsBreakdown = asRecord(output.economicsBreakdown);
+  economicsBreakdown._description_reportedCostMetrics = 'Best available reported project cost metrics for Tier benchmarking. metric identifies the canonical Tier benchmark the reported measure is economically comparable to; it does NOT assert that the technical report uses that exact terminology. Preserve the report wording in reportedLabel, explain material definition differences in definitionNotes, and provide source/page where available. Do not map a reported measure to a canonical metric unless its economic basis is sufficiently comparable.';
+
+  const existingEconomicsBreakdown = asRecord((existing as unknown as Record<string, unknown> | undefined)?.economicsBreakdown);
+  const existingReported = Array.isArray(existingEconomicsBreakdown.reportedCostMetrics)
+    ? existingEconomicsBreakdown.reportedCostMetrics
+    : [];
+  const outputReported = Array.isArray(economicsBreakdown.reportedCostMetrics)
+    ? economicsBreakdown.reportedCostMetrics
+    : [];
+
+  economicsBreakdown.reportedCostMetrics = outputReported.map((row, index) => {
+    const normalized = asRecord(row);
+    const original = asRecord(existingReported[index]);
+    return {
+      ...normalized,
+      reportedLabel: typeof original.reportedLabel === 'string' ? original.reportedLabel : null,
+      definitionNotes: typeof original.definitionNotes === 'string' ? original.definitionNotes : null,
+      sourceId: typeof original.sourceId === 'string' ? original.sourceId : null,
+      pageOrTable: typeof original.pageOrTable === 'string' ? original.pageOrTable : null,
+    };
+  });
+  output.economicsBreakdown = economicsBreakdown as ProjectJsonV1['economicsBreakdown'];
 
   return output;
 }
