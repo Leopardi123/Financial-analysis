@@ -35,7 +35,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertEqual(withTerminal.ebitdaUSD[0], withoutTerminal.ebitdaUSD[0], 'terminal proceeds do not change EBITDA');
   assertEqual(withTerminal.ebitUSD[0], withoutTerminal.ebitUSD[0], 'terminal proceeds do not change EBIT');
   assertEqual(withTerminal.taxUSD[0], withoutTerminal.taxUSD[0], 'terminal proceeds do not change tax');
-  assertEqual(withTerminal.terminalProceedsUSD_effective[0], 25, 'terminal proceeds exposed diagnostically');
+  assertEqual(withTerminal.terminalProceedsUSD_effective?.[0], 25, 'terminal proceeds exposed diagnostically');
 
   const template = getProjectJsonV1Template();
   const legacyParsed = parseProjectJsonV1(template);
