@@ -70,8 +70,8 @@ assert.equal(explicit.taxUSD[constructionCreditT], -50, 'positive explicit tax c
 assert.equal(explicit.taxUSD[operatingTaxT], 30, 'negative explicit tax cash flow is a tax payment (positive taxUSD)');
 
 for (let t = 0; t < length; t += 1) {
-  const legacyFcff = legacy.fcffUSD[t];
-  const explicitFcff = explicit.fcffUSD[t];
+  const legacyFcff: number | null = legacy.fcffUSD[t] ?? null;
+  const explicitFcff: number | null = explicit.fcffUSD[t] ?? null;
   assert.equal(typeof legacyFcff, 'number');
   assert.equal(typeof explicitFcff, 'number');
   const expectedDelta = (taxCashFlowUSD[t] ?? 0) + (terminalProceedsUSD[t] ?? 0);
