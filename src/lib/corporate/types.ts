@@ -17,8 +17,8 @@ export type CorporateAggregationOutput = {
   fcffUSD_total: Array<number | null>;
   grossRevenueUSD_total: Array<number | null>;
   auPriceUSDPerOz: Array<number | null>;
-  priceUSDByMetal: Record<string, Array<number | null>>;
-  priceKeyByMetal: Record<string, string>;
+  priceUSDByMetal?: Record<string, Array<number | null>>;
+  priceKeyByMetal?: Record<string, string>;
   sustainingCostUSD_total: Array<number | null>;
   payableAuEqOz_total: Array<number | null>;
   aiscAuEqUSDPerOz_LOM: number | null;
