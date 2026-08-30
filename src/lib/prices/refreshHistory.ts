@@ -6,6 +6,10 @@ import {
   getFredHistoryCommodityPriceMapping,
   isFredHistoryOnlyCommodityPriceKey,
 } from "./providers/fred.js";
+import {
+  fetchImfCommodityPriceSeries,
+  getImfCommodityPriceMapping,
+} from "./providers/imfCommodity.js";
 import { getPriceKeyDefinition, type PriceKey } from "./keys.js";
 import { convertPriceToCanonical } from "./units/convert.js";
 
@@ -96,6 +100,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
   fetchHistoricalFn?: typeof fetchHistoricalEodFull;
   fetchLegacyHistoricalFn?: typeof fetchLegacyCommodityHistoricalFull;
   fetchFredCommodityPriceSeriesFn?: typeof fetchFredCommodityPriceSeries;
+  fetchImfCommodityPriceSeriesFn?: typeof fetchImfCommodityPriceSeries;
 } = {}): Promise<{ monthsTouched: number }> {
   const lockKey = `${args.priceKey}:${args.from}:${args.to}`;
   const existing = refreshLocks.get(lockKey);
@@ -109,6 +114,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
     const fetchHistoricalFn = deps.fetchHistoricalFn ?? fetchHistoricalEodFull;
     const fetchLegacyHistoricalFn = deps.fetchLegacyHistoricalFn ?? fetchLegacyCommodityHistoricalFull;
     const fetchFredFn = deps.fetchFredCommodityPriceSeriesFn ?? fetchFredCommodityPriceSeries;
+    const fetchImfFn = deps.fetchImfCommodityPriceSeriesFn ?? fetchImfCommodityPriceSeries;
 
     const mappingRows = await queryFn(
       `SELECT provider, provider_symbol, provider_kind
@@ -120,6 +126,7 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
 
     const mapping = mappingRows[0] ?? null;
     const fredRegistryMapping = getFredHistoryCommodityPriceMapping(args.priceKey);
+    const imfRegistryMapping = getImfCommodityPriceMapping(args.priceKey);
     const historyOnlyFred = isFredHistoryOnlyCommodityPriceKey(args.priceKey) && fredRegistryMapping !== null;
 
     // A verified history-only registry entry deliberately overrides the normal
@@ -131,12 +138,21 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
       historyOnlyFred
         ? "FRED"
         : mapping?.provider
-          ?? (fredRegistryMapping ? "FRED" : fxProviderSymbolFromKey(args.priceKey) ? "FMP" : ""),
+          ?? (fredRegistryMapping
+            ? "FRED"
+            : imfRegistryMapping
+              ? "IMF"
+              : fxProviderSymbolFromKey(args.priceKey)
+                ? "FMP"
+                : ""),
     ).toUpperCase();
     let providerSymbol = historyOnlyFred
       ? fredRegistryMapping?.fredSeriesId ?? null
-      : mapping?.provider_symbol ?? fredRegistryMapping?.fredSeriesId ?? null;
-    let providerLabel: "FMP" | "FRED";
+      : mapping?.provider_symbol
+        ?? fredRegistryMapping?.fredSeriesId
+        ?? imfRegistryMapping?.datasetSeriesId
+        ?? null;
+    let providerLabel: "FMP" | "FRED" | "IMF";
     let filtered: HistoryInputRow[];
 
     if (provider === "FMP") {
@@ -220,6 +236,30 @@ export async function refreshHistoryRangeToMonthlyBlobs(args: {
           }),
         }));
       providerLabel = "FRED";
+    } else if (provider === "IMF") {
+      const imfMapping = imfRegistryMapping;
+      if (!imfMapping) {
+        throw new Error(`No verified IMF commodity mapping found for price key: ${args.priceKey}`);
+      }
+      if (providerSymbol && providerSymbol !== imfMapping.datasetSeriesId) {
+        throw new Error(
+          `IMF provider mapping mismatch for ${args.priceKey}: database=${providerSymbol}, registry=${imfMapping.datasetSeriesId}`,
+        );
+      }
+      providerSymbol = imfMapping.datasetSeriesId;
+      const definition = getPriceKeyDefinition(args.priceKey);
+      const imfRows = await fetchImfFn(imfMapping, { fromUtc: monthStart(args.from), toUtc: args.to });
+      filtered = imfRows
+        .filter((row) => row.dateUtc >= args.from && row.dateUtc <= args.to)
+        .map((row) => ({
+          date: row.dateUtc,
+          close: convertPriceToCanonical({
+            value: row.close,
+            fromUnit: imfMapping.providerUnit,
+            canonicalUnit: definition.canonicalUnit,
+          }),
+        }));
+      providerLabel = "IMF";
     } else {
       throw new Error(`Unsupported price history provider for ${args.priceKey}: ${provider || "missing"}`);
     }
