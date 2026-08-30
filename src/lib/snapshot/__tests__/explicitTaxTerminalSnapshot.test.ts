@@ -31,6 +31,9 @@ const legacyRaw = (legacyBody.projects as Array<Record<string, unknown>>)[0].raw
 const explicitRaw = (explicitBody.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>;
 
 // Compare against the exact legacy zero-tax path: no taxRate and no explicit cash-tax field.
+// This test verifies cash-flow plumbing only. It does not assert that a report-locked
+// explicit tax series is a spot-sensitive tax model when runtime metal prices differ
+// from the technical-report deck.
 const legacyEconomics = (legacyRaw.economics ?? {}) as Record<string, unknown>;
 delete legacyEconomics.taxRate;
 legacyRaw.economics = legacyEconomics;
