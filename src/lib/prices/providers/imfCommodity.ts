@@ -17,6 +17,9 @@ export type ImfCommodityPriceRow = {
 export const IMF_PRIMARY_COMMODITY_API_BASE_URL =
   'https://api.imf.org/external/sdmx/2.1/data';
 
+// Backward-compatible diagnostic export. The source is now the SDMX API, not the workbook.
+export const IMF_PRIMARY_COMMODITY_WORKBOOK_URL = IMF_PRIMARY_COMMODITY_API_BASE_URL;
+
 export const IMF_COMMODITY_PRICE_MAPPINGS: readonly ImfCommodityPriceMapping[] = [
   {
     priceKey: 'MO_USD_TONNE',
@@ -112,7 +115,6 @@ function parseXmlAttributes(input: string): Record<string, string> {
 export function parseImfCommoditySdmxXml(text: string): ImfCommodityPriceRow[] {
   const rows: ImfCommodityPriceRow[] = [];
 
-  // Structure-specific SDMX-ML 2.1: <Obs TIME_PERIOD="2026-07" OBS_VALUE="66882" ... />
   const obsTagPattern = /<(?:\w+:)?Obs\b([^>]*)\/?\s*>/g;
   let obsMatch: RegExpExecArray | null;
   while ((obsMatch = obsTagPattern.exec(text)) !== null) {
@@ -127,7 +129,6 @@ export function parseImfCommoditySdmxXml(text: string): ImfCommodityPriceRow[] {
     return rows.sort((a, b) => a.dateUtc.localeCompare(b.dateUtc));
   }
 
-  // Generic SDMX-ML 2.1 fallback: ObsDimension/ObsValue child elements.
   const genericObsPattern = /<(?:\w+:)?Obs\b[^>]*>([\s\S]*?)<\/(?:\w+:)?Obs>/g;
   let genericMatch: RegExpExecArray | null;
   while ((genericMatch = genericObsPattern.exec(text)) !== null) {
