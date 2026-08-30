@@ -3,6 +3,7 @@ import {
   aggregateManagementRating,
   aggregateOptionalityRating,
   exactFitManagementPass,
+  exceptionalOptionalityForLongevityPass,
 } from './manualEvidence.ts';
 import { valuationConvergencePasses } from './valuationConvergence.ts';
 import type {
@@ -50,27 +51,23 @@ function managementAtLeast(actual: ManagementRating | null, minimum: ManagementR
   return managementRank[actual] >= managementRank[minimum];
 }
 
-function hasExceptionalOptionality(rating: OptionalityRating | null): boolean | null {
-  if (rating === null || rating === 'unassessed') return null;
-  return rating === 'exceptional';
-}
-
 function longevityPass(
   lomYears: number | null,
-  optionalityRating: OptionalityRating | null,
+  exceptionalOptionality: boolean | null,
   directYears: number,
   withOptionalityYears: number,
 ): boolean | null {
   if (!finite(lomYears)) return null;
   if (lomYears >= directYears) return true;
   if (lomYears < withOptionalityYears) return false;
-  return hasExceptionalOptionality(optionalityRating);
+  return exceptionalOptionality;
 }
 
 type DerivedManualRatings = {
   managementRating: ManagementRating | null;
   optionalityRating: OptionalityRating | null;
   exactFitManagement: boolean | null;
+  exceptionalOptionality: boolean | null;
 };
 
 function deriveManualRatings(input: InvestmentScoreInputs): DerivedManualRatings {
@@ -78,6 +75,7 @@ function deriveManualRatings(input: InvestmentScoreInputs): DerivedManualRatings
     managementRating: aggregateManagementRating(input.management),
     optionalityRating: aggregateOptionalityRating(input.optionality),
     exactFitManagement: exactFitManagementPass(input.management),
+    exceptionalOptionality: exceptionalOptionalityForLongevityPass(input.optionality),
   };
 }
 
@@ -120,9 +118,10 @@ function score1Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings):
     check(
       'longevityOptionality',
       'Multigenerational LOM or exceptional optionality',
-      longevityPass(input.lomYears, manual.optionalityRating, c.lomDirectYears, c.lomWithExceptionalOptionalityYears),
+      longevityPass(input.lomYears, manual.exceptionalOptionality, c.lomDirectYears, c.lomWithExceptionalOptionalityYears),
       input.lomYears,
       `LOM >= ${c.lomDirectYears}y OR LOM >= ${c.lomWithExceptionalOptionalityYears}y + exceptional optionality`,
+      'Exceptional optionality for the LOM exception requires at least three of four assessed optionality dimensions to be exceptional.',
     ),
     check('cycleResistance', 'Tier-1 cycle resistance', input.cycleResistanceTier1Pass, input.cycleResistanceTier1Pass, true),
     check('fatalFlaw', 'No fatal flaw', input.fatalFlaw === null ? null : input.fatalFlaw === false, input.fatalFlaw, false),
@@ -138,9 +137,10 @@ function score2Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings):
     check(
       'longevityOptionality',
       'Long LOM or exceptional optionality',
-      longevityPass(input.lomYears, manual.optionalityRating, c.lomDirectYears, c.lomWithExceptionalOptionalityYears),
+      longevityPass(input.lomYears, manual.exceptionalOptionality, c.lomDirectYears, c.lomWithExceptionalOptionalityYears),
       input.lomYears,
       `LOM >= ${c.lomDirectYears}y OR LOM >= ${c.lomWithExceptionalOptionalityYears}y + exceptional optionality`,
+      'Exceptional optionality for the LOM exception requires at least three of four assessed optionality dimensions to be exceptional.',
     ),
     check('cycleResistance', 'Tier-1 cycle resistance', input.cycleResistanceTier1Pass, input.cycleResistanceTier1Pass, true),
     check('fatalFlaw', 'No fatal flaw', input.fatalFlaw === null ? null : input.fatalFlaw === false, input.fatalFlaw, false),
