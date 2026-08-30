@@ -24,63 +24,51 @@ function clone<T>(value: T): T {
 }
 
 const baseBody = await loadFixture();
-const legacyBody = clone(baseBody);
-const explicitBody = clone(baseBody);
+const dynamicBody = clone(baseBody);
+const evidenceBody = clone(baseBody);
 
-const legacyRaw = (legacyBody.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>;
-const explicitRaw = (explicitBody.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>;
+const dynamicRaw = (dynamicBody.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>;
+const evidenceRaw = (evidenceBody.projects as Array<Record<string, unknown>>)[0].rawJson as Record<string, unknown>;
 
-// Compare against the exact legacy zero-tax path: no taxRate and no explicit cash-tax field.
-// This test verifies cash-flow plumbing only. It does not assert that a report-locked
-// explicit tax series is a spot-sensitive tax model when runtime metal prices differ
-// from the technical-report deck.
-const legacyEconomics = (legacyRaw.economics ?? {}) as Record<string, unknown>;
-delete legacyEconomics.taxRate;
-legacyRaw.economics = legacyEconomics;
-const explicitEconomics = (explicitRaw.economics ?? {}) as Record<string, unknown>;
-delete explicitEconomics.taxRate;
-explicitRaw.economics = explicitEconomics;
+// Both runtime cases use the same dynamic tax rule. The second case additionally carries
+// report-deck tax evidence that must not alter spot runtime tax or FCFF.
+(dynamicRaw.economics as Record<string, unknown>).taxRate = 0.27;
+(evidenceRaw.economics as Record<string, unknown>).taxRate = 0.27;
 
-const legacySeries = legacyRaw.series as Record<string, unknown>;
-const explicitSeries = explicitRaw.series as Record<string, unknown>;
-const length = (legacySeries.operatingCostsUSD as Array<number | null>).length;
-const taxCashFlowUSD = new Array<number | null>(length).fill(0);
+const dynamicSeries = dynamicRaw.series as Record<string, unknown>;
+const evidenceSeries = evidenceRaw.series as Record<string, unknown>;
+const length = (dynamicSeries.operatingCostsUSD as Array<number | null>).length;
+const reportTaxCashFlowUSD = new Array<number | null>(length).fill(0);
 const terminalProceedsUSD = new Array<number | null>(length).fill(0);
-const constructionCreditT = 0;
-const operatingTaxT = Math.min(2, length - 1);
-const terminalT = length - 1;
-taxCashFlowUSD[constructionCreditT] = 50;
-taxCashFlowUSD[operatingTaxT] = -30;
-terminalProceedsUSD[terminalT] = 70;
-explicitSeries.taxCashFlowUSD = taxCashFlowUSD;
-explicitSeries.terminalProceedsUSD = terminalProceedsUSD;
+reportTaxCashFlowUSD[0] = 50;
+reportTaxCashFlowUSD[Math.min(2, length - 1)] = -30;
+terminalProceedsUSD[length - 1] = 70;
+evidenceSeries.taxCashFlowUSD = reportTaxCashFlowUSD;
+evidenceSeries.terminalProceedsUSD = terminalProceedsUSD;
 
-const legacyResult = await runCorporateSnapshotPipeline({ body: legacyBody, refresh: false });
-const explicitResult = await runCorporateSnapshotPipeline({ body: explicitBody, refresh: false });
-assert.equal(legacyResult.ok, true);
-assert.equal(explicitResult.ok, true);
-if (!legacyResult.ok || !explicitResult.ok) process.exit(1);
+const dynamicResult = await runCorporateSnapshotPipeline({ body: dynamicBody, refresh: false });
+const evidenceResult = await runCorporateSnapshotPipeline({ body: evidenceBody, refresh: false });
+assert.equal(dynamicResult.ok, true);
+assert.equal(evidenceResult.ok, true);
+if (!dynamicResult.ok || !evidenceResult.ok) process.exit(1);
 
-const legacy = legacyResult.snapshot.series;
-const explicit = explicitResult.snapshot.series;
-assert.ok(legacy && explicit);
+const dynamic = dynamicResult.snapshot.series;
+const evidence = evidenceResult.snapshot.series;
+assert.ok(dynamic && evidence);
 
-// Explicit tax and terminal proceeds are cash-flow-only inputs: operating EBIT/revenue must not move.
-assert.deepEqual(explicit.totalRevenue_USD, legacy.totalRevenue_USD);
-assert.deepEqual(explicit.ebitUSD, legacy.ebitUSD);
-
-assert.equal(explicit.taxUSD[constructionCreditT], -50, 'positive explicit tax cash flow is a refundable credit (negative taxUSD)');
-assert.equal(explicit.taxUSD[operatingTaxT], 30, 'negative explicit tax cash flow is a tax payment (positive taxUSD)');
+assert.deepEqual(evidence.totalRevenue_USD, dynamic.totalRevenue_USD, 'report tax evidence must not alter runtime revenue');
+assert.deepEqual(evidence.ebitUSD, dynamic.ebitUSD, 'report tax evidence must not alter runtime EBIT');
+assert.deepEqual(evidence.taxUSD, dynamic.taxUSD, 'report tax evidence must not override dynamic runtime tax');
 
 for (let t = 0; t < length; t += 1) {
-  const legacyFcff: number | null = legacy.fcffUSD[t] ?? null;
-  const explicitFcff: number | null = explicit.fcffUSD[t] ?? null;
-  assert.equal(typeof legacyFcff, 'number');
-  assert.equal(typeof explicitFcff, 'number');
-  const expectedDelta = (taxCashFlowUSD[t] ?? 0) + (terminalProceedsUSD[t] ?? 0);
+  const dynamicFcff: number | null = dynamic.fcffUSD[t] ?? null;
+  const evidenceFcff: number | null = evidence.fcffUSD[t] ?? null;
+  assert.equal(typeof dynamicFcff, 'number');
+  assert.equal(typeof evidenceFcff, 'number');
+  const expectedDelta = terminalProceedsUSD[t] ?? 0;
   assert.ok(
-    Math.abs((explicitFcff as number) - (legacyFcff as number) - expectedDelta) < 1e-6,
-    `FCFF delta at t=${t} should equal explicit tax cash flow + terminal proceeds`,
+    Math.abs((evidenceFcff as number) - (dynamicFcff as number) - expectedDelta) < 1e-6,
+    `runtime FCFF delta at t=${t} must contain terminal proceeds only, never report tax evidence`,
   );
 }
 
