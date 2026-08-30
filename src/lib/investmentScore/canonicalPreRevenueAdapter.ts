@@ -1,4 +1,5 @@
 import type { Tier1PreRevenueAssessment } from '../tier1/preRevenue.ts';
+import { assessValuationConvergence } from './valuationConvergence.ts';
 import type {
   InvestmentScoreInputs,
   ManagementEvidence,
@@ -36,6 +37,7 @@ export type CanonicalPreRevenueAdapterResult = {
   sources: {
     pNav: 'COMPARE_STOCKS_PNAV_PF' | 'UNAVAILABLE';
     peak6xVsPrice: 'COMPARE_STOCKS_PEAK_6X_VS_PRICE' | 'UNAVAILABLE';
+    valuationConvergence: 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE' | 'UNAVAILABLE';
     lomYears: 'COMPARE_STOCKS_CANONICAL_PAYABLE_AUEQ_PRODUCTION_YEARS' | 'UNAVAILABLE';
     tier: 'TIER1_PRE_REVENUE_ASSESSMENT' | 'UNAVAILABLE';
     cycleResistanceTier1Pass: 'TIER1_PRE_REVENUE_CYCLE_GATE' | 'UNAVAILABLE';
@@ -50,10 +52,6 @@ function validExtraShares(value: number): number {
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
-/**
- * Mirrors CompareStocks' canonical PF share basis without mutating Corporate
- * snapshot state. Manual extra shares are additive to modeled PF shares.
- */
 function postFinancingShares(
   snapshot: CorporateSnapshotForInvestmentScore,
   manualExtraShares: number,
@@ -63,10 +61,6 @@ function postFinancingShares(
   return modeled + validExtraShares(manualExtraShares);
 }
 
-/**
- * Exact metric basis used by PRE REVENUE Compare Stocks:
- * (current price * PF shares incl. manual extra shares) / NAV today.
- */
 function pNavPostFinancing(
   snapshot: CorporateSnapshotForInvestmentScore,
   price: number | null,
@@ -80,10 +74,6 @@ function pNavPostFinancing(
   return (price * sharesPf) / nav;
 }
 
-/**
- * Compare Stocks adjusts Corporate's 6x EV/EBITDA per-share series for manual
- * extra shares using modeled PF shares / total PF shares, then takes the peak.
- */
 function peakSixTimesVsPrice(
   snapshot: CorporateSnapshotForInvestmentScore,
   price: number | null,
@@ -109,11 +99,6 @@ function peakSixTimesVsPrice(
   return peakPerShare === null ? null : peakPerShare / price;
 }
 
-/**
- * Exact PRE REVENUE Compare Stocks LOM convention: count positive canonical
- * payable AuEq years between first and last positive year, rejecting invalid
- * negative/non-finite observations inside the production span.
- */
 function canonicalPayableAuEqProductionYears(
   values: Array<number | null> | null | undefined,
 ): number | null {
@@ -165,6 +150,7 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
   const peak6xVsPrice = snapshot
     ? peakSixTimesVsPrice(snapshot, args.priceCurrentTargetCurrency, args.manualExtraShares)
     : null;
+  const convergence = assessValuationConvergence({ pNav, peak6xVsPrice });
   const lomYears = snapshot
     ? canonicalPayableAuEqProductionYears(snapshot.aggregation?.payableAuEqOz_total)
     : null;
@@ -173,23 +159,23 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
 
   if (pNav === null) diagnostics.push('P/NAV PF: Ej verifierad från canonical Corporate snapshot + current price.');
   if (peak6xVsPrice === null) diagnostics.push('Peak 6x / pris: Ej verifierad från canonical Corporate valuation time series + current price.');
+  diagnostics.push(`Valuation convergence: ${convergence.reason}`);
   if (lomYears === null) diagnostics.push('LOM: Ej verifierad från canonical payable AuEq production series.');
   if (tier === null) diagnostics.push('Tier: Ej verifierad från Tier1 pre-revenue assessment.');
   if (cycleResistance === null) diagnostics.push('Cykelresistens: Ej verifierad från Tier1 cycle gate.');
 
   // Deliberately NOT inferred here:
-  // - valuationConvergenceScore1Pass requires its own canonical convergence rule;
   // - downsideRobustnessPass for Score 3 has not yet been defined as equivalent
   //   to the stricter Tier cycle gate;
   // - rawScore awaits 4-10 calibration.
-  diagnostics.push('Valuation convergence, Score-3 downside robustness och rawScore lämnas Ej verifierade tills respektive kanonisk regel är definierad.');
+  diagnostics.push('Score-3 downside robustness och rawScore lämnas Ej verifierade tills respektive kanonisk regel är definierad.');
 
   return {
     inputs: {
       tier,
       pNav,
       peak6xVsPrice,
-      valuationConvergenceScore1Pass: null,
+      valuationConvergence: convergence.classification,
       lomYears,
       cycleResistanceTier1Pass: cycleResistance,
       downsideRobustnessPass: null,
@@ -202,6 +188,7 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
     sources: {
       pNav: pNav === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_PNAV_PF',
       peak6xVsPrice: peak6xVsPrice === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_PEAK_6X_VS_PRICE',
+      valuationConvergence: convergence.classification === 'NOT_VERIFIED' ? 'UNAVAILABLE' : 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE',
       lomYears: lomYears === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_CANONICAL_PAYABLE_AUEQ_PRODUCTION_YEARS',
       tier: tier === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_ASSESSMENT',
       cycleResistanceTier1Pass: cycleResistance === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_CYCLE_GATE',
