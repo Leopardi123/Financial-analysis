@@ -1,6 +1,7 @@
 import type { ProjectPhase1Input, ProjectPhase1Output } from './types.ts';
 
 const CAPEX_NEGATIVE_ERROR = 'capexUSD must be non-negative spend';
+const TAX_MODE_CONFLICT_ERROR = 'taxCashFlowUSD is mutually exclusive with taxRate';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -45,6 +46,11 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     throw new Error('taxRate must be between 0 and 0.6');
   }
 
+  const hasExplicitTaxCashFlow = input.taxCashFlowUSD !== undefined && input.taxCashFlowUSD !== null;
+  if (hasExplicitTaxCashFlow && taxRate !== null) {
+    throw new Error(TAX_MODE_CONFLICT_ERROR);
+  }
+
   const revenueUSD = normalizeSeriesLength(input.revenueUSD, length, 'revenueUSD');
   const operatingCostsUSD = normalizeSeriesLength(input.operatingCostsUSD, length, 'operatingCostsUSD');
   const sustainingCapexUSD = normalizeSeriesLength(input.sustainingCapexUSD, length, 'sustainingCapexUSD');
@@ -55,6 +61,9 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const byproductCreditsUSD = normalizeSeriesLength(input.byproductCreditsUSD, length, 'byproductCreditsUSD');
   const depreciationUSD = normalizeSeriesLength(input.depreciationUSD, length, 'depreciationUSD');
   const workingCapitalDeltaUSD = normalizeSeriesLength(input.workingCapitalDeltaUSD, length, 'workingCapitalDeltaUSD');
+  const taxCashFlowUSD = hasExplicitTaxCashFlow
+    ? normalizeSeriesLength(input.taxCashFlowUSD, length, 'taxCashFlowUSD')
+    : null;
 
   const sustainingCostUSD: (number | null)[] = new Array(length).fill(null);
   const sustainingAdjustedOperatingEarningsUSD: (number | null)[] = new Array(length).fill(null);
@@ -113,17 +122,34 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     const taxableIncomeAtT = Math.max(0, ebitAtT);
     taxableIncomeUSD[t] = Number.isFinite(taxableIncomeAtT) ? taxableIncomeAtT : null;
 
-    if (taxRate === null || taxableIncomeUSD[t] === null) {
-      effectiveTaxRate[t] = null;
-      taxUSD[t] = null;
-      nopatUSD[t] = null;
-      fcffUSD[t] = null;
-      continue;
-    }
+    if (hasExplicitTaxCashFlow) {
+      const explicitTaxCashFlowAtT = taxCashFlowUSD?.[t] ?? null;
+      if (!isFiniteNumber(explicitTaxCashFlowAtT)) {
+        effectiveTaxRate[t] = null;
+        taxUSD[t] = null;
+        nopatUSD[t] = null;
+        fcffUSD[t] = null;
+        continue;
+      }
+      // taxUSD preserves the existing output sign convention: positive is a
+      // tax expense/payment, negative is a tax credit. Input cash-flow signs are
+      // the opposite because positive taxCashFlowUSD is an inflow.
+      const taxValue = -explicitTaxCashFlowAtT;
+      taxUSD[t] = Number.isFinite(taxValue) ? taxValue : null;
+      effectiveTaxRate[t] = ebitAtT > 0 && taxUSD[t] !== null ? (taxUSD[t] as number) / ebitAtT : null;
+    } else {
+      if (taxRate === null || taxableIncomeUSD[t] === null) {
+        effectiveTaxRate[t] = null;
+        taxUSD[t] = null;
+        nopatUSD[t] = null;
+        fcffUSD[t] = null;
+        continue;
+      }
 
-    const taxValue = (taxableIncomeUSD[t] as number) * taxRate;
-    taxUSD[t] = Number.isFinite(taxValue) ? taxValue : null;
-    effectiveTaxRate[t] = ebitAtT > 0 && taxUSD[t] !== null ? (taxUSD[t] as number) / ebitAtT : null;
+      const taxValue = (taxableIncomeUSD[t] as number) * taxRate;
+      taxUSD[t] = Number.isFinite(taxValue) ? taxValue : null;
+      effectiveTaxRate[t] = ebitAtT > 0 && taxUSD[t] !== null ? (taxUSD[t] as number) / ebitAtT : null;
+    }
 
     if (taxUSD[t] == null) {
       nopatUSD[t] = null;
@@ -178,4 +204,4 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   };
 }
 
-export { CAPEX_NEGATIVE_ERROR };
+export { CAPEX_NEGATIVE_ERROR, TAX_MODE_CONFLICT_ERROR };

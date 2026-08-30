@@ -50,6 +50,11 @@ export type ProjectJsonV1 = {
     royaltiesUSD?: Array<number | null>;
     reclamationUSD: Array<number | null>;
     byproductCreditsUSD?: Array<number | null>;
+    /**
+     * Report-locked net tax cash flow. Positive = cash inflow/refundable tax
+     * credit; negative = cash tax payment. Mutually exclusive with taxRate.
+     */
+    taxCashFlowUSD?: Array<number | null>;
   };
 
   metals: {
