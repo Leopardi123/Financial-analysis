@@ -30,7 +30,7 @@ const base: InvestmentScoreInputs = {
   tier: 1,
   pNav: 0.12,
   peak6xVsPrice: 5,
-  valuationConvergenceScore1Pass: true,
+  valuationConvergence: 'EXTREME',
   lomYears: 32,
   cycleResistanceTier1Pass: true,
   downsideRobustnessPass: true,
@@ -45,20 +45,28 @@ const base: InvestmentScoreInputs = {
   assert.equal(result.gates.score1.passed, true);
   assert.equal(result.bestAllowedScore, 1);
   assert.equal(result.investmentScore, 2, 'raw continuous score still determines position within the allowed class');
+  assert.equal(result.components.valuationConvergence, 'EXTREME');
   assert.equal(result.components.managementRating, 'exceptional');
   assert.equal(result.components.optionalityRating, 'strong');
 }
 
 {
-  const result = computeInvestmentScore({ ...base, rawScore: 1, pNav: 0.16 });
+  const result = computeInvestmentScore({ ...base, rawScore: 1, pNav: 0.16, valuationConvergence: 'VERY_STRONG' });
   assert.equal(result.gates.score1.passed, false);
   assert.equal(result.gates.score2.passed, true);
   assert.equal(result.bestAllowedScore, 2);
-  assert.equal(result.investmentScore, 2, 'Score 1 valuation gate must cap an otherwise perfect raw score');
+  assert.equal(result.investmentScore, 2, 'Score 1 convergence gate must cap an otherwise perfect raw score');
 }
 
 {
-  const result = computeInvestmentScore({ ...base, rawScore: 1, tier: 2, pNav: 0.2, lomYears: 25 });
+  const result = computeInvestmentScore({
+    ...base,
+    rawScore: 1,
+    tier: 2,
+    pNav: 0.2,
+    lomYears: 25,
+    valuationConvergence: 'STRONG',
+  });
   assert.equal(result.gates.score1.passed, false);
   assert.equal(result.gates.score2.passed, false);
   assert.equal(result.gates.score3.passed, true);
@@ -97,7 +105,7 @@ const base: InvestmentScoreInputs = {
 }
 
 {
-  const result = computeInvestmentScore({ ...base, rawScore: 2, valuationConvergenceScore1Pass: null });
+  const result = computeInvestmentScore({ ...base, rawScore: 2, valuationConvergence: 'NOT_VERIFIED' });
   assert.equal(result.gates.score1.passed, false);
   assert.equal(result.verified, false);
   assert.match(result.diagnostics.join(' '), /Ej verifierad/);
