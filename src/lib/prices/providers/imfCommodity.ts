@@ -6,6 +6,9 @@ export type ImfCommodityPriceMapping = {
   description: string;
 };
 
+export const IMF_PRIMARY_COMMODITY_WORKBOOK_URL =
+  'https://www.imf.org/-/media/files/research/commodityprices/monthly/external-data.xlsx';
+
 export const IMF_COMMODITY_PRICE_MAPPINGS: readonly ImfCommodityPriceMapping[] = [
   {
     priceKey: 'MO_USD_TONNE',
