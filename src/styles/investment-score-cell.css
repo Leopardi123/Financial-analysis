@@ -1,0 +1,49 @@
+.investment-score-cell {
+  display: inline-flex;
+  min-width: 76px;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.investment-score-cell strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(20, 35, 32, 0.35);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.48);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.investment-score-cell small {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.68rem;
+  opacity: 0.66;
+}
+
+.investment-score-cell--score-1 strong,
+.investment-score-cell--score-2 strong,
+.investment-score-cell--score-3 strong {
+  border-width: 2px;
+  font-weight: 800;
+}
+
+.investment-score-cell--score-7,
+.investment-score-cell--score-8,
+.investment-score-cell--score-9,
+.investment-score-cell--score-10 {
+  opacity: 0.72;
+}
+
+.investment-score-cell--pending,
+.investment-score-cell--unverified {
+  font-size: 0.72rem;
+  opacity: 0.55;
+}
