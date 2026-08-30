@@ -55,6 +55,11 @@ export type ProjectJsonV1 = {
      * credit; negative = cash tax payment. Mutually exclusive with taxRate.
      */
     taxCashFlowUSD?: Array<number | null>;
+    /**
+     * Report-locked non-operating terminal proceeds such as salvage value.
+     * Positive values are FCFF inflows and do not affect revenue/EBITDA/EBIT/tax.
+     */
+    terminalProceedsUSD?: Array<number | null>;
   };
 
   metals: {
