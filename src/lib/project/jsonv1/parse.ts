@@ -9,7 +9,11 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function parseExplicitTaxCashFlow(raw: unknown, expectedLength: number): Array<number | null> | null {
+function parseStrictOptionalSeries(
+  raw: unknown,
+  fieldName: 'taxCashFlowUSD' | 'terminalProceedsUSD',
+  expectedLength: number,
+): Array<number | null> | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return null;
   }
@@ -17,58 +21,60 @@ function parseExplicitTaxCashFlow(raw: unknown, expectedLength: number): Array<n
   if (!series || typeof series !== 'object' || Array.isArray(series)) {
     return null;
   }
-  const taxCashFlowRaw = (series as { taxCashFlowUSD?: unknown }).taxCashFlowUSD;
-  if (taxCashFlowRaw === undefined || taxCashFlowRaw === null) {
+  const valueRaw = (series as Record<string, unknown>)[fieldName];
+  if (valueRaw === undefined || valueRaw === null) {
     return null;
   }
-  if (!Array.isArray(taxCashFlowRaw)) {
-    throw new Error(
-      `series.taxCashFlowUSD must be an array of length ${expectedLength} (masterN+1).`,
-    );
+  if (!Array.isArray(valueRaw)) {
+    throw new Error(`series.${fieldName} must be an array of length ${expectedLength} (masterN+1).`);
   }
-  if (taxCashFlowRaw.length !== expectedLength) {
+  if (valueRaw.length !== expectedLength) {
     throw new Error(
-      `series.taxCashFlowUSD must be an array of length ${expectedLength} (masterN+1). Received array length ${taxCashFlowRaw.length}.`,
+      `series.${fieldName} must be an array of length ${expectedLength} (masterN+1). Received array length ${valueRaw.length}.`,
     );
   }
 
-  return taxCashFlowRaw.map((value, index) => {
+  return valueRaw.map((value, index) => {
     if (value === null) {
       return null;
     }
     if (!isFiniteNumber(value)) {
       throw new Error(
-        `series.taxCashFlowUSD[${index}] must be null or a finite number. Received ${JSON.stringify(value)}.`,
+        `series.${fieldName}[${index}] must be null or a finite number. Received ${JSON.stringify(value)}.`,
       );
+    }
+    if (fieldName === 'terminalProceedsUSD' && value < 0) {
+      throw new Error(`series.terminalProceedsUSD[${index}] must be null or a finite number >= 0.`);
     }
     return value;
   });
 }
 
 /**
- * Backwards-compatible parser overlay for report-locked tax cash flows.
- *
- * The legacy parser remains the source of truth for every pre-existing field.
- * If series.taxCashFlowUSD is absent, the returned engine input is therefore
- * identical to the legacy path. When present, only the new optional Phase 1
- * field is added. taxRate and taxCashFlowUSD are deliberately mutually
- * exclusive so an explicit report tax series can never be double-counted.
+ * Backwards-compatible parser overlay for report-locked cash-flow fields.
+ * The preserved legacy parser remains authoritative for every pre-existing
+ * project field. If neither overlay field exists, the parsed result is returned
+ * unchanged, which keeps existing Project/Corporate calculations on the old path.
  */
 export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   const parsed = parseProjectJsonV1Legacy(raw);
   const expectedLength = parsed.engineInput.masterN + 1;
-  const taxCashFlowUSD = parseExplicitTaxCashFlow(raw, expectedLength);
+  const taxCashFlowUSD = parseStrictOptionalSeries(raw, 'taxCashFlowUSD', expectedLength);
+  const terminalProceedsUSD = parseStrictOptionalSeries(raw, 'terminalProceedsUSD', expectedLength);
 
-  if (taxCashFlowUSD === null) {
-    return parsed;
+  if (taxCashFlowUSD !== null) {
+    if (parsed.engineInputWithoutPrices.taxRate !== null) {
+      throw new Error('series.taxCashFlowUSD is mutually exclusive with economics.taxRate');
+    }
+    parsed.engineInput.phase1.taxCashFlowUSD = [...taxCashFlowUSD];
+    parsed.engineInputWithoutPrices.phase1.taxCashFlowUSD = [...taxCashFlowUSD];
   }
 
-  if (parsed.engineInputWithoutPrices.taxRate !== null) {
-    throw new Error('series.taxCashFlowUSD is mutually exclusive with economics.taxRate');
+  if (terminalProceedsUSD !== null) {
+    parsed.engineInput.phase1.terminalProceedsUSD = [...terminalProceedsUSD];
+    parsed.engineInputWithoutPrices.phase1.terminalProceedsUSD = [...terminalProceedsUSD];
   }
 
-  parsed.engineInput.phase1.taxCashFlowUSD = [...taxCashFlowUSD];
-  parsed.engineInputWithoutPrices.phase1.taxCashFlowUSD = [...taxCashFlowUSD];
   return parsed;
 }
 

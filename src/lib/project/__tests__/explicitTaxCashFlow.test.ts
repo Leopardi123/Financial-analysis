@@ -1,3 +1,4 @@
+import './terminalProceedsCashFlow.test.ts';
 import { computeProjectPhase1 } from '../phase1.ts';
 import { parseProjectJsonV1 } from '../jsonv1/parse.ts';
 import { parseProjectJsonV1 as parseProjectJsonV1Legacy } from '../jsonv1/parseLegacy.ts';
@@ -33,9 +34,6 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
 }
 
 (function runExplicitTaxCashFlowTests() {
-  // Hard non-regression guard: when the new field is absent, the new parser
-  // must return the exact same canonical inputs/context/warnings as the parser
-  // that existed before this feature branch.
   const legacyJson = getProjectJsonV1Template();
   const legacyParsedBefore = parseProjectJsonV1Legacy(legacyJson);
   const legacyParsedAfter = parseProjectJsonV1(legacyJson);

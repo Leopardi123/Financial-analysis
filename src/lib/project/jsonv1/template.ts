@@ -10,9 +10,9 @@ type ProjectJsonV1Template = ProjectJsonV1 & Record<string, unknown>;
  * Backwards-compatible template overlay.
  *
  * The legacy template builder remains authoritative for every existing field.
- * The new explicit tax series is only preserved when it already exists in the
- * project JSON, so old templates/projects receive no new active input and keep
- * exactly the prior taxRate behavior.
+ * Report-locked cash-flow overlay fields are only preserved when they already
+ * exist in the project JSON. Old templates/projects therefore receive no new
+ * active inputs and keep exactly the prior calculation behavior.
  */
 export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJsonV1Template {
   const output = buildProjectJsonV1TemplateLegacy(existing) as ProjectJsonV1Template;
@@ -22,17 +22,24 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
   series._example_taxCashFlowUSD = [254700000, 365200000, 398300000, -120000000];
   series._unit_taxCashFlowUSD = 'USD (full dollars)';
 
+  series._description_terminalProceedsUSD = 'Optional report-locked non-operating terminal cash proceeds aligned to t=0..masterN, e.g. salvage value. Values must be >= 0, have exactly masterN+1 elements, and affect FCFF only—not revenue, EBITDA, EBIT or tax.';
+  series._example_terminalProceedsUSD = [0, 0, 0, 179100000];
+  series._unit_terminalProceedsUSD = 'USD (full dollars)';
+
   if (existing?.series.taxCashFlowUSD !== undefined) {
     series.taxCashFlowUSD = [...existing.series.taxCashFlowUSD];
+  }
+  if (existing?.series.terminalProceedsUSD !== undefined) {
+    series.terminalProceedsUSD = [...existing.series.terminalProceedsUSD];
   }
 
   return output;
 }
 
 /**
- * Keep the default project JSON template byte-for-byte equivalent in its active
- * calculation fields. Explicit tax is opt-in and therefore is not inserted into
- * newly created legacy-style project JSONs.
+ * Keep the default project JSON template equivalent in its active calculation
+ * fields. Both report-locked overlays are opt-in and are not inserted into new
+ * legacy-style project JSONs.
  */
 export function getProjectJsonV1Template(): ProjectJsonV1 {
   return getProjectJsonV1TemplateLegacy();
