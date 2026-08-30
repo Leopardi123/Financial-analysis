@@ -30,26 +30,46 @@ Scale: 1 best, 10 worst.
 - Hard gates always take precedence over continuous score.
 - UI must never calculate or alter the score.
 
+## Canonical valuation convergence
+
+Valuation convergence answers whether two fundamentally different valuation perspectives agree that the equity is undervalued. It is not a weighted score and one leg cannot compensate for a failure in the other.
+
+Canonical inputs are the exact existing PRE REVENUE Compare Stocks metrics:
+
+- `P/NAV PF`: current price × post-financing shares including manual extra shares / `NAV_today_TargetCurrency`.
+- `Peak 6x / pris`: peak `evEbitda6xPerShare`, adjusted for the same post-financing/manual-extra-share basis, divided by current price.
+
+The single classifier lives in `src/lib/investmentScore/valuationConvergence.ts` and returns:
+
+- `EXTREME`: P/NAV PF <= 0.15x AND Peak 6x / pris >= 4.0x.
+- `VERY_STRONG`: P/NAV PF <= 0.25x AND Peak 6x / pris >= 3.0x.
+- `STRONG`: P/NAV PF <= 0.40x AND Peak 6x / pris >= 2.0x.
+- `CONTRADICTORY`: P/NAV PF <= 0.40x but Peak 6x / pris < 1.5x; NAV discount is not confirmed by the earnings-based view.
+- `MIXED`: all other verified combinations that do not reach Strong convergence.
+- `NOT_VERIFIED`: either canonical input is missing/invalid.
+
+`Target / pris`, annualized return to production and AuEq valuation metrics are not counted as a second independent convergence leg in v0. They can later be used as diagnostics or continuous-score inputs, but not to bypass the two-leg hard gate.
+
 ## Score 1 — Generational
 
 All must pass:
 
 - Tier 1.
-- P/NAV <= 0.15x, or a separately defined equivalent producer valuation rule.
-- Independent valuation convergence verified by a canonical rule.
+- `EXTREME` canonical valuation convergence.
 - Exceptional management.
 - Relevant execution track record itself must be Exceptional: Score 1 requires exact-fit prior execution, not merely a high management average.
 - LOM >= 30 years, or LOM >= 20 years plus exceptional optionality.
 - Tier-1 cycle resistance.
 - No identified fatal flaw.
 
+The P/NAV <= 0.15x requirement is therefore still a hard requirement, but it is enforced once inside the central convergence classifier rather than duplicated inside the score gate.
+
 ## Score 2 — Exceptional Buy
 
 All must pass:
 
 - Tier 1.
-- P/NAV <= 0.25x (preliminary).
-- Peak 6x / price >= 3x or future canonical equivalent (preliminary).
+- At least `VERY_STRONG` canonical valuation convergence.
 - Management >= Strong.
 - LOM >= 20 years, or LOM >= 15 years plus exceptional optionality.
 - Tier-1 cycle resistance.
@@ -60,8 +80,7 @@ All must pass:
 All must pass:
 
 - Tier 1-2.
-- P/NAV <= 0.40x (preliminary).
-- Peak 6x / price >= 2x (preliminary).
+- At least `STRONG` canonical valuation convergence.
 - Management >= Adequate/Good; final minimum to be calibrated.
 - Downside robustness passes a canonical test.
 - No identified fatal flaw.
@@ -113,6 +132,7 @@ Canonical engine output must expose at least:
 - `rawScore`
 - `bestAllowedScore`
 - gate results for Scores 1-3
+- canonical valuation-convergence class
 - `gateFailures[]`
 - verification status
 - diagnostics
