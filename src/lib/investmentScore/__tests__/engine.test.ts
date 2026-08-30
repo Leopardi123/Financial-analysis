@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import { computeInvestmentScore } from '../engine.ts';
-import type { InvestmentScoreInputs } from '../types.ts';
+import type {
+  InvestmentScoreInputs,
+  ManagementEvidence,
+  ManagementRating,
+  OptionalityEvidence,
+  OptionalityRating,
+} from '../types.ts';
+
+function management(rating: ManagementRating): ManagementEvidence {
+  return {
+    executionTrackRecord: { rating },
+    capitalAllocation: { rating },
+    deliveryCredibility: { rating },
+    technicalTeamFit: { rating },
+  };
+}
+
+function optionality(rating: OptionalityRating): OptionalityEvidence {
+  return {
+    resourceExpansion: { rating },
+    minePlanConversion: { rating },
+    expansionDebottlenecking: { rating },
+    districtStrategic: { rating },
+  };
+}
 
 const base: InvestmentScoreInputs = {
   tier: 1,
@@ -11,10 +35,8 @@ const base: InvestmentScoreInputs = {
   cycleResistanceTier1Pass: true,
   downsideRobustnessPass: true,
   fatalFlaw: false,
-  managementRating: 'exceptional',
-  management: null,
-  optionalityRating: 'strong',
-  optionality: null,
+  management: management('exceptional'),
+  optionality: optionality('strong'),
   rawScore: 1.4,
 };
 
@@ -23,6 +45,8 @@ const base: InvestmentScoreInputs = {
   assert.equal(result.gates.score1.passed, true);
   assert.equal(result.bestAllowedScore, 1);
   assert.equal(result.investmentScore, 2, 'raw continuous score still determines position within the allowed class');
+  assert.equal(result.components.managementRating, 'exceptional');
+  assert.equal(result.components.optionalityRating, 'strong');
 }
 
 {
@@ -43,13 +67,25 @@ const base: InvestmentScoreInputs = {
 }
 
 {
-  const result = computeInvestmentScore({ ...base, rawScore: 1, lomYears: 20, optionalityRating: 'exceptional' });
+  const result = computeInvestmentScore({ ...base, rawScore: 1, lomYears: 20, optionality: optionality('exceptional') });
   assert.equal(result.gates.score1.passed, true, '20y LOM plus exceptional optionality can satisfy Score 1 longevity gate');
 }
 
 {
-  const result = computeInvestmentScore({ ...base, rawScore: 1, lomYears: 19, optionalityRating: 'exceptional' });
+  const result = computeInvestmentScore({ ...base, rawScore: 1, lomYears: 19, optionality: optionality('exceptional') });
   assert.equal(result.gates.score1.passed, false);
+}
+
+{
+  const result = computeInvestmentScore({
+    ...base,
+    rawScore: 1,
+    management: {
+      ...management('exceptional'),
+      executionTrackRecord: { rating: 'strong' },
+    },
+  });
+  assert.equal(result.gates.score1.passed, false, 'Score 1 requires exceptional exact-fit execution history, not only a high management average');
 }
 
 {
@@ -65,6 +101,15 @@ const base: InvestmentScoreInputs = {
   assert.equal(result.gates.score1.passed, false);
   assert.equal(result.verified, false);
   assert.match(result.diagnostics.join(' '), /Ej verifierad/);
+}
+
+{
+  const result = computeInvestmentScore({ ...base, rawScore: 2, management: null });
+  assert.equal(result.gates.score1.passed, false);
+  assert.equal(result.gates.score2.passed, false);
+  assert.equal(result.gates.score3.passed, false);
+  assert.equal(result.verified, false);
+  assert.match(result.diagnostics.join(' '), /Management|management/i);
 }
 
 console.log('investmentScore engine tests passed');
