@@ -67,8 +67,8 @@ export function exactFitManagementPass(evidence: ManagementEvidence | null): boo
 }
 
 /**
- * Canonical optionality aggregate. Optionality is positive-only downstream.
- * The aggregate is conservative: four dimensions are averaged and floored.
+ * Canonical optionality aggregate used by the continuous positive-only bonus.
+ * The aggregate remains conservative: four dimensions are averaged and floored.
  */
 export function aggregateOptionalityRating(evidence: OptionalityEvidence | null): OptionalityRating | null {
   if (!evidence) return null;
@@ -80,4 +80,20 @@ export function aggregateOptionalityRating(evidence: OptionalityEvidence | null)
   if (floored === 2) return 'strong';
   if (floored === 1) return 'some';
   return 'none';
+}
+
+/**
+ * Hard-gate definition of broad exceptional optionality for the LOM exception.
+ * A single exceptional dimension is not enough: at least three of the four
+ * assessed optionality dimensions must themselves be exceptional. Missing
+ * evidence stays unverified and can never qualify the gate.
+ *
+ * This is intentionally separate from aggregateOptionalityRating so the
+ * continuous optionality bonus is unchanged by the hard-gate rule.
+ */
+export function exceptionalOptionalityForLongevityPass(evidence: OptionalityEvidence | null): boolean | null {
+  if (!evidence) return null;
+  const values = optionalityValues(evidence);
+  if (!values) return null;
+  return values.filter((rating) => rating === 'exceptional').length >= 3;
 }
