@@ -19,6 +19,10 @@
       "destination": "/api/tier1-pre-revenue"
     },
     {
+      "source": "/api/imf-mo-debug",
+      "destination": "/api/imf-mo-debug"
+    },
+    {
       "source": "/api/:path*",
       "destination": "/api"
     },
@@ -32,6 +36,9 @@
       "includeFiles": "src/**/*.ts"
     },
     "api/tier1-pre-revenue.ts": {
+      "includeFiles": "src/**/*.ts"
+    },
+    "api/imf-mo-debug.ts": {
       "includeFiles": "src/**/*.ts"
     }
   }
