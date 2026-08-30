@@ -49,7 +49,8 @@ export type ProjectPhase1Output = {
   nopatUSD: (number | null)[];
   fcffUSD: (number | null)[];
   workingCapitalDeltaUSD_effective: (number | null)[];
-  terminalProceedsUSD_effective: (number | null)[];
+  /** Optional to preserve compatibility with existing typed fixtures/mocks. */
+  terminalProceedsUSD_effective?: (number | null)[];
 };
 
 export type ProjectPhase2Input = {
