@@ -1,3 +1,4 @@
+import type { FiscalTakeRule } from '../fiscal/types.ts';
 import type { QtyUnit } from '../jsonv1/schema.ts';
 
 export type ProjectJsonV3CostComponentCategory =
@@ -34,16 +35,29 @@ export type ProjectJsonV3SellingModel =
   | { mode: 'AGGREGATE'; sellingCostsUSD: Array<number | null> }
   | { mode: 'COMPONENTS'; components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3SellingComponentCategory>> };
 
-export type ProjectJsonV3RoyaltyModel =
+export type ProjectJsonV3FiscalTakeModel =
   | { mode: 'UNKNOWN' }
   | { mode: 'NONE' }
-  | { mode: 'RULES'; items: Array<unknown> }
-  | { mode: 'LOCKED_SERIES'; royaltiesUSD: Array<number | null> };
+  | { mode: 'RULES'; items: FiscalTakeRule[] }
+  | { mode: 'LOCKED_SERIES'; fiscalTakeUSD: Array<number | null>; placement: 'OPERATING_EXPENSE' | 'PRE_TAX_CHARGE' | 'POST_TAX_CHARGE' };
 
 export type ProjectJsonV3TaxModel =
   | { mode: 'UNKNOWN' }
-  | { mode: 'FLAT_RATE'; taxRate: number }
-  | { mode: 'LOCKED_SERIES'; taxCashFlowUSD: Array<number | null> };
+  | { mode: 'FLAT_RATE'; taxRate: number; lossCarryforward?: boolean | null }
+  | { mode: 'LOCKED_SERIES'; taxCashFlowUSD: Array<number | null> }
+  | {
+      mode: 'REPORT_LOCKED_WITH_RUNTIME_PROXY';
+      reportTaxCashFlowUSD: Array<number | null>;
+      runtime: {
+        method: 'NOMINAL_RATE_WITH_LOSS_CARRYFORWARD';
+        taxRate: number;
+      };
+      notes?: string | null;
+    };
+
+export type ProjectJsonV3RevenueBasis =
+  | 'PAYABLE_DIRECT'
+  | 'METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION';
 
 export type ProjectJsonV3ScheduleAnchor = {
   year: number;
@@ -56,10 +70,12 @@ export type ProjectJsonV3ScheduleAnchor = {
 export type ProjectJsonV3RuntimePlacement = {
   constructionStart?: ProjectJsonV3ScheduleAnchor | null;
   productionStart?: ProjectJsonV3ScheduleAnchor | null;
+  nameplateCapacity?: ProjectJsonV3ScheduleAnchor | null;
   notes?: string | null;
   /** Legacy flat placement fields are forbidden by the V3 validator. */
   productionStartYear?: never;
   constructionStartYear?: never;
+  nameplateCapacityYear?: never;
   sourceId?: never;
   pageOrTable?: never;
   asOfDate?: never;
@@ -110,12 +126,18 @@ export type ProjectJsonV3 = {
   time: {
     masterN: number;
     productionStartPeriod: number;
+    nameplateCapacityPeriod?: number | null;
     reportPeriodLabels?: Array<string | null> | null;
     phaseByPeriod: Array<'construction' | 'ramp_up' | 'operations' | 'closure'>;
     runtimePlacement?: ProjectJsonV3RuntimePlacement | null;
   };
   metals: {
+    /** Directly reported payable quantity evidence; always retained when disclosed. */
     payableQtyByMetal: Record<string, Array<number | null>>;
+    /** Optional directly reported metal-in-product/concentrate quantity evidence. */
+    metalInProductQtyByMetal?: Record<string, Array<number | null>> | null;
+    /** Exactly one active revenue quantity basis per economic metal. */
+    revenueBasisByMetal: Record<string, ProjectJsonV3RevenueBasis>;
     payableQtyUnitByMetal: Record<string, QtyUnit>;
     priceKeyByMetal: Record<string, string>;
     auPriceKey: string | null;
@@ -124,11 +146,12 @@ export type ProjectJsonV3 = {
   economics: {
     costModel: ProjectJsonV3CostModel;
     sellingModel: ProjectJsonV3SellingModel;
-    royaltyModel: ProjectJsonV3RoyaltyModel;
+    fiscalTakeModel: ProjectJsonV3FiscalTakeModel;
     taxModel: ProjectJsonV3TaxModel;
     depreciationUSD?: Array<number | null> | null;
   };
   capital: {
+    /** Report-defined initial/development project CAPEX; may extend into early production periods. */
     capexUSD: Array<number | null>;
     sustainingCapexUSD: Array<number | null>;
     closureUSD: Array<number | null>;

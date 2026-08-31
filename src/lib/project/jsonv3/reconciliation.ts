@@ -21,64 +21,40 @@ export type ProjectV3ReconciliationResult = {
   hardChecks: Array<{ check: string; status: 'PASS' | 'FAIL'; detail: string }>;
   diagnostics: string[];
 };
-
 type Check = ProjectV3ReconciliationResult['hardChecks'][number];
-
-function finite(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-function sumFinite(series: Array<number | null>, predicate: (index: number) => boolean = () => true): number | null {
+function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
+function sumFinite(series: Array<number | null>): number | null {
   let total = 0;
-  for (let t = 0; t < series.length; t += 1) {
-    if (!predicate(t)) continue;
-    const value = series[t];
-    if (!finite(value)) return null;
-    total += value;
-  }
+  for (const value of series) { if (!finite(value)) return null; total += value; }
   return total;
 }
-
 function relativeDifference(actual: number | null, expected: number): number | null {
   if (!finite(actual)) return null;
   return (actual - expected) / Math.max(1e-12, Math.abs(expected));
 }
-
 function within(actual: number | null, expected: number, tolerance: number): boolean {
   if (!finite(actual)) return false;
   return Math.abs(actual - expected) / Math.max(1, Math.abs(expected)) <= tolerance;
 }
-
 function npv(fcff: Array<number | null>, rate: number, convention: 'period_end' | 'mid_year'): number | null {
   if (!fcff.every(finite)) return null;
   const shift = convention === 'mid_year' ? 0.5 : 0;
   return (fcff as number[]).reduce((sum, value, t) => sum + value / ((1 + rate) ** (t + shift)), 0);
 }
-
 function addMoneyCheck(checks: Check[], check: string, actual: number | null, expected: number | null | undefined, tolerance: number): void {
   if (expected == null) return;
-  checks.push({
-    check,
-    status: within(actual, expected, tolerance) ? 'PASS' : 'FAIL',
-    detail: `report=${expected}; model=${actual ?? 'null'}`,
-  });
+  checks.push({ check, status: within(actual, expected, tolerance) ? 'PASS' : 'FAIL', detail: `report=${expected}; model=${actual ?? 'null'}` });
 }
-
-function reportTargetChecks(
-  raw: ProjectJsonV3,
-  parsed: ReturnType<typeof parseProjectJsonV3>,
-  report: ProjectJsonV3ReportVerification,
-  tolerance: number,
-): Check[] {
+function reportTargetChecks(parsed: ReturnType<typeof parseProjectJsonV3>, report: ProjectJsonV3ReportVerification, tolerance: number): Check[] {
   const checks: Check[] = [];
   const phase1 = parsed.engineInputWithoutPrices.phase1;
   const terminal = phase1.terminalProceedsUSD ?? [];
-
-  addMoneyCheck(checks, 'initial_capex', sumFinite(phase1.capexUSD, (t) => t < raw.time.productionStartPeriod), report.reportInitialCapexUSD, tolerance);
+  // capexUSD is report-defined initial/development CAPEX and may extend into an
+  // early production period. Classification is semantic, never t<productionStartPeriod.
+  addMoneyCheck(checks, 'initial_capex', sumFinite(phase1.capexUSD), report.reportInitialCapexUSD, tolerance);
   addMoneyCheck(checks, 'sustaining_capex', sumFinite(phase1.sustainingCapexUSD), report.reportSustainingCapexUSD, tolerance);
   addMoneyCheck(checks, 'closure_total', sumFinite(phase1.reclamationUSD), report.reportClosureUSD, tolerance);
   addMoneyCheck(checks, 'terminal_proceeds_total', terminal.length > 0 ? sumFinite(terminal) : 0, report.reportTerminalProceedsUSD, tolerance);
-
   if (report.reportClosurePeriod != null) {
     const periods = phase1.reclamationUSD.flatMap((value, index) => finite(value) && value !== 0 ? [index] : []);
     const model = periods.length > 0 ? periods[periods.length - 1] : null;
@@ -109,10 +85,9 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   const tolerance = finite(report.toleranceRelative) ? report.toleranceRelative : 0.02;
   if (!(tolerance > 0 && tolerance <= 0.1)) throw new Error('verification.report.toleranceRelative must be within (0, 0.1].');
 
-  // Reconciliation is intentionally calendar-independent. A neutral calendar anchor
-  // is used internally when runtimePlacement is absent; NPV/IRR operate on relative t.
-  const parsed = parseProjectJsonV3(raw, { requireRuntimePlacement: false });
-
+  // Report reconciliation is calendar-independent and explicitly selects the
+  // report-locked tax leg of a hybrid tax model. Normal runtime selects proxy tax.
+  const parsed = parseProjectJsonV3(raw, { requireRuntimePlacement: false, taxScenario: 'report' });
   const requiredKeys = [...new Set(Object.values(raw.metals.priceKeyByMetal))].sort();
   const suppliedKeys = Object.keys(report.priceDeckByKey).sort();
   const missing = requiredKeys.filter((key) => !finite(report.priceDeckByKey[key]) || report.priceDeckByKey[key] <= 0);
@@ -122,7 +97,7 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
     {
       check: 'relative_period_mapping',
       status: raw.time.phaseByPeriod.length === raw.time.masterN + 1 && (labelCount === null || labelCount === raw.time.masterN + 1) ? 'PASS' : 'FAIL',
-      detail: `periods=${raw.time.masterN + 1}; productionStartPeriod=${raw.time.productionStartPeriod}; reportLabels=${labelCount ?? 'not_disclosed'}; runtimePlacement=${raw.time.runtimePlacement?.productionStartYear ?? 'not_required_for_report_reconciliation'}`,
+      detail: `periods=${raw.time.masterN + 1}; productionStartPeriod=${raw.time.productionStartPeriod}; nameplateCapacityPeriod=${raw.time.nameplateCapacityPeriod ?? 'not_disclosed'}; reportLabels=${labelCount ?? 'not_disclosed'}; runtimePlacement=ignored_for_report_reconciliation`,
     },
     {
       check: 'report_price_deck_keys',
@@ -130,23 +105,25 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
       detail: `required=[${requiredKeys.join(',')}]; supplied=[${suppliedKeys.join(',')}]; missing=[${missing.join(',')}]; extra=[${extra.join(',')}]`,
     },
   ];
+  hardChecks.push(...reportTargetChecks(parsed, report, tolerance));
 
-  hardChecks.push(...reportTargetChecks(raw, parsed, report, tolerance));
   const diagnostics: string[] = [];
   let output: ReturnType<typeof computeProjectEngineFullProductionV1> | null = null;
-
   if (hardChecks.every((check) => check.status === 'PASS')) {
     try {
-      const input = await resolveProjectPricesToEngineInput({ parsed, scenario: { mode: 'fixed', fixedPriceByKey: report.priceDeckByKey }, allowRefresh: false, projectId: raw.meta?.projectId ?? 'project-v3-report-check' });
+      const input = await resolveProjectPricesToEngineInput({
+        parsed,
+        scenario: { mode: 'fixed', fixedPriceByKey: report.priceDeckByKey },
+        allowRefresh: false,
+        projectId: raw.meta?.projectId ?? 'project-v3-report-check',
+      });
       input.phase2.discountRate = report.discountRate;
       output = computeProjectEngineFullProductionV1(input);
       diagnostics.push(...(input.diagnostics?.warnings ?? []));
     } catch (error) {
       diagnostics.push(`Report-deck engine run failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-  } else {
-    diagnostics.push('Report-deck engine run withheld because a hard relative-period/CAPEX/closure/WC/price check failed.');
-  }
+  } else diagnostics.push('Report-deck engine run withheld because a hard relative-period/CAPEX/closure/WC/price check failed.');
 
   const fcff = output?.phase1.fcffUSD ?? [];
   const modelNPV = output ? npv(fcff, report.discountRate, report.discountConvention) : null;

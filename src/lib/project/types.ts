@@ -1,4 +1,5 @@
 import type { ProjectAiscOutput } from './aisc/types.ts';
+import type { FiscalLedgerLine, FiscalTakeEngineOutput, FiscalTakeRule } from './fiscal/types.ts';
 import type { NationalTakeOutput } from './nationalTake/types.ts';
 import type { ProjectRevenueInput, ProjectRevenueOutput } from './revenue/types.ts';
 import type { RoyaltyDetailMVI } from './royalties/mvi.ts';
@@ -10,6 +11,8 @@ export type ProjectPhase1Input = {
   masterN: number;
   productionStartPeriod: number;
   taxRate?: number | null;
+  /** Carry negative taxable income forward against later positive EBIT. */
+  taxLossCarryforward?: boolean | null;
   /**
    * Optional report-locked tax cash-flow series. Positive values are tax cash
    * inflows/credits; negative values are cash tax payments. When supplied this
@@ -17,6 +20,18 @@ export type ProjectPhase1Input = {
    * changing EBITDA/EBIT.
    */
   taxCashFlowUSD?: (number | null)[] | null;
+  /** Fiscal charges after EBIT but before corporate income tax. */
+  preTaxChargesUSD?: (number | null)[] | null;
+  /** Fiscal charges after corporate income tax. */
+  postTaxChargesUSD?: (number | null)[] | null;
+  /**
+   * For V3 METAL_IN_PRODUCT revenue: directly reported payable/gross quantity
+   * ratio by metal. Dimensionless, therefore safe across price-unit conversion.
+   */
+  payabilityFactorByMetal?: Record<string, (number | null)[]> | null;
+  /** V3 fiscal-take rules and source-backed component ledger. */
+  fiscalTakeRules?: FiscalTakeRule[] | null;
+  fiscalLedgerUSD?: Partial<Record<FiscalLedgerLine, Array<number | null>>> | null;
   /**
    * Optional report-locked non-operating terminal proceeds, e.g. salvage value.
    * Positive values are FCFF cash inflows and do not change revenue, EBITDA,
@@ -26,7 +41,7 @@ export type ProjectPhase1Input = {
   capexUSD: (number | null)[];
   revenueUSD: (number | null)[];
   operatingCostsUSD: (number | null)[];
-  /** Canonical off-site/selling costs (TC/RC/freight/insurance/marketing). */
+  /** Canonical off-site/selling costs (payability, TC/RC/freight/insurance/marketing). */
   sellingCostsUSD?: (number | null)[] | null;
   sustainingCapexUSD: (number | null)[];
   royaltiesUSD: (number | null)[];
@@ -52,6 +67,9 @@ export type ProjectPhase1Output = {
   fcffUSD: (number | null)[];
   workingCapitalDeltaUSD_effective: (number | null)[];
   sellingCostsUSD_effective?: (number | null)[];
+  preTaxChargesUSD_effective?: (number | null)[];
+  postTaxChargesUSD_effective?: (number | null)[];
+  taxLossCarryforwardUSD_effective?: (number | null)[];
   /** Optional to preserve compatibility with existing typed fixtures/mocks. */
   terminalProceedsUSD_effective?: (number | null)[];
 };
@@ -74,134 +92,71 @@ export type ProjectPhase2Output = {
   dcf_present_over_etlv: number | null;
 };
 
-export type ProjectEngineInput = {
-  phase1: ProjectPhase1Input;
-  phase2: {
-    discountRate: number;
-  };
-};
-
-export type ProjectEngineOutput = {
-  phase1: ProjectPhase1Output;
-  phase2: ProjectPhase2Output;
-};
+export type ProjectEngineInput = { phase1: ProjectPhase1Input; phase2: { discountRate: number } };
+export type ProjectEngineOutput = { phase1: ProjectPhase1Output; phase2: ProjectPhase2Output };
 
 export type ProjectEngineWithTakeInput = {
   take: ProjectTakeMVIInput;
-  phase1: Omit<ProjectPhase1Input, 'revenueUSD'> & {
-    grossRevenueUSD: (number | null)[];
-  };
-  phase2: {
-    discountRate: number;
-  };
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD'> & { grossRevenueUSD: (number | null)[] };
+  phase2: { discountRate: number };
 };
-
-export type ProjectEngineWithTakeOutput = {
-  take: ProjectTakeMVIOutput;
-  phase1: ProjectPhase1Output;
-  phase2: ProjectPhase2Output;
-};
+export type ProjectEngineWithTakeOutput = { take: ProjectTakeMVIOutput; phase1: ProjectPhase1Output; phase2: ProjectPhase2Output };
 
 export type ProjectEngineWithAiscInput = {
   engine: ProjectEngineInput;
-  aisc: {
-    grossRevenueUSD: (number | null)[];
-    auPriceUSDPerOz: (number | null)[];
-  };
+  aisc: { grossRevenueUSD: (number | null)[]; auPriceUSDPerOz: (number | null)[] };
 };
-
-export type ProjectEngineWithAiscOutput = ProjectEngineOutput & {
-  aisc: ProjectAiscOutput;
-};
+export type ProjectEngineWithAiscOutput = ProjectEngineOutput & { aisc: ProjectAiscOutput };
 
 export type ProjectEngineWithTakeAndAiscInput = {
   engineWithTake: ProjectEngineWithTakeInput;
-  aisc: {
-    grossRevenueUSD: (number | null)[];
-    auPriceUSDPerOz: (number | null)[];
-  };
+  aisc: { grossRevenueUSD: (number | null)[]; auPriceUSDPerOz: (number | null)[] };
 };
-
-export type ProjectEngineWithTakeAndAiscOutput = ProjectEngineWithTakeOutput & {
-  aisc: ProjectAiscOutput;
-};
+export type ProjectEngineWithTakeAndAiscOutput = ProjectEngineWithTakeOutput & { aisc: ProjectAiscOutput };
 
 export type ProjectEngineFromProductionInput = {
   revenue: ProjectRevenueInput;
-  take: Omit<ProjectTakeMVIInput, 'grossRevenueUSD'> & {
-    items: ProjectTakeMVIInput['items'];
-  };
-  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
-    royaltiesUSD?: (number | null)[];
-  };
+  take: Omit<ProjectTakeMVIInput, 'grossRevenueUSD'> & { items: ProjectTakeMVIInput['items'] };
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & { royaltiesUSD?: (number | null)[] };
   phase2: { discountRate: number };
-  aisc: {
-    auPriceUSDPerOz: (number | null)[];
-  };
+  aisc: { auPriceUSDPerOz: (number | null)[] };
 };
-
-export type ProjectEngineFromProductionOutput = {
-  revenue: ProjectRevenueOutput;
-  take: ProjectTakeMVIOutput;
-  phase1: ProjectPhase1Output;
-  phase2: ProjectPhase2Output;
-  aisc: ProjectAiscOutput;
-};
+export type ProjectEngineFromProductionOutput = { revenue: ProjectRevenueOutput; take: ProjectTakeMVIOutput; phase1: ProjectPhase1Output; phase2: ProjectPhase2Output; aisc: ProjectAiscOutput };
 
 export type ProjectEngineFromProductionWithStreamsInput = {
   streams: StreamsApplyByMetalInput;
   revenue: Omit<ProjectRevenueInput, 'payableQtyByMetal'>;
-  take: Omit<ProjectTakeMVIInput, 'grossRevenueUSD' | 'byMetalRevenueUSD'> & {
-    items: TakeItemMVI[];
-  };
-  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
-    royaltiesUSD?: never;
-  };
+  take: Omit<ProjectTakeMVIInput, 'grossRevenueUSD' | 'byMetalRevenueUSD'> & { items: TakeItemMVI[] };
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & { royaltiesUSD?: never };
   phase2: { discountRate: number };
   aisc: { auPriceUSDPerOz: (number | null)[] };
 };
-
-export type ProjectEngineFromProductionWithStreamsOutput = {
-  streams: StreamsApplyByMetalOutput;
-  revenue: ProjectRevenueOutput;
-  take: ProjectTakeMVIOutput;
-  phase1: ProjectPhase1Output;
-  phase2: ProjectPhase2Output;
-  aisc: ProjectAiscOutput;
-};
+export type ProjectEngineFromProductionWithStreamsOutput = { streams: StreamsApplyByMetalOutput; revenue: ProjectRevenueOutput; take: ProjectTakeMVIOutput; phase1: ProjectPhase1Output; phase2: ProjectPhase2Output; aisc: ProjectAiscOutput };
 
 export type ProjectEngineFullProductionV1Input = {
   masterN: number;
-
   streamsByMetal?: Record<string, StreamMVIConfig> | null;
-
+  /** Revenue-driving commercial quantity. V2 and PAYABLE_DIRECT use payable quantity. */
   payableQtyByMetal: Record<string, (number | null)[]>;
   spotPriceUSDByMetal: Record<string, (number | null)[]>;
   priceSeriesByKey?: Record<string, (number | null)[]>;
   priceKeyByMetal?: Record<string, string>;
   auPriceKey?: string | null;
-
   takeItems: unknown[];
-
   royaltiesDetail?: Array<RoyaltyDetailMVI> | null;
-
-  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & {
-    royaltiesUSD?: (number | null)[];
-  };
-
+  phase1: Omit<ProjectPhase1Input, 'revenueUSD' | 'royaltiesUSD'> & { royaltiesUSD?: (number | null)[] };
   phase2: { discountRate: number };
-
   aisc: { auPriceUSDPerOz: (number | null)[] };
-
-  meta?: {
-    usedFallbackDateMapping?: boolean;
-  };
+  meta?: { usedFallbackDateMapping?: boolean };
 };
 
 export type ProjectEngineFullProductionV1Output = {
   streams: StreamsApplyByMetalOutput | null;
   revenue: ProjectRevenueOutput;
   nationalTake: NationalTakeOutput;
+  fiscalTake?: FiscalTakeEngineOutput | null;
+  payabilityDeductionUSDByMetal?: Record<string, (number | null)[]>;
+  payabilityDeductionUSDTotal?: (number | null)[];
   totalTakeUSD: (number | null)[];
   itemTakeUSDById: Record<string, (number | null)[]>;
   phase1: ProjectPhase1Output;
