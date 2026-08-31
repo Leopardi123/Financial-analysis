@@ -101,9 +101,7 @@ function resolveTime(raw: ProjectJsonV3, options: ParseProjectJsonV3Options): { 
   if (nameplateCapacity && nameplateCapacityPeriod != null) candidates.push({ source: 'nameplateCapacity', year: nameplateCapacity.year - nameplateCapacityPeriod });
   const firstCalendarYear = candidates[0]?.year;
   if (!Number.isInteger(firstCalendarYear)) throw new Error('Unable to resolve runtime calendar placement.');
-  if (candidates.some((candidate) => candidate.year !== firstCalendarYear)) {
-    throw new Error(`PLACEMENT_CONFLICT: sourced schedule anchors imply different relative t=0 calendar years: ${candidates.map((item) => `${item.source}=>${item.year}`).join(', ')}. Do not stretch/interpolate or shift economic arrays; verify whether the underlying technical schedule changed.`);
-  }
+  if (candidates.some((candidate) => candidate.year !== firstCalendarYear)) throw new Error(`PLACEMENT_CONFLICT: sourced schedule anchors imply different relative t=0 calendar years: ${candidates.map((item) => `${item.source}=>${item.year}`).join(', ')}. Do not stretch/interpolate or shift economic arrays; verify whether the underlying technical schedule changed.`);
   const productionStartYear = (firstCalendarYear as number) + productionStartPeriod;
   return { yearsByPeriod: Array.from({ length }, (_, t) => (firstCalendarYear as number) + t), productionStartYear, runtimePlacementApplied: true };
 }
@@ -120,8 +118,15 @@ function setLedgerLine(ledger: Partial<Record<FiscalLedgerLine, Array<number | n
   ledger[line] = ledger[line] ? sumStrictSeries([ledger[line] as Array<number | null>, series], length) : [...series];
 }
 
+/**
+ * Preserve directly reported payable quantity as the canonical downstream
+ * production quantity. For gross-metal-value reports we retain the directly
+ * reported metal-in-product quantity as evidence and encode only the
+ * dimensionless payable/gross factor into the engine. This avoids the old
+ * mined→grade→recovery rounding chain while ensuring Project/Corporate/Tier do
+ * not accidentally treat gross concentrate metal as payable production.
+ */
 function resolveCommercialQuantities(raw: ProjectJsonV3, length: number): {
-  revenueQtyByMetal: Record<string, Array<number | null>>;
   payabilityFactorByMetal: Record<string, Array<number | null>>;
   actualPayableQtyByMetal: Record<string, Array<number | null>>;
 } {
@@ -137,7 +142,6 @@ function resolveCommercialQuantities(raw: ProjectJsonV3, length: number): {
   const extraPrice = Object.keys(raw.metals.priceKeyByMetal).filter((metal) => !metals.includes(metal));
   if (extraPrice.length > 0) throw new Error(`metals.priceKeyByMetal contains metal(s) without revenueBasisByMetal: ${extraPrice.join(', ')}.`);
 
-  const revenueQtyByMetal: Record<string, Array<number | null>> = {};
   const payabilityFactorByMetal: Record<string, Array<number | null>> = {};
   const actualPayableQtyByMetal: Record<string, Array<number | null>> = {};
   for (const metal of metals) {
@@ -145,13 +149,11 @@ function resolveCommercialQuantities(raw: ProjectJsonV3, length: number): {
     const payable = assertSeries(raw.metals.payableQtyByMetal[metal], length, `metals.payableQtyByMetal.${metal}`, { nonNegative: true });
     actualPayableQtyByMetal[metal] = payable;
     if (basis === 'PAYABLE_DIRECT') {
-      revenueQtyByMetal[metal] = payable;
       payabilityFactorByMetal[metal] = new Array<number | null>(length).fill(1);
       continue;
     }
     if (basis !== 'METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION') throw new Error(`Unsupported revenue basis for ${metal}: ${String(basis)}.`);
     const gross = assertSeries(metalInProduct[metal], length, `metals.metalInProductQtyByMetal.${metal}`, { nonNegative: true });
-    revenueQtyByMetal[metal] = gross;
     payabilityFactorByMetal[metal] = Array.from({ length }, (_, t) => {
       if (!finite(gross[t]) || !finite(payable[t])) return null;
       const grossValue = gross[t] as number;
@@ -165,7 +167,7 @@ function resolveCommercialQuantities(raw: ProjectJsonV3, length: number): {
     const nonPayableBasis = metals.filter((metal) => raw.metals.revenueBasisByMetal[metal] !== 'PAYABLE_DIRECT');
     if (nonPayableBasis.length > 0) throw new Error(`Streams with METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION are not yet representable without ambiguous stream/payability ordering: ${nonPayableBasis.join(', ')}. Use source-backed PAYABLE_DIRECT or leave unverified.`);
   }
-  return { revenueQtyByMetal, payabilityFactorByMetal, actualPayableQtyByMetal };
+  return { payabilityFactorByMetal, actualPayableQtyByMetal };
 }
 
 export function isProjectJsonV3(raw: unknown): raw is ProjectJsonV3 { return isRecord(raw) && raw.version === 'project_json_v3'; }
@@ -254,7 +256,7 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
     else throw new Error('LOCKED_SERIES fiscalTake placement must be OPERATING_EXPENSE, PRE_TAX_CHARGE or POST_TAX_CHARGE.');
   } else if (fiscalTakeModel.mode !== 'NONE') throw new Error('economics.fiscalTakeModel.mode must be NONE, RULES or LOCKED_SERIES for runtime.');
 
-  const { revenueQtyByMetal, payabilityFactorByMetal, actualPayableQtyByMetal } = resolveCommercialQuantities(raw, length);
+  const { payabilityFactorByMetal, actualPayableQtyByMetal } = resolveCommercialQuantities(raw, length);
   const syntheticV2 = {
     version: 'project_json_v2',
     meta: raw.meta ?? {},
@@ -266,7 +268,7 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
       workingCapitalDeltaUSD, reclamationUSD: closureUSD, byproductCreditsUSD: zeroSeries(length), terminalProceedsUSD,
     },
     metals: {
-      payableQtyByMetal: revenueQtyByMetal,
+      payableQtyByMetal: actualPayableQtyByMetal,
       payableQtyUnitByMetal: raw.metals.payableQtyUnitByMetal,
       priceKeyByMetal: raw.metals.priceKeyByMetal,
       auPriceKey: raw.metals.auPriceKey,
