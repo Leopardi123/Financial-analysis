@@ -20,7 +20,16 @@ export function validateProjectJsonV3SingleSource(raw: ProjectJsonV3): void {
   forbid(root, ['series', 'economicsBreakdown', 'takeItems', 'priceOverrides'], 'root', 'project_json_v3');
 
   const time = record(raw.time, 'time');
-  forbid(time, ['periodEndDatesUtc', 'productionStartYear'], 'time', 'RELATIVE_AXIS_PLUS_RUNTIME_PLACEMENT');
+  forbid(time, ['periodEndDatesUtc', 'productionStartYear', 'constructionStartYear'], 'time', 'RELATIVE_AXIS_PLUS_RUNTIME_PLACEMENT');
+  if (time.runtimePlacement != null) {
+    const placement = record(time.runtimePlacement, 'time.runtimePlacement');
+    forbid(
+      placement,
+      ['productionStartYear', 'constructionStartYear', 'sourceId', 'pageOrTable', 'asOfDate'],
+      'time.runtimePlacement',
+      'SOURCED_SCHEDULE_ANCHORS',
+    );
+  }
 
   const economics = record(raw.economics, 'economics');
   const cost = record(economics.costModel, 'economics.costModel');

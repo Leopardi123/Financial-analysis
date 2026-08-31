@@ -16,13 +16,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function v3ValidationProxy(rawJson: Record<string, unknown>): Record<string, unknown> {
   const time = isRecord(rawJson.time) ? rawJson.time : {};
+  const productionStartPeriod = Number.isInteger(time.productionStartPeriod) ? time.productionStartPeriod as number : null;
   const runtimePlacement = isRecord(time.runtimePlacement) ? time.runtimePlacement : {};
+  const productionAnchor = isRecord(runtimePlacement.productionStart) ? runtimePlacement.productionStart : null;
+  const constructionAnchor = isRecord(runtimePlacement.constructionStart) ? runtimePlacement.constructionStart : null;
+  const productionStartYear = productionAnchor && Number.isInteger(productionAnchor.year)
+    ? productionAnchor.year
+    : constructionAnchor && Number.isInteger(constructionAnchor.year) && productionStartPeriod !== null
+      ? (constructionAnchor.year as number) + productionStartPeriod
+      : null;
   return {
     version: 'project_json_v2',
     time: {
       masterN: time.masterN,
       productionStartPeriod: time.productionStartPeriod,
-      productionStartYear: runtimePlacement.productionStartYear,
+      productionStartYear,
     },
   };
 }
@@ -33,10 +41,10 @@ function v3ValidationProxy(rawJson: Record<string, unknown>): Record<string, unk
  * The legacy validator still validates all corporate/request fields. V3 project
  * documents are independently parsed through the canonical project parser, then
  * represented by a minimal V2 time proxy only while the legacy request-shape
- * checks run. The proxy uses the sourced V3 runtime placement; relative report
- * economics remain untouched. The original V3 document is restored before the
- * snapshot pipeline receives the validated request, so Project/Corporate always
- * calculate from V3.
+ * checks run. The proxy derives productionStartYear from the already-validated
+ * sourced V3 schedule anchors; relative report economics remain untouched. The
+ * original V3 document is restored before the snapshot pipeline receives the
+ * validated request, so Project/Corporate always calculate from V3.
  */
 export function validateSnapshotRequest(body: unknown): ReturnType<typeof validateSnapshotRequestLegacy> {
   if (!isRecord(body) || !Array.isArray(body.projects)) {

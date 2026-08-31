@@ -1,5 +1,5 @@
 import { parseProjectJsonV1 as parseProjectJsonV2Legacy, type ParsedProjectJsonV1 } from '../jsonv1/parseLegacy.ts';
-import type { ProjectJsonV3, ProjectJsonV3SeriesComponent } from './schema.ts';
+import type { ProjectJsonV3, ProjectJsonV3ScheduleAnchor, ProjectJsonV3SeriesComponent } from './schema.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -53,6 +53,23 @@ function validateComponents<T extends string>(
 
 export type ParseProjectJsonV3Options = { requireRuntimePlacement?: boolean };
 
+type ResolvedScheduleAnchor = ProjectJsonV3ScheduleAnchor & { year: number; sourceId: string };
+
+function resolveScheduleAnchor(raw: unknown, path: string): ResolvedScheduleAnchor | null {
+  if (raw == null) return null;
+  if (!isRecord(raw)) throw new Error(`${path} must be an object or null.`);
+  if (!Number.isInteger(raw.year) || (raw.year as number) < 1900 || (raw.year as number) > 2200) {
+    throw new Error(`${path}.year must be a 4-digit integer in range 1900..2200.`);
+  }
+  if (typeof raw.sourceId !== 'string' || !raw.sourceId.trim()) {
+    throw new Error(`${path}.sourceId must identify the company schedule/guidance source.`);
+  }
+  if (raw.asOfDate != null && (typeof raw.asOfDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.asOfDate))) {
+    throw new Error(`${path}.asOfDate must be null or YYYY-MM-DD.`);
+  }
+  return raw as ResolvedScheduleAnchor;
+}
+
 function resolveTime(raw: ProjectJsonV3, options: ParseProjectJsonV3Options): {
   yearsByPeriod: number[];
   productionStartYear: number;
@@ -81,21 +98,41 @@ function resolveTime(raw: ProjectJsonV3, options: ParseProjectJsonV3Options): {
   if (phaseByPeriod[productionStartPeriod] !== 'ramp_up' && phaseByPeriod[productionStartPeriod] !== 'operations') throw new Error('productionStartPeriod must point to ramp_up or operations.');
 
   const requireRuntimePlacement = options.requireRuntimePlacement !== false;
-  let productionStartYear: number;
-  let runtimePlacementApplied = false;
   if (runtimePlacement == null) {
-    if (requireRuntimePlacement) throw new Error('time.runtimePlacement.productionStartYear is required for Project/Corporate/Compare Stocks runtime. Report reconciliation may run without calendar placement because the economics are relative.');
-    productionStartYear = 2000;
-  } else {
-    if (!isRecord(runtimePlacement)) throw new Error('time.runtimePlacement must be an object or null.');
-    if (!Number.isInteger(runtimePlacement.productionStartYear) || runtimePlacement.productionStartYear < 1900 || runtimePlacement.productionStartYear > 2200) throw new Error('time.runtimePlacement.productionStartYear must be a 4-digit integer in range 1900..2200.');
-    if (typeof runtimePlacement.sourceId !== 'string' || !runtimePlacement.sourceId.trim()) throw new Error('time.runtimePlacement.sourceId must identify the company schedule/guidance source.');
-    productionStartYear = runtimePlacement.productionStartYear;
-    runtimePlacementApplied = true;
+    if (requireRuntimePlacement) {
+      throw new Error('time.runtimePlacement requires at least constructionStart or productionStart for Project/Corporate/Compare Stocks runtime. Report reconciliation may run without calendar placement because the economics are relative.');
+    }
+    const productionStartYear = 2000;
+    const firstCalendarYear = productionStartYear - productionStartPeriod;
+    return {
+      yearsByPeriod: Array.from({ length }, (_, t) => firstCalendarYear + t),
+      productionStartYear,
+      runtimePlacementApplied: false,
+    };
   }
-  const firstCalendarYear = productionStartYear - productionStartPeriod;
+
+  if (!isRecord(runtimePlacement)) throw new Error('time.runtimePlacement must be an object or null.');
+  const constructionStart = resolveScheduleAnchor(runtimePlacement.constructionStart, 'time.runtimePlacement.constructionStart');
+  const productionStart = resolveScheduleAnchor(runtimePlacement.productionStart, 'time.runtimePlacement.productionStart');
+  if (!constructionStart && !productionStart) {
+    throw new Error('time.runtimePlacement requires at least one sourced anchor: constructionStart or productionStart.');
+  }
+  if (constructionStart && productionStartPeriod === 0) {
+    throw new Error('time.runtimePlacement.constructionStart cannot be used when productionStartPeriod=0 because the relative economic axis contains no construction period before production.');
+  }
+
+  const impliedProductionStartYear = constructionStart ? constructionStart.year + productionStartPeriod : null;
+  if (constructionStart && productionStart && impliedProductionStartYear !== productionStart.year) {
+    throw new Error(
+      `PLACEMENT_CONFLICT: constructionStart.year=${constructionStart.year} plus productionStartPeriod=${productionStartPeriod} implies productionStart.year=${impliedProductionStartYear}, but company guidance supplies productionStart.year=${productionStart.year}. Do not shift economic arrays to force a match; verify whether the underlying project schedule/mine plan changed.`,
+    );
+  }
+
+  const productionStartYear = productionStart?.year ?? impliedProductionStartYear;
+  if (!Number.isInteger(productionStartYear)) throw new Error('Unable to resolve runtime production start year from time.runtimePlacement.');
+  const firstCalendarYear = constructionStart?.year ?? (productionStartYear as number) - productionStartPeriod;
   const yearsByPeriod = Array.from({ length }, (_, t) => firstCalendarYear + t);
-  return { yearsByPeriod, productionStartYear, runtimePlacementApplied };
+  return { yearsByPeriod, productionStartYear: productionStartYear as number, runtimePlacementApplied: true };
 }
 
 function assertRuntimeReadyEconomicSources(raw: ProjectJsonV3): void {

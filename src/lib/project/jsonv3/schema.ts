@@ -45,12 +45,24 @@ export type ProjectJsonV3TaxModel =
   | { mode: 'FLAT_RATE'; taxRate: number }
   | { mode: 'LOCKED_SERIES'; taxCashFlowUSD: Array<number | null> };
 
-export type ProjectJsonV3RuntimePlacement = {
-  productionStartYear: number;
+export type ProjectJsonV3ScheduleAnchor = {
+  year: number;
   sourceId: string;
   pageOrTable?: string | null;
   asOfDate?: string | null;
   notes?: string | null;
+};
+
+export type ProjectJsonV3RuntimePlacement = {
+  constructionStart?: ProjectJsonV3ScheduleAnchor | null;
+  productionStart?: ProjectJsonV3ScheduleAnchor | null;
+  notes?: string | null;
+  /** Legacy flat placement fields are forbidden by the V3 validator. */
+  productionStartYear?: never;
+  constructionStartYear?: never;
+  sourceId?: never;
+  pageOrTable?: never;
+  asOfDate?: never;
 };
 
 export type ProjectJsonV3ReportedCostCheckpoint = {

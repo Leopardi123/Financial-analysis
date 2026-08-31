@@ -33,10 +33,18 @@ function fixture(): ProjectJsonV3 {
       reportPeriodLabels: ['-1', '1', '2', '3'],
       phaseByPeriod: ['construction', 'operations', 'operations', 'closure'],
       runtimePlacement: {
-        productionStartYear: 2029,
-        sourceId: 'fixture-company-guidance',
-        pageOrTable: 'Schedule guidance',
-        asOfDate: '2026-08-31',
+        constructionStart: {
+          year: 2028,
+          sourceId: 'fixture-construction-guidance',
+          pageOrTable: 'Schedule guidance',
+          asOfDate: '2026-08-31',
+        },
+        productionStart: {
+          year: 2029,
+          sourceId: 'fixture-production-guidance',
+          pageOrTable: 'Schedule guidance',
+          asOfDate: '2026-08-31',
+        },
       },
     },
     metals: {
@@ -105,9 +113,9 @@ async function engineAtReportDeck(raw: ProjectJsonV3) {
 
 (async function run(): Promise<void> {
   const blank = buildProjectJsonV3Template() as any;
-  assert(Array.isArray(blank._how_to_fill) && blank._how_to_fill.length >= 22, 'Blank V3 template must carry complete filling instructions');
+  assert(Array.isArray(blank._how_to_fill) && blank._how_to_fill.length >= 24, 'Blank V3 template must carry complete filling instructions');
   assert(blank._template_status?.includes('NOT runtime-valid'), 'Blank V3 template must state that placeholders are not runtime-valid');
-  assert(blank.time.runtimePlacement === null, 'Blank V3 template must not invent a calendar production start');
+  assert(blank.time.runtimePlacement === null, 'Blank V3 template must not invent calendar anchors');
   assert(blank.time.reportPeriodLabels === null, 'Blank V3 template must not invent report period labels');
   assert(!Object.prototype.hasOwnProperty.call(blank.time, 'periodEndDatesUtc'), 'V3 relative economics must not contain fixed periodEndDatesUtc');
   assert(Object.keys(blank.metals.payableQtyByMetal).length === 0, 'Blank V3 template must not assume a metal');
@@ -128,10 +136,33 @@ async function engineAtReportDeck(raw: ProjectJsonV3) {
 
   const raw = fixture();
   const parsed = parseProjectJsonV1(raw);
-  assert(parsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'Runtime placement must map relative t to calendar years from productionStartPeriod');
+  assert(parsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'Consistent construction/production anchors must map the relative axis into calendar years');
   near((parsed.engineInputWithoutPrices.phase1 as any).operatingCostsUSD[1], 600000);
   near((parsed.engineInputWithoutPrices.phase1 as any).siteGandA_USD[1], 50000);
   near((parsed.engineInputWithoutPrices.phase1 as any).sellingCostsUSD[1], 1000);
+
+  const productionOnly = clone(raw);
+  productionOnly.time.runtimePlacement = {
+    productionStart: { year: 2029, sourceId: 'production-only-guidance' },
+  };
+  assert(parseProjectJsonV1(productionOnly).engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'Production-only anchor must derive construction calendar placement from productionStartPeriod');
+
+  const constructionOnly = clone(raw);
+  constructionOnly.time.runtimePlacement = {
+    constructionStart: { year: 2028, sourceId: 'construction-only-guidance' },
+  };
+  assert(parseProjectJsonV1(constructionOnly).engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'Construction-only anchor must derive production calendar placement from productionStartPeriod');
+
+  const conflictingPlacement = clone(raw);
+  conflictingPlacement.time.runtimePlacement = {
+    constructionStart: { year: 2028, sourceId: 'construction-guidance' },
+    productionStart: { year: 2030, sourceId: 'production-guidance' },
+  };
+  assertThrows(
+    () => parseProjectJsonV1(conflictingPlacement),
+    /PLACEMENT_CONFLICT/,
+    'Conflicting company calendar anchors must fail closed rather than stretch or shift the economic arrays',
+  );
 
   const inlineRequest = validateSnapshotRequest({
     targetCurrency: 'USD',
@@ -151,10 +182,12 @@ async function engineAtReportDeck(raw: ProjectJsonV3) {
   near(output.phase1.ebitdaUSD[1], expectedEbitda);
 
   const shifted = clone(raw);
-  shifted.time.runtimePlacement!.productionStartYear = 2031;
-  shifted.time.runtimePlacement!.sourceId = 'later-company-guidance';
+  shifted.time.runtimePlacement = {
+    constructionStart: { year: 2030, sourceId: 'later-construction-guidance' },
+    productionStart: { year: 2031, sourceId: 'later-production-guidance' },
+  };
   const shiftedParsed = parseProjectJsonV1(shifted);
-  assert(shiftedParsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2030,2031,2032,2033', 'Changing guidance must shift only calendar placement');
+  assert(shiftedParsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2030,2031,2032,2033', 'Changing consistent guidance anchors must shift only calendar placement');
   const shiftedOutput = await engineAtReportDeck(shifted);
   assert(JSON.stringify(shiftedOutput.phase1.fcffUSD) === JSON.stringify(output.phase1.fcffUSD), 'Calendar placement changes must not change relative Project FCFF economics');
   assert(JSON.stringify(shifted.capital) === JSON.stringify(raw.capital), 'Schedule guidance changes must not shift capital arrays');
@@ -179,8 +212,8 @@ async function engineAtReportDeck(raw: ProjectJsonV3) {
   unplacedRuntime.time.runtimePlacement = null;
   assertThrows(
     () => parseProjectJsonV1(unplacedRuntime),
-    /runtimePlacement\.productionStartYear is required/,
-    'Project/Corporate/Compare Stocks runtime must require a current calendar placement',
+    /requires at least constructionStart or productionStart/,
+    'Project/Corporate/Compare Stocks runtime must require a current sourced calendar anchor',
   );
 
   const staleCalendarAxis = fixture() as any;
@@ -189,6 +222,14 @@ async function engineAtReportDeck(raw: ProjectJsonV3) {
     () => parseProjectJsonV1(staleCalendarAxis),
     /forbids parallel source field\(s\): periodEndDatesUtc/,
     'V3 must reject a fixed periodEndDatesUtc axis beside the relative economic axis',
+  );
+
+  const staleRuntimePlacement = fixture() as any;
+  staleRuntimePlacement.time.runtimePlacement = { productionStartYear: 2029, sourceId: 'legacy-shape' };
+  assertThrows(
+    () => parseProjectJsonV1(staleRuntimePlacement),
+    /SOURCED_SCHEDULE_ANCHORS forbids parallel source field\(s\): productionStartYear, sourceId/,
+    'V3 must reject the old single-field runtimePlacement shape so schedule provenance remains anchor-specific',
   );
 
   const invalid = fixture() as any;
