@@ -1,13 +1,14 @@
 import { parseProjectJsonV1WithContext } from '../project/jsonv1/parse.ts';
 
-const JSON_VERSION = 'project_json_v2';
+const JSON_VERSIONS = new Set(['project_json_v2', 'project_json_v3'] as const);
+type SupportedProjectJsonVersion = 'project_json_v2' | 'project_json_v3';
 
 export type CompanyProjectUpsertInput = {
   symbol: string;
   project_id: string;
   project_name: string | null;
   raw_json: Record<string, unknown>;
-  json_version: typeof JSON_VERSION;
+  json_version: SupportedProjectJsonVersion;
 };
 
 type ValidationOk<T> = { ok: true; value: T };
@@ -70,8 +71,8 @@ export function validateCompanyProjectUpsert(input: unknown): ValidationOk<Compa
   }
 
   const version = (raw_json as Record<string, unknown>).version;
-  if (version !== JSON_VERSION) {
-    return { ok: false, error: `raw_json.version must be "${JSON_VERSION}"` };
+  if (typeof version !== 'string' || !JSON_VERSIONS.has(version as SupportedProjectJsonVersion)) {
+    return { ok: false, error: 'raw_json.version must be "project_json_v2" or "project_json_v3"' };
   }
 
   try {
@@ -87,7 +88,7 @@ export function validateCompanyProjectUpsert(input: unknown): ValidationOk<Compa
       project_id,
       project_name,
       raw_json: raw_json as Record<string, unknown>,
-      json_version: JSON_VERSION,
+      json_version: version as SupportedProjectJsonVersion,
     },
   };
 }
@@ -98,7 +99,6 @@ export function validateCompanyProjectListQuery(input: unknown): ValidationOk<{ 
   if (!isValidSymbol(symbol)) {
     return { ok: false, error: 'symbol query parameter must be a non-empty string (max 32) containing only letters, numbers, dot, or dash' };
   }
-
   return { ok: true, value: { symbol } };
 }
 

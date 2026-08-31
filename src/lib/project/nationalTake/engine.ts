@@ -47,6 +47,9 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
 
   assertSeriesLength(input.phase1.capexUSD, expectedLength, 'phase1.capexUSD');
   assertSeriesLength(input.phase1.operatingCostsUSD, expectedLength, 'phase1.operatingCostsUSD');
+  if (input.phase1.sellingCostsUSD) {
+    assertSeriesLength(input.phase1.sellingCostsUSD, expectedLength, 'phase1.sellingCostsUSD');
+  }
   assertSeriesLength(input.phase1.sustainingCapexUSD, expectedLength, 'phase1.sustainingCapexUSD');
   assertSeriesLength(input.phase1.siteGandA_USD, expectedLength, 'phase1.siteGandA_USD');
   assertSeriesLength(input.phase1.reclamationUSD, expectedLength, 'phase1.reclamationUSD');
@@ -96,7 +99,7 @@ export function computeNationalTake(input: NationalTakeInput): NationalTakeOutpu
     diagnostics.push(`takeItems: included ${takeMviOut.includedSummaries.join(', ')}`);
   } else if (anyFinite(input.phase1.royaltiesUSD)) {
     royaltiesEffective = input.phase1.royaltiesUSD as Array<number | null>;
-    diagnostics.push('royaltiesUSD: manual override detected; ignoring royaltiesDetail for calculation');
+    diagnostics.push('royaltiesUSD: canonical locked series detected; ignoring royaltiesDetail for calculation');
   } else {
     royaltiesEffective = royaltiesFromDetail.royaltiesUSD_calc;
   }

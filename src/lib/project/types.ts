@@ -26,6 +26,8 @@ export type ProjectPhase1Input = {
   capexUSD: (number | null)[];
   revenueUSD: (number | null)[];
   operatingCostsUSD: (number | null)[];
+  /** Canonical off-site/selling costs (TC/RC/freight/insurance/marketing). */
+  sellingCostsUSD?: (number | null)[] | null;
   sustainingCapexUSD: (number | null)[];
   royaltiesUSD: (number | null)[];
   siteGandA_USD: (number | null)[];
@@ -49,6 +51,7 @@ export type ProjectPhase1Output = {
   nopatUSD: (number | null)[];
   fcffUSD: (number | null)[];
   workingCapitalDeltaUSD_effective: (number | null)[];
+  sellingCostsUSD_effective?: (number | null)[];
   /** Optional to preserve compatibility with existing typed fixtures/mocks. */
   terminalProceedsUSD_effective?: (number | null)[];
 };
