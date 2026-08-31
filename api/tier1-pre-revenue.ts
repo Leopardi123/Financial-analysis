@@ -15,6 +15,7 @@ import {
   extractReportedCostEvidence,
   reportedCostWeightInBenchmarkUnits,
 } from '../src/lib/tier1/reportedCost.ts';
+import { assessReportedCostBenchmarkCompatibility } from '../src/lib/tier1/reportedCostCompatibility.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
 function finite(value: unknown): value is number {
@@ -70,21 +71,33 @@ type ReportedCompanyCost = {
   projectDetails: string[];
 };
 
+type ReportedCostEvidenceDetail = {
+  projectId: string;
+  metric: string;
+  value: number | null;
+  unit: string | null;
+  reportedLabel: string | null;
+  basisId: string | null;
+  costBaseYear: number | null;
+  sourceId: string | null;
+  pageOrTable: string | null;
+  compatibility: 'COMPARABLE' | 'NOT_COMPARABLE' | 'INSUFFICIENT_DEFINITION' | 'NOT_AVAILABLE' | 'INVALID';
+  reason: string;
+};
+
 /**
- * Reported cost is an optional best-available override. It is used only when
- * every project contributing payable primary-metal production has a usable
- * reported metric in the benchmark unit. Otherwise the Tier route keeps the
- * cost result already derived from the existing project engine in
- * src/server/routes/tier1/pre-revenue.ts. Missing evidence never turns an
- * otherwise computable model result into NOT_VERIFIED.
+ * Reported cost remains useful evidence even when it cannot classify a cost
+ * quartile. Only evidence that passes the single central compatibility guard
+ * for every contributing primary-metal project may override the base Tier cost.
  */
 async function computeReportedCompanyCost(
   symbol: string,
   primaryMetal: Tier1Metal,
-): Promise<{ cost: ReportedCompanyCost | null; diagnostics: string[] }> {
+): Promise<{ cost: ReportedCompanyCost | null; diagnostics: string[]; evidenceDetails: ReportedCostEvidenceDetail[] }> {
   const loaded = await loadProjectsForSymbol(symbol);
   const benchmark = TIER1_COST_BENCHMARKS[primaryMetal];
   const diagnostics: string[] = [];
+  const evidenceDetails: ReportedCostEvidenceDetail[] = [];
   let numerator = 0;
   let denominator = 0;
   const projectDetails: string[] = [];
@@ -98,12 +111,41 @@ async function computeReportedCompanyCost(
 
     const reported = extractReportedCostEvidence(project.rawJson, benchmark.metric);
     if (reported.status !== 'AVAILABLE' || !finite(reported.value) || !reported.unit) {
-      diagnostics.push(`${project.projectId}: ${reported.reason} Befintlig engine-baserad cost används i stället.`);
-      return { cost: null, diagnostics };
+      evidenceDetails.push({
+        projectId: project.projectId,
+        metric: reported.metric,
+        value: reported.value,
+        unit: reported.unit,
+        reportedLabel: reported.reportedLabel,
+        basisId: reported.basisId,
+        costBaseYear: reported.costBaseYear,
+        sourceId: reported.sourceId,
+        pageOrTable: reported.pageOrTable,
+        compatibility: reported.status,
+        reason: reported.reason,
+      });
+      diagnostics.push(`${project.projectId}: ${reported.reason} Befintlig engine-baserad cost behålls.`);
+      return { cost: null, diagnostics, evidenceDetails };
     }
-    if (reported.unit !== benchmark.unit) {
-      diagnostics.push(`${project.projectId}: rapporterad ${reported.unit} kan inte jämföras direkt med ${benchmark.unit}; befintlig engine-baserad cost används.`);
-      return { cost: null, diagnostics };
+
+    const compatibility = assessReportedCostBenchmarkCompatibility({ evidence: reported, benchmark });
+    evidenceDetails.push({
+      projectId: project.projectId,
+      metric: reported.metric,
+      value: reported.value,
+      unit: reported.unit,
+      reportedLabel: reported.reportedLabel,
+      basisId: reported.basisId,
+      costBaseYear: reported.costBaseYear,
+      sourceId: reported.sourceId,
+      pageOrTable: reported.pageOrTable,
+      compatibility: compatibility.status,
+      reason: compatibility.reason,
+    });
+
+    if (compatibility.status !== 'COMPARABLE') {
+      diagnostics.push(`${project.projectId}: rapporterad cost bevaras som evidence men får inte sätta extern kvartil. ${compatibility.reason} Befintlig engine-baserad cost behålls.`);
+      return { cost: null, diagnostics, evidenceDetails };
     }
 
     const payableUnit = parsed.engineInputWithoutPrices.payableQtyUnitByMetal[primaryMetal];
@@ -113,8 +155,8 @@ async function computeReportedCompanyCost(
       benchmarkUnit: benchmark.unit,
     });
     if (!finite(weight) || weight <= 0) {
-      diagnostics.push(`${project.projectId}: payable-vikt kan inte räknas i ${benchmark.unit}; befintlig engine-baserad cost används.`);
-      return { cost: null, diagnostics };
+      diagnostics.push(`${project.projectId}: payable-vikt kan inte räknas i ${benchmark.unit}; befintlig engine-baserad cost behålls.`);
+      return { cost: null, diagnostics, evidenceDetails };
     }
 
     numerator += reported.value * weight;
@@ -123,10 +165,11 @@ async function computeReportedCompanyCost(
     projectDetails.push(`${project.projectId}: ${reported.value.toFixed(4)} ${reported.unit}${provenance ? ` · ${provenance}` : ''}`);
   }
 
-  if (contributingProjects === 0 || !(denominator > 0)) return { cost: null, diagnostics };
+  if (contributingProjects === 0 || !(denominator > 0)) return { cost: null, diagnostics, evidenceDetails };
   return {
     cost: { value: numerator / denominator, unit: benchmark.unit, projectDetails },
     diagnostics,
+    evidenceDetails,
   };
 }
 
@@ -139,7 +182,7 @@ function applyReportedCostOverride(assessment: any, reported: ReportedCompanyCos
 
   assessment.support.costMetric = benchmark.metric;
   assessment.support.costMetricValue = reported.value;
-  assessment.support.costMethod = 'REPORTED_COST_BEST_AVAILABLE';
+  assessment.support.costMethod = 'REPORTED_COST_EXACT_COMPATIBLE';
   assessment.support.costProjectDetails = reported.projectDetails;
   assessment.support.costBenchmarkBasisId = benchmark.basisId;
   assessment.support.costBenchmarkDataPeriod = benchmark.dataPeriod;
@@ -154,7 +197,7 @@ function applyReportedCostOverride(assessment: any, reported: ReportedCompanyCos
     benchmark,
     nowUtc: new Date().toISOString(),
   });
-  gate.reason = `${gate.reason} Projektkostnaden kommer från bästa tillgängliga rapporterade cost i project_json; benchmark-specifik basis/year är inte en hard guard.`;
+  gate.reason = `${gate.reason} Projektkostnaden kommer från rapporterad cost som har passerat den centrala compatibility-guarden för metric, unit, legacy basis, cost year och source/page-table.`;
   assessment.gates.cost = gate;
 }
 
@@ -216,14 +259,15 @@ export default async function handler(req: any, res: any): Promise<void> {
         }
       }
 
-      // Single source of truth: the base Tier route already derives cost from the
-      // existing project engine. A reported JSON cost only overrides that result
-      // when it is complete for all primary-metal projects; otherwise the base
-      // engine result remains untouched.
+      // Single source of truth: reported evidence is resolved once through the
+      // central compatibility guard. Incompatible evidence remains visible but
+      // cannot override the base engine-derived cost gate.
       if (assessment.primaryMetal) {
         const reported = await computeReportedCompanyCost(symbol, assessment.primaryMetal as Tier1Metal);
         assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
         assessment.diagnostics.push(...reported.diagnostics.map((item) => `Kostnad: ${item}`));
+        assessment.support = assessment.support ?? {};
+        assessment.support.reportedCostEvidence = reported.evidenceDetails;
         if (reported.cost) applyReportedCostOverride(assessment, reported.cost);
       }
 
