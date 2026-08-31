@@ -60,11 +60,55 @@ function parseProjectJsonV2(raw: any): ParsedProjectJsonV1 {
   return parsed;
 }
 
+/**
+ * Transitional read-only bridge for legacy runtime code that still reads
+ * raw.time.productionStartYear directly.
+ *
+ * V3 deliberately does NOT store productionStartYear. The canonical calendar
+ * axis is resolved from runtimePlacement by parseProjectJsonV3. This proxy only
+ * exposes that already-resolved year through property access. It is not an own
+ * property, is omitted by Object.keys/JSON.stringify, and therefore cannot leak
+ * back into stored project_json_v3 or defeat the single-source validator.
+ */
+function installV3RuntimeTimeReadBridge(raw: unknown, parsed: ParsedProjectJsonV1): void {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+  const root = raw as Record<string, unknown>;
+  const timeValue = root.time;
+  if (!timeValue || typeof timeValue !== 'object' || Array.isArray(timeValue)) return;
+
+  const time = timeValue as Record<string, unknown>;
+  if (
+    Number.isInteger(time.productionStartYear)
+    && !Object.prototype.hasOwnProperty.call(time, 'productionStartYear')
+  ) {
+    return;
+  }
+
+  const engine = parsed.engineInputWithoutPrices;
+  const productionStartYear = engine.yearsByPeriod[engine.productionStartPeriod];
+  if (!Number.isInteger(productionStartYear)) {
+    throw new Error('Canonical parsed project timeline does not resolve a productionStartYear.');
+  }
+
+  root.time = new Proxy(time, {
+    get(target, property, receiver) {
+      if (property === 'productionStartYear') return productionStartYear;
+      return Reflect.get(target, property, receiver);
+    },
+    has(target, property) {
+      if (property === 'productionStartYear') return true;
+      return Reflect.has(target, property);
+    },
+  });
+}
+
 /** Version-dispatching parser. V2 and V3 compile to the same canonical engine input. */
 export function parseProjectJsonV1(raw: any): ParsedProjectJsonV1 {
   if (isProjectJsonV3(raw)) {
     validateProjectJsonV3SingleSource(raw);
-    return parseProjectJsonV3(raw);
+    const parsed = parseProjectJsonV3(raw);
+    installV3RuntimeTimeReadBridge(raw, parsed);
+    return parsed;
   }
   return parseProjectJsonV2(raw);
 }
