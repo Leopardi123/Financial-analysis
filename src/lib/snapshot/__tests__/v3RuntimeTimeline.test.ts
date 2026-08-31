@@ -51,7 +51,7 @@ const body = {
 };
 
 const result = await runCorporateSnapshotPipeline({ body, refresh: false });
-assert.equal(result.ok, true, result.ok ? undefined : JSON.stringify(result.diagnostics));
+assert.equal(result.ok, true, result.ok ? 'V3 runtime snapshot succeeded' : JSON.stringify(result.diagnostics));
 if (!result.ok) process.exit(1);
 
 assert.equal(result.snapshot.aggregation.corporateYearsByPeriod[0], 2028, 'V3 t=0 must be derived from productionStart=2031 and tp=3');
