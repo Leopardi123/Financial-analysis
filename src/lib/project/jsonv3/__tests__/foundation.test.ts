@@ -2,6 +2,7 @@ import { parseProjectJsonV1 } from '../../jsonv1/parse.ts';
 import { resolveProjectPricesToEngineInput } from '../../jsonv1/resolvePrices.ts';
 import { computeProjectEngineFullProductionV1 } from '../../engineFullProductionV1.ts';
 import { computeIrr } from '../../../metrics/lista3.ts';
+import { validateSnapshotRequest } from '../../../api/validateSnapshotRequest.ts';
 import { reconcileProjectJsonV3ToReport } from '../reconciliation.ts';
 import type { ProjectJsonV3 } from '../schema.ts';
 
@@ -86,6 +87,18 @@ function fixture(): ProjectJsonV3 {
   near((parsed.engineInputWithoutPrices.phase1 as any).operatingCostsUSD[1], 600000);
   near((parsed.engineInputWithoutPrices.phase1 as any).siteGandA_USD[1], 50000);
   near((parsed.engineInputWithoutPrices.phase1 as any).sellingCostsUSD[1], 1000);
+
+  const inlineRequest = validateSnapshotRequest({
+    targetCurrency: 'USD',
+    valuationYear: 2028,
+    discountRate: 0.1,
+    fx_USD_to_TargetCurrency: 1,
+    projects: [{ projectId: 'v3-fixture', rawJson: raw }],
+  });
+  assert(inlineRequest.ok, 'Project inline snapshot request must accept valid project_json_v3');
+  if (inlineRequest.ok) {
+    assert(inlineRequest.value.projects[0].rawJson.version === 'project_json_v3', 'snapshot validator must restore original v3 document before runtime');
+  }
 
   const input = await resolveProjectPricesToEngineInput({
     parsed,
