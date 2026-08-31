@@ -24,13 +24,13 @@ No report-FCFF array can make a project appear reconciled without the Project en
 ## Project / Corporate / Pre revenue
 
 - V2 and V3 both compile to the existing `ParsedProjectJsonV1` / `ProjectEngineFullProductionV1Input` boundary; there is no second V3 economics engine.
-- Inline Project snapshot requests accept V3 through a V3-aware request wrapper. The old request validator is retained as a frozen corporate/request-shape validator; V3 is parsed canonically first and the original V3 document is restored before runtime.
+- Inline Project snapshot requests accept V3 through a V3-aware request wrapper. The original V3 document is restored before runtime.
 - Corporate symbol mode loads stored projects and uses the same version-dispatching project parser.
 - Tier / Compare Stocks Pre revenue uses the same project parser and engine for spot and cycle runs.
 - Reported C1/AISC is exposed as checkpoint evidence only. The API-level reported-cost override is removed; a report metric can no longer replace the canonical engine-derived cost gate.
 
-## Compatibility and migration
+## Editor and migration
 
-V2 remains readable during migration. V3 company-project upsert is supported server-side. No automatic v2->v3 semantic migration is allowed: report semantics must be mapped project by project and reconciled against the technical report.
+The Company Projects route preserves the complete Legacy v2 editor and adds an explicit `Canonical v3` editor mode. The V3 editor validates through the same canonical parser and can create/save V3 documents, while V2 projects remain untouched. There is deliberately no automatic v2->v3 converter: report semantics must be mapped project by project.
 
-The current Company Projects editor UI still has V2-specific local validation/template behavior and is the remaining primary UI boundary before live V3 migration. No live project should be migrated or labelled verified until its technical report is reconciled through the same-engine report runner.
+Saving a V3 project means schema-valid only. No live project should be labelled `VERIFIED` until the report-deck reconciliation runner reproduces the technical report NPV/IRR and all mandatory hard checks pass.
