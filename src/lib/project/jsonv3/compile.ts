@@ -104,6 +104,17 @@ function resolveTime(raw: ProjectJsonV3): { yearsByPeriod: number[]; productionS
   return { yearsByPeriod: years, productionStartYear: years[productionStartPeriod] };
 }
 
+function assertRuntimeReadyEconomicSources(raw: ProjectJsonV3): void {
+  const unresolved: string[] = [];
+  if (raw.economics.costModel?.mode === 'UNKNOWN') unresolved.push('economics.costModel');
+  if (raw.economics.sellingModel?.mode === 'UNKNOWN') unresolved.push('economics.sellingModel');
+  if (raw.economics.royaltyModel?.mode === 'UNKNOWN') unresolved.push('economics.royaltyModel');
+  if (raw.economics.taxModel?.mode === 'UNKNOWN') unresolved.push('economics.taxModel');
+  if (unresolved.length > 0) {
+    throw new Error(`project_json_v3 draft placeholder(s) must be resolved from the technical report before runtime: ${unresolved.join(', ')}. UNKNOWN is not an economic assumption.`);
+  }
+}
+
 export function isProjectJsonV3(raw: unknown): raw is ProjectJsonV3 {
   return isRecord(raw) && raw.version === 'project_json_v3';
 }
@@ -118,6 +129,7 @@ export function parseProjectJsonV3(rawUnknown: unknown): ParsedProjectJsonV1 {
   const { masterN, productionStartPeriod } = raw.time;
   const length = masterN + 1;
   const { yearsByPeriod, productionStartYear } = resolveTime(raw);
+  assertRuntimeReadyEconomicSources(raw);
 
   const capexUSD = assertSeries(raw.capital.capexUSD, length, 'capital.capexUSD', { nonNegative: true });
   const sustainingCapexUSD = assertSeries(raw.capital.sustainingCapexUSD, length, 'capital.sustainingCapexUSD', { nonNegative: true });
@@ -148,7 +160,7 @@ export function parseProjectJsonV3(rawUnknown: unknown): ParsedProjectJsonV1 {
     operatingCostsUSD = sumStrictSeries(site, length);
     siteGandA_USD = sumStrictSeries(ga, length);
   } else {
-    throw new Error('economics.costModel.mode must be AGGREGATE or COMPONENTS.');
+    throw new Error('economics.costModel.mode must be AGGREGATE or COMPONENTS for runtime.');
   }
 
   let sellingCostsUSD: Array<number | null> = zeroSeries(length);
@@ -163,7 +175,7 @@ export function parseProjectJsonV3(rawUnknown: unknown): ParsedProjectJsonV1 {
     const components = validateComponents(sellingModel.components, length, 'economics.sellingModel.components');
     sellingCostsUSD = sumStrictSeries(components.map((component) => component.seriesUSD), length);
   } else if (sellingModel.mode !== 'NONE') {
-    throw new Error('economics.sellingModel.mode must be NONE, AGGREGATE or COMPONENTS.');
+    throw new Error('economics.sellingModel.mode must be NONE, AGGREGATE or COMPONENTS for runtime.');
   }
 
   let taxRate: number | null = null;
@@ -178,7 +190,7 @@ export function parseProjectJsonV3(rawUnknown: unknown): ParsedProjectJsonV1 {
   } else if (taxModel.mode === 'LOCKED_SERIES') {
     taxCashFlowUSD = assertSeries(taxModel.taxCashFlowUSD, length, 'economics.taxModel.taxCashFlowUSD');
   } else {
-    throw new Error('economics.taxModel.mode must be FLAT_RATE or LOCKED_SERIES.');
+    throw new Error('economics.taxModel.mode must be FLAT_RATE or LOCKED_SERIES for runtime.');
   }
 
   let takeItems: Array<unknown> = [];
@@ -191,7 +203,7 @@ export function parseProjectJsonV3(rawUnknown: unknown): ParsedProjectJsonV1 {
   } else if (royaltyModel.mode === 'LOCKED_SERIES') {
     lockedRoyalties = assertSeries(royaltyModel.royaltiesUSD, length, 'economics.royaltyModel.royaltiesUSD', { nonNegative: true });
   } else if (royaltyModel.mode !== 'NONE') {
-    throw new Error('economics.royaltyModel.mode must be NONE, RULES or LOCKED_SERIES.');
+    throw new Error('economics.royaltyModel.mode must be NONE, RULES or LOCKED_SERIES for runtime.');
   }
 
   if (!isRecord(raw.metals.payableQtyByMetal) || !isRecord(raw.metals.payableQtyUnitByMetal) || !isRecord(raw.metals.priceKeyByMetal)) {

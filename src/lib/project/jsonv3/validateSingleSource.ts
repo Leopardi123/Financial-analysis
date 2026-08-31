@@ -21,14 +21,18 @@ export function validateProjectJsonV3SingleSource(raw: ProjectJsonV3): void {
 
   const economics = record(raw.economics, 'economics');
   const cost = record(economics.costModel, 'economics.costModel');
-  if (cost.mode === 'AGGREGATE') {
+  if (cost.mode === 'UNKNOWN') {
+    forbid(cost, ['operatingCostsUSD', 'siteGandA_USD', 'components'], 'economics.costModel', 'UNKNOWN');
+  } else if (cost.mode === 'AGGREGATE') {
     forbid(cost, ['components'], 'economics.costModel', 'AGGREGATE');
   } else if (cost.mode === 'COMPONENTS') {
     forbid(cost, ['operatingCostsUSD', 'siteGandA_USD'], 'economics.costModel', 'COMPONENTS');
   }
 
   const selling = record(economics.sellingModel, 'economics.sellingModel');
-  if (selling.mode === 'NONE') {
+  if (selling.mode === 'UNKNOWN') {
+    forbid(selling, ['sellingCostsUSD', 'components'], 'economics.sellingModel', 'UNKNOWN');
+  } else if (selling.mode === 'NONE') {
     forbid(selling, ['sellingCostsUSD', 'components'], 'economics.sellingModel', 'NONE');
   } else if (selling.mode === 'AGGREGATE') {
     forbid(selling, ['components'], 'economics.sellingModel', 'AGGREGATE');
@@ -37,7 +41,9 @@ export function validateProjectJsonV3SingleSource(raw: ProjectJsonV3): void {
   }
 
   const royalty = record(economics.royaltyModel, 'economics.royaltyModel');
-  if (royalty.mode === 'NONE') {
+  if (royalty.mode === 'UNKNOWN') {
+    forbid(royalty, ['items', 'royaltiesUSD'], 'economics.royaltyModel', 'UNKNOWN');
+  } else if (royalty.mode === 'NONE') {
     forbid(royalty, ['items', 'royaltiesUSD'], 'economics.royaltyModel', 'NONE');
   } else if (royalty.mode === 'RULES') {
     forbid(royalty, ['royaltiesUSD'], 'economics.royaltyModel', 'RULES');
@@ -46,7 +52,9 @@ export function validateProjectJsonV3SingleSource(raw: ProjectJsonV3): void {
   }
 
   const tax = record(economics.taxModel, 'economics.taxModel');
-  if (tax.mode === 'FLAT_RATE') {
+  if (tax.mode === 'UNKNOWN') {
+    forbid(tax, ['taxRate', 'taxCashFlowUSD'], 'economics.taxModel', 'UNKNOWN');
+  } else if (tax.mode === 'FLAT_RATE') {
     forbid(tax, ['taxCashFlowUSD'], 'economics.taxModel', 'FLAT_RATE');
   } else if (tax.mode === 'LOCKED_SERIES') {
     forbid(tax, ['taxRate'], 'economics.taxModel', 'LOCKED_SERIES');

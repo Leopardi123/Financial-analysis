@@ -4,6 +4,7 @@ import { computeProjectEngineFullProductionV1 } from '../../engineFullProduction
 import { computeIrr } from '../../../metrics/lista3.ts';
 import { validateSnapshotRequest } from '../../../api/validateSnapshotRequest.ts';
 import { reconcileProjectJsonV3ToReport } from '../reconciliation.ts';
+import { buildProjectJsonV3Template } from '../template.ts';
 import type { ProjectJsonV3 } from '../schema.ts';
 
 function assert(condition: unknown, message: string): void {
@@ -81,6 +82,25 @@ function fixture(): ProjectJsonV3 {
 }
 
 (async function run(): Promise<void> {
+  const blank = buildProjectJsonV3Template() as any;
+  assert(Array.isArray(blank._how_to_fill) && blank._how_to_fill.length >= 20, 'Blank V3 template must carry complete filling instructions');
+  assert(blank._template_status?.includes('NOT runtime-valid'), 'Blank V3 template must state that placeholders are not runtime-valid');
+  assert(Object.keys(blank.metals.payableQtyByMetal).length === 0, 'Blank V3 template must not assume a metal');
+  assert(Object.keys(blank.metals.priceKeyByMetal).length === 0, 'Blank V3 template must not guess a runtime price key');
+  assert(blank.metals.auPriceKey === null, 'Blank V3 template must not assume an Au price key');
+  assert(blank.economics.costModel.mode === 'UNKNOWN', 'Blank V3 cost source must start UNKNOWN');
+  assert(blank.economics.sellingModel.mode === 'UNKNOWN', 'Blank V3 selling source must start UNKNOWN');
+  assert(blank.economics.royaltyModel.mode === 'UNKNOWN', 'Blank V3 royalty source must start UNKNOWN');
+  assert(blank.economics.taxModel.mode === 'UNKNOWN', 'Blank V3 tax source must start UNKNOWN');
+  assert(blank.capital.capexUSD.every((value: unknown) => value === null), 'Blank V3 CAPEX must use null, never placeholder zero');
+  assert(blank.capital.sustainingCapexUSD.every((value: unknown) => value === null), 'Blank V3 sustaining CAPEX must use null');
+  assert(blank.capital.closureUSD.every((value: unknown) => value === null), 'Blank V3 closure must use null');
+  assertThrows(
+    () => parseProjectJsonV1(blank),
+    /draft placeholder\(s\) must be resolved from the technical report before runtime/,
+    'Blank V3 template must fail closed instead of becoming a plausible runtime project',
+  );
+
   const raw = fixture();
   const parsed = parseProjectJsonV1(raw);
   assert(parsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'V3 report periods must be canonical calendar axis');

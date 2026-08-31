@@ -24,6 +24,7 @@ export type ProjectJsonV3SeriesComponent<TCategory extends string> = {
 };
 
 export type ProjectJsonV3CostModel =
+  | { mode: 'UNKNOWN' }
   | {
       mode: 'AGGREGATE';
       operatingCostsUSD: Array<number | null>;
@@ -35,6 +36,7 @@ export type ProjectJsonV3CostModel =
     };
 
 export type ProjectJsonV3SellingModel =
+  | { mode: 'UNKNOWN' }
   | { mode: 'NONE' }
   | { mode: 'AGGREGATE'; sellingCostsUSD: Array<number | null> }
   | {
@@ -43,11 +45,13 @@ export type ProjectJsonV3SellingModel =
     };
 
 export type ProjectJsonV3RoyaltyModel =
+  | { mode: 'UNKNOWN' }
   | { mode: 'NONE' }
   | { mode: 'RULES'; items: Array<unknown> }
   | { mode: 'LOCKED_SERIES'; royaltiesUSD: Array<number | null> };
 
 export type ProjectJsonV3TaxModel =
+  | { mode: 'UNKNOWN' }
   | { mode: 'FLAT_RATE'; taxRate: number }
   | { mode: 'LOCKED_SERIES'; taxCashFlowUSD: Array<number | null> };
 
@@ -79,6 +83,8 @@ export type ProjectJsonV3ReportVerification = {
   reportWorkingCapitalUnwindPeriod?: number | null;
   reportTerminalProceedsUSD?: number | null;
   reportTerminalProceedsPeriod?: number | null;
+  assumptionsPageOrTable?: string | null;
+  assumptionsNotes?: string | null;
 };
 
 export type ProjectJsonV3 = {
