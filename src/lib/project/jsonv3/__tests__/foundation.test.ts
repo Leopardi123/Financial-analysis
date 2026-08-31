@@ -52,7 +52,7 @@ function fixture(): ProjectJsonV3 {
       depreciationUSD: [0, 0, 0, 0],
     },
     capital: {
-      capexUSD: [100000, 0, 0, 0],
+      capexUSD: [1500000, 0, 0, 0],
       sustainingCapexUSD: [0, 0, 0, 0],
       closureUSD: [0, 0, 0, 10000],
       workingCapitalDeltaUSD: [0, 0, 0, 0],
@@ -69,7 +69,7 @@ function fixture(): ProjectJsonV3 {
         reportNPVPostTaxUSD: 1,
         reportIRRPostTax: 0.1,
         toleranceRelative: 0.000001,
-        reportInitialCapexUSD: 100000,
+        reportInitialCapexUSD: 1500000,
         reportSustainingCapexUSD: 0,
         reportClosureUSD: 10000,
         reportClosurePeriod: 3,
