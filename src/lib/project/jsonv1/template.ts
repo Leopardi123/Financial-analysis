@@ -28,7 +28,7 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
   if (existing?.series.terminalProceedsUSD !== undefined) series.terminalProceedsUSD = [...existing.series.terminalProceedsUSD];
 
   const economicsBreakdown = asRecord(output.economicsBreakdown);
-  economicsBreakdown._description_reportedCostMetrics = 'Single source of truth for cost metrics explicitly reported by PEA/PFS/FS. Store the report semantics, not the desired benchmark. metric/value/unit preserve legacy compatibility; new rows should also preserve primaryMetal, basis, denominator, period, byProductTreatment, royaltyTreatment, offSiteTreatment, costBaseYear, quality and exact source/page when supported. Unknown must stay unknown. Never infer missing semantics from free text or array order.';
+  economicsBreakdown._description_reportedCostMetrics = 'Single source of truth for cost metrics explicitly reported by PEA/PFS/FS. Store the report semantics, not the desired benchmark. metric/value/unit preserve legacy compatibility; new rows should also preserve primaryMetal, basis, denominator, period, byProductTreatment, royaltyTreatment, offSiteTreatment, coProductMethod/equivalentFormula where applicable, costBaseYear, quality and exact source/page when supported. Unknown must stay unknown. Never infer missing semantics from free text or array order.';
 
   const existingEconomicsBreakdown = asRecord((existing as unknown as Record<string, unknown> | undefined)?.economicsBreakdown);
   const existingReported = Array.isArray(existingEconomicsBreakdown.reportedCostMetrics) ? existingEconomicsBreakdown.reportedCostMetrics : [];
@@ -49,6 +49,8 @@ export function buildProjectJsonV1Template(existing?: ProjectJsonV1): ProjectJso
       byProductTreatment: copy('byProductTreatment'),
       royaltyTreatment: copy('royaltyTreatment'),
       offSiteTreatment: copy('offSiteTreatment'),
+      coProductMethod: copy('coProductMethod'),
+      equivalentFormula: typeof original.equivalentFormula === 'string' ? original.equivalentFormula : null,
       costBaseYear: copy('costBaseYear'),
       quality: copy('quality'),
       sourceId: typeof original.sourceId === 'string' ? original.sourceId : null,

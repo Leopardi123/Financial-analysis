@@ -3,6 +3,7 @@ import type {
   ProjectReportedCostBasis,
   ProjectReportedCostByProductTreatment,
   ProjectReportedCostComponentTreatment,
+  ProjectReportedCostCoProductMethod,
   ProjectReportedCostDenominator,
   ProjectReportedCostPeriod,
   ProjectReportedCostQuality,
@@ -76,6 +77,8 @@ export type ProjectJsonV1 = {
       byProductTreatment?: ProjectReportedCostByProductTreatment | null;
       royaltyTreatment?: ProjectReportedCostComponentTreatment | null;
       offSiteTreatment?: ProjectReportedCostComponentTreatment | null;
+      coProductMethod?: ProjectReportedCostCoProductMethod | null;
+      equivalentFormula?: string | null;
       costBaseYear?: number | null;
       quality?: ProjectReportedCostQuality | null;
       sourceId?: string | null;

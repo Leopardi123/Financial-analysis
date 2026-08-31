@@ -4,6 +4,7 @@ import type {
   ProjectReportedCostBasis,
   ProjectReportedCostByProductTreatment,
   ProjectReportedCostComponentTreatment,
+  ProjectReportedCostCoProductMethod,
   ProjectReportedCostDenominator,
   ProjectReportedCostPeriod,
   ProjectReportedCostQuality,
@@ -22,6 +23,8 @@ export type ReportedCostEvidence = {
   byProductTreatment: ProjectReportedCostByProductTreatment | null;
   royaltyTreatment: ProjectReportedCostComponentTreatment | null;
   offSiteTreatment: ProjectReportedCostComponentTreatment | null;
+  coProductMethod: ProjectReportedCostCoProductMethod | null;
+  equivalentFormula: string | null;
   quality: ProjectReportedCostQuality | null;
   basisId: Tier1CostBasisId | null;
   value: number | null;
@@ -35,9 +38,10 @@ export type ReportedCostEvidence = {
 const VALID_METRICS = new Set<Tier1CostMetric>(TIER1_COST_METRIC_IDS);
 const VALID_BASIS_IDS = new Set<Tier1CostBasisId>(TIER1_COST_BASIS_IDS);
 const BASIS = new Set(['net_by_product', 'co_product', 'before_by_product', 'reported_other', 'unknown']);
-const DENOMINATOR = new Set(['payable_primary_metal', 'metal_equivalent', 'sold_metal', 'other', 'unknown']);
+const DENOMINATOR = new Set(['payable_primary_metal', 'produced_primary_metal', 'metal_equivalent', 'sold_metal', 'other', 'unknown']);
 const BYPRODUCT = new Set(['credited', 'co_product_allocation', 'excluded', 'not_applicable', 'unknown']);
 const COMPONENT = new Set(['included', 'excluded', 'partial', 'not_applicable', 'unknown']);
+const CO_PRODUCT_METHOD = new Set(['metal_equivalent_denominator', 'revenue_allocation', 'physical_allocation', 'reported_other', 'unknown']);
 const QUALITY = new Set(['reported_exact', 'reported_basis_incomplete']);
 
 function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
@@ -57,7 +61,7 @@ function parsePeriod(value: unknown): ProjectReportedCostPeriod | null {
   return null;
 }
 function emptyEvidence(status: 'NOT_AVAILABLE' | 'INVALID', metric: Tier1CostMetric, reason: string): ReportedCostEvidence {
-  return { status, metric, reportedLabel: null, definitionNotes: null, primaryMetal: null, basis: null, denominator: null, period: null, byProductTreatment: null, royaltyTreatment: null, offSiteTreatment: null, quality: null, basisId: null, value: null, unit: null, costBaseYear: null, sourceId: null, pageOrTable: null, reason };
+  return { status, metric, reportedLabel: null, definitionNotes: null, primaryMetal: null, basis: null, denominator: null, period: null, byProductTreatment: null, royaltyTreatment: null, offSiteTreatment: null, coProductMethod: null, equivalentFormula: null, quality: null, basisId: null, value: null, unit: null, costBaseYear: null, sourceId: null, pageOrTable: null, reason };
 }
 function parseEvidence(entry: Record<string, unknown>, expectedMetric: Tier1CostMetric): ReportedCostEvidence | null {
   if (entry.metric !== expectedMetric || !VALID_METRICS.has(expectedMetric) || !finite(entry.value) || (entry.unit !== 'USD/lb' && entry.unit !== 'USD/toz')) return null;
@@ -71,11 +75,13 @@ function parseEvidence(entry: Record<string, unknown>, expectedMetric: Tier1Cost
     basis: enumOrNull<ProjectReportedCostBasis>(entry.basis, BASIS), denominator: enumOrNull<ProjectReportedCostDenominator>(entry.denominator, DENOMINATOR), period: parsePeriod(entry.period),
     byProductTreatment: enumOrNull<ProjectReportedCostByProductTreatment>(entry.byProductTreatment, BYPRODUCT),
     royaltyTreatment: enumOrNull<ProjectReportedCostComponentTreatment>(entry.royaltyTreatment, COMPONENT), offSiteTreatment: enumOrNull<ProjectReportedCostComponentTreatment>(entry.offSiteTreatment, COMPONENT),
+    coProductMethod: enumOrNull<ProjectReportedCostCoProductMethod>(entry.coProductMethod, CO_PRODUCT_METHOD),
+    equivalentFormula: stringOrNull(entry.equivalentFormula),
     quality: enumOrNull<ProjectReportedCostQuality>(entry.quality, QUALITY), basisId,
     value: entry.value as number, unit: entry.unit as 'USD/lb' | 'USD/toz', costBaseYear,
     sourceId: stringOrNull(entry.sourceId), pageOrTable: stringOrNull(entry.pageOrTable), reason: '',
   };
-  const context = [evidence.reportedLabel ? `rapportmått “${evidence.reportedLabel}”` : null, evidence.period?.kind ? `period ${evidence.period.kind}` : null, evidence.basis ? `basis ${evidence.basis}` : null, evidence.sourceId ? `källa ${evidence.sourceId}` : null, evidence.pageOrTable, evidence.costBaseYear ? `kostnadsår ${evidence.costBaseYear}` : null].filter(Boolean).join(', ');
+  const context = [evidence.reportedLabel ? `rapportmått “${evidence.reportedLabel}”` : null, evidence.period?.kind ? `period ${evidence.period.kind}` : null, evidence.basis ? `basis ${evidence.basis}` : null, evidence.denominator ? `denominator ${evidence.denominator}` : null, evidence.sourceId ? `källa ${evidence.sourceId}` : null, evidence.pageOrTable, evidence.costBaseYear ? `kostnadsår ${evidence.costBaseYear}` : null].filter(Boolean).join(', ');
   evidence.reason = context ? `Rapporterad kostnadsuppgift bevaras som evidence (${context}).` : 'Rapporterad kostnadsuppgift bevaras som evidence.';
   return evidence;
 }
@@ -88,7 +94,7 @@ export function extractReportedCostEvidenceCandidates(rawJson: unknown, expected
 }
 
 function semanticKey(evidence: ReportedCostEvidence): string {
-  return JSON.stringify([evidence.primaryMetal, evidence.basis, evidence.denominator, evidence.byProductTreatment, evidence.royaltyTreatment, evidence.offSiteTreatment, evidence.costBaseYear]);
+  return JSON.stringify([evidence.primaryMetal, evidence.basis, evidence.denominator, evidence.byProductTreatment, evidence.royaltyTreatment, evidence.offSiteTreatment, evidence.coProductMethod, evidence.equivalentFormula, evidence.costBaseYear]);
 }
 
 /** Backwards-compatible single-reader. Never resolves semantically different rows by array order. */

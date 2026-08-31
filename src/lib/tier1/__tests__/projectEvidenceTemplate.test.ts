@@ -19,13 +19,14 @@ const source = {
   economicsBreakdown: {
     meta: { defaultSource: 'PFS', notes: 'locked' },
     reportedCostMetrics: [{
-      metric: 'C1_CU_USD_PER_LB', reportedLabel: 'Cash Costs, Net of By-product Credits', value: 1.22, unit: 'USD/lb',
-      definitionNotes: 'Exact report wording.', primaryMetal: 'Cu', basis: 'net_by_product', denominator: 'payable_primary_metal',
-      period: { kind: 'LOM' }, byProductTreatment: 'credited', royaltyTreatment: 'included', offSiteTreatment: 'included',
-      quality: 'reported_exact', costBaseYear: 2025,
+      metric: 'C1_CU_USD_PER_LB', reportedLabel: 'C1 cost – co-product basis', value: 1.95, unit: 'USD/lb',
+      definitionNotes: 'Exact report wording.', primaryMetal: 'Cu', basis: 'co_product', denominator: 'metal_equivalent',
+      period: { kind: 'LOM' }, byProductTreatment: 'co_product_allocation', royaltyTreatment: 'included', offSiteTreatment: 'included',
+      coProductMethod: 'metal_equivalent_denominator', equivalentFormula: 'Cu + Mo*price ratio',
+      quality: 'reported_exact', costBaseYear: 2026,
       // Legacy benchmark-specific proof remains deliberately outside the typed project schema.
       basisId: 'S_AND_P_CO_PRODUCT_C1_CU',
-      sourceId: 'pfs-2025', pageOrTable: 'Table 18-5',
+      sourceId: 'pfs-2026', pageOrTable: 'Table 22-3',
     }],
   },
   reconciliation: { report: { sourceId: 'legacy' } },
@@ -35,21 +36,23 @@ const template = buildProjectJsonV1Template(source) as any;
 const row = template.economicsBreakdown.reportedCostMetrics[0];
 assert.equal(template.economicsBreakdown.reportedCostMetrics.length, 1);
 assert.equal(row.metric, 'C1_CU_USD_PER_LB');
-assert.equal(row.reportedLabel, 'Cash Costs, Net of By-product Credits');
-assert.equal(row.value, 1.22);
+assert.equal(row.reportedLabel, 'C1 cost – co-product basis');
+assert.equal(row.value, 1.95);
 assert.equal(row.unit, 'USD/lb');
 assert.equal(row.definitionNotes, 'Exact report wording.');
 assert.equal(row.primaryMetal, 'Cu');
-assert.equal(row.basis, 'net_by_product');
-assert.equal(row.denominator, 'payable_primary_metal');
+assert.equal(row.basis, 'co_product');
+assert.equal(row.denominator, 'metal_equivalent');
 assert.deepEqual(row.period, { kind: 'LOM' });
-assert.equal(row.byProductTreatment, 'credited');
+assert.equal(row.byProductTreatment, 'co_product_allocation');
 assert.equal(row.royaltyTreatment, 'included');
 assert.equal(row.offSiteTreatment, 'included');
+assert.equal(row.coProductMethod, 'metal_equivalent_denominator');
+assert.equal(row.equivalentFormula, 'Cu + Mo*price ratio');
 assert.equal(row.quality, 'reported_exact');
-assert.equal(row.costBaseYear, 2025);
-assert.equal(row.sourceId, 'pfs-2025');
-assert.equal(row.pageOrTable, 'Table 18-5');
+assert.equal(row.costBaseYear, 2026);
+assert.equal(row.sourceId, 'pfs-2026');
+assert.equal(row.pageOrTable, 'Table 22-3');
 assert.equal('basisId' in row, false);
 assert.equal('reconciliation' in template, false);
 assert.match(template.economicsBreakdown._description_reportedCostMetrics, /Single source of truth/);
