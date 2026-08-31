@@ -25,24 +25,14 @@ export type ProjectJsonV3SeriesComponent<TCategory extends string> = {
 
 export type ProjectJsonV3CostModel =
   | { mode: 'UNKNOWN' }
-  | {
-      mode: 'AGGREGATE';
-      operatingCostsUSD: Array<number | null>;
-      siteGandA_USD?: Array<number | null> | null;
-    }
-  | {
-      mode: 'COMPONENTS';
-      components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3CostComponentCategory>>;
-    };
+  | { mode: 'AGGREGATE'; operatingCostsUSD: Array<number | null>; siteGandA_USD?: Array<number | null> | null }
+  | { mode: 'COMPONENTS'; components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3CostComponentCategory>> };
 
 export type ProjectJsonV3SellingModel =
   | { mode: 'UNKNOWN' }
   | { mode: 'NONE' }
   | { mode: 'AGGREGATE'; sellingCostsUSD: Array<number | null> }
-  | {
-      mode: 'COMPONENTS';
-      components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3SellingComponentCategory>>;
-    };
+  | { mode: 'COMPONENTS'; components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3SellingComponentCategory>> };
 
 export type ProjectJsonV3RoyaltyModel =
   | { mode: 'UNKNOWN' }
@@ -54,6 +44,14 @@ export type ProjectJsonV3TaxModel =
   | { mode: 'UNKNOWN' }
   | { mode: 'FLAT_RATE'; taxRate: number }
   | { mode: 'LOCKED_SERIES'; taxCashFlowUSD: Array<number | null> };
+
+export type ProjectJsonV3RuntimePlacement = {
+  productionStartYear: number;
+  sourceId: string;
+  pageOrTable?: string | null;
+  asOfDate?: string | null;
+  notes?: string | null;
+};
 
 export type ProjectJsonV3ReportedCostCheckpoint = {
   metric: string;
@@ -69,6 +67,7 @@ export type ProjectJsonV3ReportVerification = {
   sourceId: string;
   npvIrrPageOrTable: string;
   pricesPageOrTable: string;
+  periodsPageOrTable?: string | null;
   discountRate: number;
   discountConvention: 'period_end' | 'mid_year';
   priceDeckByKey: Record<string, number>;
@@ -99,8 +98,9 @@ export type ProjectJsonV3 = {
   time: {
     masterN: number;
     productionStartPeriod: number;
-    periodEndDatesUtc: string[];
+    reportPeriodLabels?: Array<string | null> | null;
     phaseByPeriod: Array<'construction' | 'ramp_up' | 'operations' | 'closure'>;
+    runtimePlacement?: ProjectJsonV3RuntimePlacement | null;
   };
   metals: {
     payableQtyByMetal: Record<string, Array<number | null>>;

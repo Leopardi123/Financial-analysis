@@ -109,17 +109,28 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   const tolerance = finite(report.toleranceRelative) ? report.toleranceRelative : 0.02;
   if (!(tolerance > 0 && tolerance <= 0.1)) throw new Error('verification.report.toleranceRelative must be within (0, 0.1].');
 
+  // Reconciliation is intentionally calendar-independent. A neutral calendar anchor
+  // is used internally when runtimePlacement is absent; NPV/IRR operate on relative t.
+  const parsed = parseProjectJsonV3(raw, { requireRuntimePlacement: false });
+
   const requiredKeys = [...new Set(Object.values(raw.metals.priceKeyByMetal))].sort();
   const suppliedKeys = Object.keys(report.priceDeckByKey).sort();
   const missing = requiredKeys.filter((key) => !finite(report.priceDeckByKey[key]) || report.priceDeckByKey[key] <= 0);
   const extra = suppliedKeys.filter((key) => !requiredKeys.includes(key));
-  const hardChecks: Check[] = [{
-    check: 'report_price_deck_keys',
-    status: missing.length === 0 && extra.length === 0 ? 'PASS' : 'FAIL',
-    detail: `required=[${requiredKeys.join(',')}]; supplied=[${suppliedKeys.join(',')}]; missing=[${missing.join(',')}]; extra=[${extra.join(',')}]`,
-  }];
+  const labelCount = raw.time.reportPeriodLabels?.length ?? null;
+  const hardChecks: Check[] = [
+    {
+      check: 'relative_period_mapping',
+      status: raw.time.phaseByPeriod.length === raw.time.masterN + 1 && (labelCount === null || labelCount === raw.time.masterN + 1) ? 'PASS' : 'FAIL',
+      detail: `periods=${raw.time.masterN + 1}; productionStartPeriod=${raw.time.productionStartPeriod}; reportLabels=${labelCount ?? 'not_disclosed'}; runtimePlacement=${raw.time.runtimePlacement?.productionStartYear ?? 'not_required_for_report_reconciliation'}`,
+    },
+    {
+      check: 'report_price_deck_keys',
+      status: missing.length === 0 && extra.length === 0 ? 'PASS' : 'FAIL',
+      detail: `required=[${requiredKeys.join(',')}]; supplied=[${suppliedKeys.join(',')}]; missing=[${missing.join(',')}]; extra=[${extra.join(',')}]`,
+    },
+  ];
 
-  const parsed = parseProjectJsonV3(raw);
   hardChecks.push(...reportTargetChecks(raw, parsed, report, tolerance));
   const diagnostics: string[] = [];
   let output: ReturnType<typeof computeProjectEngineFullProductionV1> | null = null;
@@ -134,7 +145,7 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
       diagnostics.push(`Report-deck engine run failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   } else {
-    diagnostics.push('Report-deck engine run withheld because a hard period/CAPEX/closure/WC/price check failed.');
+    diagnostics.push('Report-deck engine run withheld because a hard relative-period/CAPEX/closure/WC/price check failed.');
   }
 
   const fcff = output?.phase1.fcffUSD ?? [];

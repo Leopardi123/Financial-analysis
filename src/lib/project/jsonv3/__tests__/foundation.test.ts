@@ -19,6 +19,9 @@ function assertThrows(fn: () => unknown, pattern: RegExp, message: string): void
   try { fn(); } catch (caught) { error = caught; }
   assert(error instanceof Error && pattern.test(error.message), message);
 }
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 function fixture(): ProjectJsonV3 {
   return {
@@ -27,8 +30,14 @@ function fixture(): ProjectJsonV3 {
     time: {
       masterN: 3,
       productionStartPeriod: 1,
-      periodEndDatesUtc: ['2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31'],
+      reportPeriodLabels: ['-1', '1', '2', '3'],
       phaseByPeriod: ['construction', 'operations', 'operations', 'closure'],
+      runtimePlacement: {
+        productionStartYear: 2029,
+        sourceId: 'fixture-company-guidance',
+        pageOrTable: 'Schedule guidance',
+        asOfDate: '2026-08-31',
+      },
     },
     metals: {
       payableQtyByMetal: { Au: [0, 1000, 1000, 0] },
@@ -65,6 +74,7 @@ function fixture(): ProjectJsonV3 {
         sourceId: 'fixture-report',
         npvIrrPageOrTable: 'Table X',
         pricesPageOrTable: 'Table Y',
+        periodsPageOrTable: 'Table periods',
         discountRate: 0.08,
         discountConvention: 'period_end',
         priceDeckByKey: { XAU_USD_TOZ: 2000 },
@@ -81,10 +91,25 @@ function fixture(): ProjectJsonV3 {
   };
 }
 
+async function engineAtReportDeck(raw: ProjectJsonV3) {
+  const parsed = parseProjectJsonV1(raw);
+  const input = await resolveProjectPricesToEngineInput({
+    parsed,
+    scenario: { mode: 'fixed', fixedPriceByKey: { XAU_USD_TOZ: 2000 } },
+    allowRefresh: false,
+    projectId: raw.meta?.projectId ?? 'v3-fixture',
+  });
+  input.phase2.discountRate = 0.08;
+  return computeProjectEngineFullProductionV1(input);
+}
+
 (async function run(): Promise<void> {
   const blank = buildProjectJsonV3Template() as any;
-  assert(Array.isArray(blank._how_to_fill) && blank._how_to_fill.length >= 20, 'Blank V3 template must carry complete filling instructions');
+  assert(Array.isArray(blank._how_to_fill) && blank._how_to_fill.length >= 22, 'Blank V3 template must carry complete filling instructions');
   assert(blank._template_status?.includes('NOT runtime-valid'), 'Blank V3 template must state that placeholders are not runtime-valid');
+  assert(blank.time.runtimePlacement === null, 'Blank V3 template must not invent a calendar production start');
+  assert(blank.time.reportPeriodLabels === null, 'Blank V3 template must not invent report period labels');
+  assert(!Object.prototype.hasOwnProperty.call(blank.time, 'periodEndDatesUtc'), 'V3 relative economics must not contain fixed periodEndDatesUtc');
   assert(Object.keys(blank.metals.payableQtyByMetal).length === 0, 'Blank V3 template must not assume a metal');
   assert(Object.keys(blank.metals.priceKeyByMetal).length === 0, 'Blank V3 template must not guess a runtime price key');
   assert(blank.metals.auPriceKey === null, 'Blank V3 template must not assume an Au price key');
@@ -103,7 +128,7 @@ function fixture(): ProjectJsonV3 {
 
   const raw = fixture();
   const parsed = parseProjectJsonV1(raw);
-  assert(parsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'V3 report periods must be canonical calendar axis');
+  assert(parsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'Runtime placement must map relative t to calendar years from productionStartPeriod');
   near((parsed.engineInputWithoutPrices.phase1 as any).operatingCostsUSD[1], 600000);
   near((parsed.engineInputWithoutPrices.phase1 as any).siteGandA_USD[1], 50000);
   near((parsed.engineInputWithoutPrices.phase1 as any).sellingCostsUSD[1], 1000);
@@ -120,17 +145,20 @@ function fixture(): ProjectJsonV3 {
     assert(inlineRequest.value.projects[0].rawJson.version === 'project_json_v3', 'snapshot validator must restore original v3 document before runtime');
   }
 
-  const input = await resolveProjectPricesToEngineInput({
-    parsed,
-    scenario: { mode: 'fixed', fixedPriceByKey: { XAU_USD_TOZ: 2000 } },
-    allowRefresh: false,
-    projectId: 'v3-fixture',
-  });
-  input.phase2.discountRate = 0.08;
-  const output = computeProjectEngineFullProductionV1(input);
+  const output = await engineAtReportDeck(raw);
   near(output.phase1.sellingCostsUSD_effective?.[1], 1000);
   const expectedEbitda = 2_000_000 - 600_000 - 1_000 - 50_000;
   near(output.phase1.ebitdaUSD[1], expectedEbitda);
+
+  const shifted = clone(raw);
+  shifted.time.runtimePlacement!.productionStartYear = 2031;
+  shifted.time.runtimePlacement!.sourceId = 'later-company-guidance';
+  const shiftedParsed = parseProjectJsonV1(shifted);
+  assert(shiftedParsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2030,2031,2032,2033', 'Changing guidance must shift only calendar placement');
+  const shiftedOutput = await engineAtReportDeck(shifted);
+  assert(JSON.stringify(shiftedOutput.phase1.fcffUSD) === JSON.stringify(output.phase1.fcffUSD), 'Calendar placement changes must not change relative Project FCFF economics');
+  assert(JSON.stringify(shifted.capital) === JSON.stringify(raw.capital), 'Schedule guidance changes must not shift capital arrays');
+  assert(JSON.stringify(shifted.metals) === JSON.stringify(raw.metals), 'Schedule guidance changes must not shift production arrays');
 
   const fcff = output.phase1.fcffUSD;
   assert(fcff.every((value) => typeof value === 'number' && Number.isFinite(value)), 'Fixture FCFF must be finite');
@@ -140,9 +168,28 @@ function fixture(): ProjectJsonV3 {
   raw.verification!.report!.reportNPVPostTaxUSD = reportNpv;
   raw.verification!.report!.reportIRRPostTax = reportIrr as number;
 
-  const reconciled = await reconcileProjectJsonV3ToReport(raw);
-  assert(reconciled.status === 'VERIFIED', `Expected VERIFIED reconciliation: ${JSON.stringify(reconciled.hardChecks)}`);
+  const reportOnly = clone(raw);
+  reportOnly.time.runtimePlacement = null;
+  const reconciled = await reconcileProjectJsonV3ToReport(reportOnly);
+  assert(reconciled.status === 'VERIFIED', `Expected calendar-independent VERIFIED reconciliation: ${JSON.stringify(reconciled.hardChecks)}`);
   assert(reconciled.hardChecks.every((check) => check.status === 'PASS'), 'Every hard reconciliation check must pass');
+  assert(reconciled.hardChecks.some((check) => check.check === 'relative_period_mapping'), 'Reconciliation must expose relative-period mapping hard check');
+
+  const unplacedRuntime = clone(raw);
+  unplacedRuntime.time.runtimePlacement = null;
+  assertThrows(
+    () => parseProjectJsonV1(unplacedRuntime),
+    /runtimePlacement\.productionStartYear is required/,
+    'Project/Corporate/Compare Stocks runtime must require a current calendar placement',
+  );
+
+  const staleCalendarAxis = fixture() as any;
+  staleCalendarAxis.time.periodEndDatesUtc = ['2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31'];
+  assertThrows(
+    () => parseProjectJsonV1(staleCalendarAxis),
+    /forbids parallel source field\(s\): periodEndDatesUtc/,
+    'V3 must reject a fixed periodEndDatesUtc axis beside the relative economic axis',
+  );
 
   const invalid = fixture() as any;
   invalid.economics.costModel.operatingCostsUSD = [0, 1, 1, 0];
