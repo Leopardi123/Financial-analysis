@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import InvestmentScoreEvidenceDialog from '../components/investmentScore/InvestmentScoreEvidenceDialog.tsx';
 import {
   deleteCompanyProject,
   getCompanyProject,
@@ -51,18 +52,21 @@ export default function CompanyProjectsEditorV3Page() {
   const [projectId, setProjectId] = useState('');
   const [projectName, setProjectName] = useState('');
   const [rawText, setRawText] = useState('');
+  const [savedRawText, setSavedRawText] = useState<string | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [evidenceProject, setEvidenceProject] = useState<CompanyProjectSummary | null>(null);
 
   const validation = useMemo(() => rawText.trim() ? validateRaw(rawText) : null, [rawText]);
 
-  async function refresh(): Promise<void> {
+  async function refresh(nextSelectedId?: string): Promise<void> {
     if (!symbol) return;
     try {
       const all = await listAllCompanyProjects(symbol);
       setProjects(all.filter((project) => project.json_version === 'project_json_v3'));
+      if (nextSelectedId) setSelectedId(nextSelectedId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -79,6 +83,7 @@ export default function CompanyProjectsEditorV3Page() {
     setProjectId(id);
     setProjectName('');
     setRawText(templateText(id, ''));
+    setSavedRawText(null);
     setIsNew(true);
     setError(null);
     setStatus('Created a project_json_v3 draft. Report periods and economic sources must be filled from the technical report; unknowns must not be guessed.');
@@ -88,10 +93,12 @@ export default function CompanyProjectsEditorV3Page() {
     try {
       const stored = await getCompanyProject(symbol, project.project_id);
       if (stored.raw_json.version !== 'project_json_v3') throw new Error('Selected project is not project_json_v3.');
+      const pretty = JSON.stringify(stored.raw_json, null, 2);
       setSelectedId(stored.project_id);
       setProjectId(stored.project_id);
       setProjectName(stored.project_name ?? '');
-      setRawText(JSON.stringify(stored.raw_json, null, 2));
+      setRawText(pretty);
+      setSavedRawText(pretty);
       setIsNew(false);
       setError(null);
       setStatus(`Loaded ${stored.project_id}.`);
@@ -113,15 +120,61 @@ export default function CompanyProjectsEditorV3Page() {
       meta.projectName = projectName.trim();
       raw.meta = meta;
       const result = await upsertCompanyProject({ symbol, project_id: projectId.trim(), project_name: projectName.trim() || null, raw_json: raw });
+      const pretty = JSON.stringify(raw, null, 2);
       setSelectedId(result.project_id);
       setIsNew(false);
-      setRawText(JSON.stringify(raw, null, 2));
+      setRawText(pretty);
+      setSavedRawText(pretty);
       setStatus(`Saved project_json_v3 at ${result.updated_at_utc}. This means schema-valid, not report-verified.`);
-      await refresh();
+      await refresh(result.project_id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function setProjectDisabled(project: CompanyProjectSummary, disabled: boolean): Promise<void> {
+    if (!symbol) return;
+    if (selectedId === project.project_id && savedRawText !== null && rawText !== savedRawText) {
+      setError('Projektet har osparade ändringar. Spara eller återställ innan status ändras.');
+      return;
+    }
+
+    try {
+      const stored = await getCompanyProject(symbol, project.project_id);
+      if (stored.raw_json.version !== 'project_json_v3') throw new Error('Selected project is not project_json_v3.');
+      const raw = JSON.parse(JSON.stringify(stored.raw_json)) as Record<string, unknown>;
+      const existingMeta = raw.meta;
+      const meta = typeof existingMeta === 'object' && existingMeta !== null && !Array.isArray(existingMeta)
+        ? existingMeta as Record<string, unknown>
+        : {};
+
+      if (disabled) {
+        meta.disabled = true;
+        raw.meta = meta;
+      } else {
+        delete meta.disabled;
+        raw.meta = meta;
+      }
+
+      const result = await upsertCompanyProject({
+        symbol,
+        project_id: stored.project_id,
+        project_name: stored.project_name,
+        raw_json: raw,
+      });
+
+      setError(null);
+      setStatus(disabled ? `Inaktiverade ${project.project_id}.` : `Aktiverade ${project.project_id}.`);
+      if (selectedId === project.project_id && !isNew) {
+        const pretty = JSON.stringify(raw, null, 2);
+        setRawText(pretty);
+        setSavedRawText(pretty);
+      }
+      await refresh(result.project_id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   }
 
@@ -130,7 +183,7 @@ export default function CompanyProjectsEditorV3Page() {
     try {
       await deleteCompanyProject({ symbol, project_id: id });
       if (selectedId === id) {
-        setSelectedId(''); setProjectId(''); setProjectName(''); setRawText(''); setIsNew(false);
+        setSelectedId(''); setProjectId(''); setProjectName(''); setRawText(''); setSavedRawText(null); setIsNew(false);
       }
       setStatus(`Deleted ${id}.`);
       await refresh();
@@ -161,9 +214,17 @@ export default function CompanyProjectsEditorV3Page() {
           <ul className="project-list">
             {projects.map((project) => (
               <li key={project.project_id} className={selectedId === project.project_id ? 'selected' : ''}>
-                <div><strong>{project.project_id}</strong><div>{project.project_name || '—'}</div><small>{project.updated_at_utc}</small></div>
+                <div>
+                  <strong>{project.project_id}</strong>
+                  <div>{project.project_name || '—'}</div>
+                  <small>{project.disabled ? 'Inaktiverat · ' : ''}{project.updated_at_utc}</small>
+                </div>
                 <div className="project-row-actions">
                   <button type="button" onClick={() => void load(project)}>Edit</button>
+                  <button type="button" onClick={() => setEvidenceProject(project)}>Kvalitativ bedömning</button>
+                  <button type="button" onClick={() => void setProjectDisabled(project, !project.disabled)}>
+                    {project.disabled ? 'Aktivera' : 'Inaktivera'}
+                  </button>
                   <button type="button" className="danger" onClick={() => void remove(project.project_id)}>Delete</button>
                 </div>
               </li>
@@ -185,9 +246,19 @@ export default function CompanyProjectsEditorV3Page() {
             <button type="button" onClick={() => void save()} disabled={!validation?.ok || saving}>{saving ? 'Saving…' : 'Save'}</button>
             <button type="button" onClick={() => validation?.ok && setRawText(JSON.stringify(validation.raw, null, 2))} disabled={!validation?.ok}>Prettify</button>
             <button type="button" onClick={() => void copyTemplate()}>Copy V3 template</button>
+            <button type="button" onClick={() => savedRawText !== null && setRawText(savedRawText)} disabled={savedRawText === null}>Reset to saved</button>
           </div>
         </section>
       </div>
+
+      {evidenceProject && (
+        <InvestmentScoreEvidenceDialog
+          symbol={symbol}
+          projectId={evidenceProject.project_id}
+          projectName={evidenceProject.project_name}
+          onClose={() => setEvidenceProject(null)}
+        />
+      )}
     </div>
   );
 }
