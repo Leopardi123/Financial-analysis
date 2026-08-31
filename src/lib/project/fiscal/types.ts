@@ -43,7 +43,7 @@ export type FiscalRateDefinition =
       tiers: Array<{ threshold: number; rate: number }>;
     };
 
-export type FiscalTakeRule = {
+export type FiscalTakeFormulaRule = {
   id: string;
   label?: string | null;
   placement: FiscalPlacement;
@@ -59,6 +59,25 @@ export type FiscalTakeRule = {
   pageOrTable?: string | null;
   notes?: string | null;
 };
+
+/**
+ * Source-locked fiscal cash-flow item. It may coexist with formula rules inside
+ * one fiscalTakeModel.RULES list when the technical report contains multiple
+ * takes with different bases/placements and one of them cannot be faithfully
+ * reconstructed. The locked series is deliberately scenario-limited; callers
+ * must not interpret it as a dynamic royalty formula.
+ */
+export type FiscalTakeLockedSeriesRule = {
+  id: string;
+  label?: string | null;
+  placement: FiscalPlacement;
+  lockedSeriesUSD: Array<number | null>;
+  sourceId: string;
+  pageOrTable: string;
+  notes?: string | null;
+};
+
+export type FiscalTakeRule = FiscalTakeFormulaRule | FiscalTakeLockedSeriesRule;
 
 export type FiscalTakeEngineInput = {
   masterN: number;

@@ -23,10 +23,10 @@ export function buildProjectJsonV3Template(): ProjectJsonV3 & Record<string, unk
       '14. Do not silently substitute mined, contained or recovered metal for either payable or metal-in-product when the report distinguishes those concepts.',
       '15. costModel has exactly one active source. Use AGGREGATE when only aggregate site operating cost is supported; use COMPONENTS when mining/processing/site G&A/other site OPEX can be mapped without overlap.',
       '16. sellingModel has exactly one active source. Put TC, RC, freight, insurance, marketing and other off-site deductions here when separately disclosed. Payability is not repeated here when it is derived by the selected revenue basis.',
-      '17. fiscalTakeModel replaces the old generic royalty bucket. Use RULES when each royalty/NSR/mining take can be represented faithfully; each item explicitly selects a canonical base, allowed deductions, rate formula and economic placement.',
+      '17. fiscalTakeModel replaces the old generic royalty bucket. In RULES mode, source-faithful dynamic items may coexist with individually reportLockedItems when one specific royalty/mining take has a published report cash series but cannot be faithfully reconstructed. Each economic take must appear exactly once by id.',
       '18. Fiscal placement is source-defined, not name-defined: REVENUE_DEDUCTION, OPERATING_EXPENSE, PRE_TAX_CHARGE or POST_TAX_CHARGE. A royalty may therefore sit at a different point than another royalty, and profit/margin-based mining takes need not be treated as revenue royalties.',
       '19. Fiscal rules may reference only canonical upstream ledger lines (gross metal value, payability, streams, TC/RC/off-site deductions, site costs, EBITDA/EBIT, depreciation/capital lines). Do not create circular definitions or arbitrary JSON expressions.',
-      '20. Use fiscalTakeModel.LOCKED_SERIES only when the report supplies a cash-flow series that cannot be faithfully reconstructed. Record the placement; locked series are scenario-limited.',
+      '20. A RULES.reportLockedItem is exact only for report reconciliation. For normal Spot/Bear/runtime it must have a source-backed runtimeProxyRule or runtime fails closed; never reuse a report-locked cash series under changed prices. Use fiscalTakeModel.LOCKED_SERIES only when the entire fiscal model is report/scenario locked.',
       '21. taxModel has exactly one active source per scenario. FLAT_RATE is allowed only when faithful. REPORT_LOCKED_WITH_RUNTIME_PROXY uses the report tax cash-flow series for report reconciliation and a simple nominal-rate-with-loss-carryforward proxy for Spot/Bear/other runtime scenarios.',
       '22. The runtime tax proxy is intentionally not a tax-planning model. It supports nominal corporate tax and loss carryforward only; label runtime tax as simplified when hybrid mode is used.',
       '23. By-product revenue belongs in metal revenue once. Net-by-product treatment is a derived C1/AISC recipe, not a second project-income source.',
@@ -35,7 +35,7 @@ export function buildProjectJsonV3Template(): ProjectJsonV3 & Record<string, unk
       '26. If the report provides only a LOM average and no defensible annual schedule, do not fabricate an annual series by interpolation. Use a truthful supported representation or leave the item unverified.',
       '27. operations is physical evidence used by Project and Tier. Populate only what the report supports; units must be explicit. Physical chains are controls, not automatic replacements for directly reported commercial quantities.',
       '28. verification.report is a checkpoint contract, not a second cash-flow model. Store exact report price deck, discount rate/convention, report NPV/IRR and hard-check totals/source pages. Never store parallel report FCFF arrays.',
-      '29. Report reconciliation selects the SAME Project engine and same relative economic arrays. In hybrid tax mode it selects reportTaxCashFlowUSD; normal Project/Corporate/Compare Stocks runtime selects the simplified dynamic tax proxy.',
+      '29. Report reconciliation selects the SAME Project engine and same relative economic arrays. In hybrid tax/fiscal mode it selects report-locked cash-flow legs; normal Project/Corporate/Compare Stocks runtime selects the explicitly identified simplified dynamic proxies.',
       '30. reportedCostCheckpoints contains report C1/AISC checkpoints only. These values never override Project/Corporate economics; they test reconstructed metrics and benchmark compatibility.',
       '31. Schema-valid/runnable is not VERIFIED. VERIFIED requires exact relative period mapping, report assumptions/prices, CAPEX/closure/WC/terminal checks and same-engine NPV/IRR within the stated tolerance (normally 1-2% relative). If any hard check is missing, status is Ej verifierad.'
     ],
@@ -44,7 +44,7 @@ export function buildProjectJsonV3Template(): ProjectJsonV3 & Record<string, unk
       revenue: 'Both payable and metal-in-product may be stored as direct report evidence, but revenueBasisByMetal selects exactly one active commercial revenue basis per metal.',
       site_opex: 'costModel = AGGREGATE XOR COMPONENTS. UNKNOWN is draft-only.',
       selling_offsite: 'sellingModel = NONE XOR AGGREGATE XOR COMPONENTS. UNKNOWN is draft-only.',
-      fiscal_take: 'fiscalTakeModel = NONE XOR RULES XOR LOCKED_SERIES. Each RULES item has one base/deduction/rate/placement definition. UNKNOWN is draft-only.',
+      fiscal_take: 'fiscalTakeModel = NONE XOR RULES XOR LOCKED_SERIES. RULES owns the fiscal category and may contain multiple distinct take definitions; each take id has one active source per scenario: dynamic rule, or report-locked report leg plus explicit runtime proxy. UNKNOWN is draft-only.',
       tax: 'taxModel = FLAT_RATE XOR LOCKED_SERIES XOR REPORT_LOCKED_WITH_RUNTIME_PROXY. Hybrid mode has one source per scenario: report-locked for reconciliation, runtime proxy otherwise.',
       byproducts: 'Secondary-metal revenue is represented through metals once; by-product credit is derived only for a cost metric recipe.',
       verification: 'Report NPV/IRR/C1/AISC are checkpoints/oracles, never alternative project-economic ledgers.'
@@ -68,7 +68,7 @@ export function buildProjectJsonV3Template(): ProjectJsonV3 & Record<string, unk
       'Capital mapping: report-defined initial/development CAPEX, sustaining CAPEX, closure/reclamation, WC unwind and terminal proceeds match totals and relative periods; initial CAPEX is not inferred from productionStartPeriod.',
       'Commercial/revenue mapping: each metal uses the report-supported revenue basis and directly reported commercial quantities; payability is deducted exactly once.',
       'Assumption lock: exact report price keys/deck, payable/payability, TC/RC, fiscal takes, tax and other material assumptions; no invented FX.',
-      'Same-engine calculation: run normal Project engine on unchanged relative series with report deck/discount convention and report tax leg where hybrid tax is used.',
+      'Same-engine calculation: run normal Project engine on unchanged relative series with report deck/discount convention and report-locked tax/fiscal legs where hybrid models are used.',
       'NPV/IRR control: report vs model within stated tolerance, normally 1-2% relative.',
       'If any hard check cannot be verified, status is Ej verifierad and missing evidence must be stated.'
     ],
@@ -76,7 +76,7 @@ export function buildProjectJsonV3Template(): ProjectJsonV3 & Record<string, unk
       payable_direct: 'Gold/silver report publishes payable ounces and its revenue is payable ounces × metal price -> PAYABLE_DIRECT. Do not subtract payability again.',
       metal_in_product: 'Concentrate report publishes metal-in-product value before payability and separately publishes payable metal -> METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION. Use directly reported gross and payable series; do not rebuild them from grade/recovery.',
       nsr_deductions: 'A source-defined NSR may use gross/revenue base less specified off-site or stream deductions. Encode those exact canonical deduction lines in the fiscal rule; do not assume all NSRs have the same base.',
-      profit_royalty: 'A mining take based on operating income or margin uses EBITDA/EBIT ledger lines and TIERED_MARGIN with the source-defined placement, rather than being forced into a revenue royalty.',
+      profit_royalty: 'A profit/margin mining take uses the source-defined ledger base. If the report publishes exact annual take but its statutory taxable-profit adjustments cannot be reconstructed, use a reportLockedItem for reconciliation plus an explicitly labelled simplified runtimeProxyRule when a defensible proxy exists; otherwise runtime fails closed.',
       schedule_change: 'If guidance moves construction/production/nameplate together, update anchors only. PLACEMENT_CONFLICT means verify schedule evidence; never stretch arrays.',
       initial_capex_after_production: 'If the report classifies part of Year 1 production-period spend as Initial Capital, keep it in capital.capexUSD at that relative period. Reconciliation sums report-defined capexUSD regardless of productionStartPeriod.',
       lom_average: 'A LOM average is not an annual schedule. Do not repeat it across years unless the report itself defines that treatment.'

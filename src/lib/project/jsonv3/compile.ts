@@ -33,6 +33,9 @@ function sumStrictSeries(seriesList: Array<Array<number | null>>, length: number
     return total;
   });
 }
+function addSeries(left: Array<number | null> | undefined, right: Array<number | null>, length: number): Array<number | null> {
+  return left ? sumStrictSeries([left, right], length) : [...right];
+}
 function validateComponents<T extends string>(
   components: Array<ProjectJsonV3SeriesComponent<T>>,
   length: number,
@@ -48,7 +51,11 @@ function validateComponents<T extends string>(
   });
 }
 
-export type ParseProjectJsonV3Options = { requireRuntimePlacement?: boolean; taxScenario?: 'runtime' | 'report' };
+export type ParseProjectJsonV3Options = {
+  requireRuntimePlacement?: boolean;
+  taxScenario?: 'runtime' | 'report';
+  fiscalScenario?: 'runtime' | 'report';
+};
 type ResolvedScheduleAnchor = ProjectJsonV3ScheduleAnchor & { year: number; sourceId: string };
 function resolveScheduleAnchor(raw: unknown, path: string): ResolvedScheduleAnchor | null {
   if (raw == null) return null;
@@ -118,14 +125,7 @@ function setLedgerLine(ledger: Partial<Record<FiscalLedgerLine, Array<number | n
   ledger[line] = ledger[line] ? sumStrictSeries([ledger[line] as Array<number | null>, series], length) : [...series];
 }
 
-/**
- * Preserve directly reported payable quantity as the canonical downstream
- * production quantity. For gross-metal-value reports we retain the directly
- * reported metal-in-product quantity as evidence and encode only the
- * dimensionless payable/gross factor into the engine. This avoids the old
- * mined→grade→recovery rounding chain while ensuring Project/Corporate/Tier do
- * not accidentally treat gross concentrate metal as payable production.
- */
+/** Preserve directly reported payable quantity as canonical downstream production. */
 function resolveCommercialQuantities(raw: ProjectJsonV3, length: number): {
   payabilityFactorByMetal: Record<string, Array<number | null>>;
   actualPayableQtyByMetal: Record<string, Array<number | null>>;
@@ -218,6 +218,7 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
     for (const component of components) setLedgerLine(fiscalLedgerUSD, lineByCategory[component.category], component.seriesUSD, length);
   } else if (sellingModel.mode !== 'NONE') throw new Error('economics.sellingModel.mode must be NONE, AGGREGATE or COMPONENTS for runtime.');
 
+  const scenarioLeg = options.fiscalScenario ?? options.taxScenario ?? 'runtime';
   let taxRate: number | null = null;
   let taxCashFlowUSD: Array<number | null> | undefined;
   let taxLossCarryforward = false;
@@ -227,10 +228,11 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
     if (!finite(taxModel.taxRate) || taxModel.taxRate < 0 || taxModel.taxRate > 0.6) throw new Error('economics.taxModel.taxRate must be finite within [0, 0.6].');
     taxRate = taxModel.taxRate;
     taxLossCarryforward = taxModel.lossCarryforward === true;
-  } else if (taxModel.mode === 'LOCKED_SERIES') taxCashFlowUSD = assertSeries(taxModel.taxCashFlowUSD, length, 'economics.taxModel.taxCashFlowUSD');
-  else if (taxModel.mode === 'REPORT_LOCKED_WITH_RUNTIME_PROXY') {
-    const taxScenario = options.taxScenario ?? 'runtime';
-    if (taxScenario === 'report') taxCashFlowUSD = assertSeries(taxModel.reportTaxCashFlowUSD, length, 'economics.taxModel.reportTaxCashFlowUSD');
+  } else if (taxModel.mode === 'LOCKED_SERIES') {
+    if (scenarioLeg !== 'report') throw new Error('economics.taxModel LOCKED_SERIES is report/scenario locked and cannot be reused for normal runtime without an explicit runtime proxy.');
+    taxCashFlowUSD = assertSeries(taxModel.taxCashFlowUSD, length, 'economics.taxModel.taxCashFlowUSD');
+  } else if (taxModel.mode === 'REPORT_LOCKED_WITH_RUNTIME_PROXY') {
+    if (scenarioLeg === 'report') taxCashFlowUSD = assertSeries(taxModel.reportTaxCashFlowUSD, length, 'economics.taxModel.reportTaxCashFlowUSD');
     else {
       if (!isRecord(taxModel.runtime) || taxModel.runtime.method !== 'NOMINAL_RATE_WITH_LOSS_CARRYFORWARD') throw new Error('economics.taxModel.runtime.method must be NOMINAL_RATE_WITH_LOSS_CARRYFORWARD.');
       if (!finite(taxModel.runtime.taxRate) || taxModel.runtime.taxRate < 0 || taxModel.runtime.taxRate > 0.6) throw new Error('economics.taxModel.runtime.taxRate must be finite within [0, 0.6].');
@@ -240,21 +242,48 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
   } else throw new Error('economics.taxModel.mode must be FLAT_RATE, LOCKED_SERIES or REPORT_LOCKED_WITH_RUNTIME_PROXY for runtime.');
 
   let fiscalTakeRules: FiscalTakeRule[] = [];
+  let lockedRevenueFiscal: Array<number | null> | undefined;
   let lockedOperatingFiscal: Array<number | null> | undefined;
   let preTaxChargesUSD: Array<number | null> | undefined;
   let postTaxChargesUSD: Array<number | null> | undefined;
   const fiscalTakeModel = raw.economics.fiscalTakeModel;
   if (!isRecord(fiscalTakeModel)) throw new Error('economics.fiscalTakeModel is required.');
+  const applyLockedFiscal = (series: Array<number | null>, placement: unknown): void => {
+    if (placement === 'REVENUE_DEDUCTION') lockedRevenueFiscal = addSeries(lockedRevenueFiscal, series, length);
+    else if (placement === 'OPERATING_EXPENSE') lockedOperatingFiscal = addSeries(lockedOperatingFiscal, series, length);
+    else if (placement === 'PRE_TAX_CHARGE') preTaxChargesUSD = addSeries(preTaxChargesUSD, series, length);
+    else if (placement === 'POST_TAX_CHARGE') postTaxChargesUSD = addSeries(postTaxChargesUSD, series, length);
+    else throw new Error(`Unsupported locked fiscal placement=${String(placement)}.`);
+  };
+
   if (fiscalTakeModel.mode === 'RULES') {
     if (!Array.isArray(fiscalTakeModel.items)) throw new Error('economics.fiscalTakeModel.items must be an array in RULES mode.');
-    fiscalTakeRules = fiscalTakeModel.items as FiscalTakeRule[];
+    fiscalTakeRules = [...(fiscalTakeModel.items as FiscalTakeRule[])];
+    const dynamicIds = new Set(fiscalTakeRules.map((item) => item?.id).filter((id): id is string => typeof id === 'string' && id.length > 0));
+    const lockedIds = new Set<string>();
+    const reportLockedItems = fiscalTakeModel.reportLockedItems ?? [];
+    if (!Array.isArray(reportLockedItems)) throw new Error('economics.fiscalTakeModel.reportLockedItems must be an array or null.');
+    for (const [index, item] of reportLockedItems.entries()) {
+      if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id.trim()) throw new Error(`economics.fiscalTakeModel.reportLockedItems[${index}].id must be non-empty.`);
+      if (dynamicIds.has(item.id) || lockedIds.has(item.id)) throw new Error(`economics.fiscalTakeModel contains duplicate fiscal id=${item.id}.`);
+      lockedIds.add(item.id);
+      if (scenarioLeg === 'report') {
+        const series = assertSeries(item.reportFiscalTakeUSD, length, `economics.fiscalTakeModel.reportLockedItems[${index}].reportFiscalTakeUSD`, { nonNegative: true });
+        applyLockedFiscal(series, item.placement);
+      } else {
+        if (!item.runtimeProxyRule) throw new Error(`Fiscal take ${item.id} is report-locked and has no runtimeProxyRule; normal Project/Corporate/Compare Stocks runtime must fail closed.`);
+        if (dynamicIds.has(item.runtimeProxyRule.id)) throw new Error(`runtimeProxyRule id=${item.runtimeProxyRule.id} collides with a dynamic fiscal rule id.`);
+        dynamicIds.add(item.runtimeProxyRule.id);
+        fiscalTakeRules.push(item.runtimeProxyRule);
+      }
+    }
   } else if (fiscalTakeModel.mode === 'LOCKED_SERIES') {
+    if (scenarioLeg !== 'report') throw new Error('economics.fiscalTakeModel LOCKED_SERIES is scenario-limited and cannot be reused in normal runtime without a dynamic proxy.');
     const locked = assertSeries(fiscalTakeModel.fiscalTakeUSD, length, 'economics.fiscalTakeModel.fiscalTakeUSD', { nonNegative: true });
-    if (fiscalTakeModel.placement === 'OPERATING_EXPENSE') lockedOperatingFiscal = locked;
-    else if (fiscalTakeModel.placement === 'PRE_TAX_CHARGE') preTaxChargesUSD = locked;
-    else if (fiscalTakeModel.placement === 'POST_TAX_CHARGE') postTaxChargesUSD = locked;
-    else throw new Error('LOCKED_SERIES fiscalTake placement must be OPERATING_EXPENSE, PRE_TAX_CHARGE or POST_TAX_CHARGE.');
+    applyLockedFiscal(locked, fiscalTakeModel.placement);
   } else if (fiscalTakeModel.mode !== 'NONE') throw new Error('economics.fiscalTakeModel.mode must be NONE, RULES or LOCKED_SERIES for runtime.');
+
+  if (lockedRevenueFiscal) sellingCostsUSD = sumStrictSeries([sellingCostsUSD, lockedRevenueFiscal], length);
 
   const { payabilityFactorByMetal, actualPayableQtyByMetal } = resolveCommercialQuantities(raw, length);
   const syntheticV2 = {
@@ -309,8 +338,9 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
     costModel: raw.economics.costModel,
     sellingModel: raw.economics.sellingModel,
     fiscalTakeModel: raw.economics.fiscalTakeModel,
+    fiscalScenarioUsed: scenarioLeg,
     taxModel: raw.economics.taxModel,
-    taxScenarioUsed: options.taxScenario ?? 'runtime',
+    taxScenarioUsed: scenarioLeg,
     verification: raw.verification ?? null,
   };
   return parsed;

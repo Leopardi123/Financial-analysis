@@ -17,6 +17,12 @@ export type ProjectV3ReconciliationResult = {
   reportIRRPostTax: number;
   modelIRRPostTax: number | null;
   irrRelativeDifference: number | null;
+  reportNPVPreTaxUSD: number | null;
+  modelNPVPreTaxUSD: number | null;
+  npvPreTaxRelativeDifference: number | null;
+  reportIRRPreTax: number | null;
+  modelIRRPreTax: number | null;
+  irrPreTaxRelativeDifference: number | null;
   toleranceRelative: number;
   hardChecks: Array<{ check: string; status: 'PASS' | 'FAIL'; detail: string }>;
   diagnostics: string[];
@@ -82,12 +88,14 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   if (!report) throw new Error('project_json_v3 verification.report is required for report reconciliation.');
   if (!finite(report.discountRate) || report.discountRate <= 0 || report.discountRate > 0.25) throw new Error('verification.report.discountRate must be within (0, 0.25].');
   if (!finite(report.reportNPVPostTaxUSD) || !finite(report.reportIRRPostTax)) throw new Error('verification.report requires finite reportNPVPostTaxUSD and reportIRRPostTax.');
+  if (report.reportNPVPreTaxUSD != null && !finite(report.reportNPVPreTaxUSD)) throw new Error('verification.report.reportNPVPreTaxUSD must be finite or null.');
+  if (report.reportIRRPreTax != null && !finite(report.reportIRRPreTax)) throw new Error('verification.report.reportIRRPreTax must be finite or null.');
   const tolerance = finite(report.toleranceRelative) ? report.toleranceRelative : 0.02;
   if (!(tolerance > 0 && tolerance <= 0.1)) throw new Error('verification.report.toleranceRelative must be within (0, 0.1].');
 
-  // Report reconciliation is calendar-independent and explicitly selects the
-  // report-locked tax leg of a hybrid tax model. Normal runtime selects proxy tax.
-  const parsed = parseProjectJsonV3(raw, { requireRuntimePlacement: false, taxScenario: 'report' });
+  // Report reconciliation is calendar-independent and explicitly selects report-locked
+  // fiscal/tax legs. Normal runtime selects source-defined dynamic rules/proxies.
+  const parsed = parseProjectJsonV3(raw, { requireRuntimePlacement: false, taxScenario: 'report', fiscalScenario: 'report' });
   const requiredKeys = [...new Set(Object.values(raw.metals.priceKeyByMetal))].sort();
   const suppliedKeys = Object.keys(report.priceDeckByKey).sort();
   const missing = requiredKeys.filter((key) => !finite(report.priceDeckByKey[key]) || report.priceDeckByKey[key] <= 0);
@@ -133,6 +141,27 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   hardChecks.push({ check: 'npv_reconciliation', status: finite(npvDiff) && Math.abs(npvDiff) <= tolerance ? 'PASS' : 'FAIL', detail: `report=${report.reportNPVPostTaxUSD}; model=${modelNPV ?? 'null'}; relDiff=${npvDiff ?? 'null'}; tolerance=${tolerance}` });
   hardChecks.push({ check: 'irr_reconciliation', status: finite(irrDiff) && Math.abs(irrDiff) <= tolerance ? 'PASS' : 'FAIL', detail: `report=${report.reportIRRPostTax}; model=${modelIRR ?? 'null'}; relDiff=${irrDiff ?? 'null'}; tolerance=${tolerance}` });
 
+  let modelNPVPreTax: number | null = null;
+  let modelIRRPreTax: number | null = null;
+  let npvPreTaxDiff: number | null = null;
+  let irrPreTaxDiff: number | null = null;
+  const reportNPVPreTax = report.reportNPVPreTaxUSD ?? null;
+  const reportIRRPreTax = report.reportIRRPreTax ?? null;
+  if (output && (reportNPVPreTax != null || reportIRRPreTax != null)) {
+    const tax = output.phase1.taxUSD;
+    const preTaxFcff = fcff.map((value, t) => finite(value) && finite(tax[t]) ? (value as number) + (tax[t] as number) : null);
+    modelNPVPreTax = npv(preTaxFcff, report.discountRate, report.discountConvention);
+    modelIRRPreTax = preTaxFcff.every(finite) ? computeIrr(preTaxFcff, report.discountRate).selectedRoot : null;
+  }
+  if (reportNPVPreTax != null) {
+    npvPreTaxDiff = relativeDifference(modelNPVPreTax, reportNPVPreTax);
+    hardChecks.push({ check: 'npv_pre_tax_reconciliation', status: finite(npvPreTaxDiff) && Math.abs(npvPreTaxDiff) <= tolerance ? 'PASS' : 'FAIL', detail: `report=${reportNPVPreTax}; model=${modelNPVPreTax ?? 'null'}; relDiff=${npvPreTaxDiff ?? 'null'}; tolerance=${tolerance}` });
+  }
+  if (reportIRRPreTax != null) {
+    irrPreTaxDiff = relativeDifference(modelIRRPreTax, reportIRRPreTax);
+    hardChecks.push({ check: 'irr_pre_tax_reconciliation', status: finite(irrPreTaxDiff) && Math.abs(irrPreTaxDiff) <= tolerance ? 'PASS' : 'FAIL', detail: `report=${reportIRRPreTax}; model=${modelIRRPreTax ?? 'null'}; relDiff=${irrPreTaxDiff ?? 'null'}; tolerance=${tolerance}` });
+  }
+
   return {
     status: hardChecks.every((check) => check.status === 'PASS') ? 'VERIFIED' : 'NOT_VERIFIED',
     sourceId: report.sourceId,
@@ -146,6 +175,12 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
     reportIRRPostTax: report.reportIRRPostTax,
     modelIRRPostTax: modelIRR,
     irrRelativeDifference: irrDiff,
+    reportNPVPreTaxUSD: reportNPVPreTax,
+    modelNPVPreTaxUSD: modelNPVPreTax,
+    npvPreTaxRelativeDifference: npvPreTaxDiff,
+    reportIRRPreTax,
+    modelIRRPreTax,
+    irrPreTaxRelativeDifference: irrPreTaxDiff,
     toleranceRelative: tolerance,
     hardChecks,
     diagnostics,

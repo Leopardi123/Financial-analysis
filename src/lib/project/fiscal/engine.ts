@@ -4,6 +4,7 @@ import type {
   FiscalRateDefinition,
   FiscalTakeEngineInput,
   FiscalTakeEngineOutput,
+  FiscalTakeFormulaRule,
   FiscalTakeRule,
 } from './types.ts';
 
@@ -85,7 +86,7 @@ function rateAtT(
 }
 
 function ruleBaseAtT(
-  rule: FiscalTakeRule,
+  rule: FiscalTakeFormulaRule,
   t: number,
   input: FiscalTakeEngineInput,
   expectedLength: number,
@@ -124,12 +125,22 @@ function addToPlacement(
   else series[t] = (series[t] as number) + value;
 }
 
+function isLockedSeriesRule(rule: FiscalTakeRule): rule is Extract<FiscalTakeRule, { lockedSeriesUSD: Array<number | null> }> {
+  return 'lockedSeriesUSD' in rule;
+}
+
 /**
  * Deterministic fiscal-take engine.
  *
- * Rules may read only canonical upstream ledger lines supplied by Project. They
- * cannot reference arbitrary JSON fields or another fiscal rule's output, which
- * prevents hidden circular definitions (royalty -> EBIT -> royalty).
+ * Formula rules may read only canonical upstream ledger lines supplied by
+ * Project. They cannot reference arbitrary JSON fields or another fiscal
+ * rule's output, which prevents hidden circular definitions.
+ *
+ * A source-locked series may coexist with formula rules. This is needed for a
+ * report that, for example, has a reconstructable NSR plus a separately
+ * reported profit/margin mining take whose legal tax base cannot be faithfully
+ * reconstructed from disclosed data. The locked item remains visibly
+ * scenario-limited instead of being disguised as site OPEX or selling cost.
  */
 export function computeFiscalTake(input: FiscalTakeEngineInput): FiscalTakeEngineOutput {
   const length = input.masterN + 1;
@@ -150,6 +161,24 @@ export function computeFiscalTake(input: FiscalTakeEngineInput): FiscalTakeEngin
     if (!['REVENUE_DEDUCTION', 'OPERATING_EXPENSE', 'PRE_TAX_CHARGE', 'POST_TAX_CHARGE'].includes(rule.placement)) {
       throw new Error(`fiscalTake rule ${rule.id} has unsupported placement=${String(rule.placement)}.`);
     }
+
+    if (isLockedSeriesRule(rule)) {
+      if (!Array.isArray(rule.lockedSeriesUSD) || rule.lockedSeriesUSD.length !== length) {
+        throw new Error(`fiscalTake locked rule ${rule.id}.lockedSeriesUSD length must equal masterN+1.`);
+      }
+      const series = rule.lockedSeriesUSD.map((value, t) => {
+        if (value === null) return null;
+        if (!finite(value) || value < 0) throw new Error(`fiscalTake locked rule ${rule.id}.lockedSeriesUSD[${t}] must be null or finite >= 0.`);
+        return value;
+      });
+      for (let t = 0; t < length; t += 1) {
+        addToPlacement(rule.placement, { revenueDeductionUSD, operatingExpenseUSD, preTaxChargeUSD, postTaxChargeUSD }, t, series[t]);
+      }
+      byRuleUSD[rule.id] = series;
+      diagnostics.push(`fiscalTake id=${rule.id} placement=${rule.placement} source=LOCKED_SERIES scenarioLimited=true`);
+      continue;
+    }
+
     if (!rule.base || typeof rule.base.line !== 'string') throw new Error(`fiscalTake rule ${rule.id} requires base.line.`);
     if (rule.start_t != null && (!Number.isInteger(rule.start_t) || rule.start_t < 0 || rule.start_t > input.masterN)) {
       throw new Error(`fiscalTake rule ${rule.id}.start_t must be within 0..masterN.`);

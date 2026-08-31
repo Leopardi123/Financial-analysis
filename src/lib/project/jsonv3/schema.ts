@@ -35,11 +35,38 @@ export type ProjectJsonV3SellingModel =
   | { mode: 'AGGREGATE'; sellingCostsUSD: Array<number | null> }
   | { mode: 'COMPONENTS'; components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3SellingComponentCategory>> };
 
+export type ProjectJsonV3ReportLockedFiscalTakeItem = {
+  id: string;
+  label?: string | null;
+  reportFiscalTakeUSD: Array<number | null>;
+  placement: 'REVENUE_DEDUCTION' | 'OPERATING_EXPENSE' | 'PRE_TAX_CHARGE' | 'POST_TAX_CHARGE';
+  /**
+   * Optional simplified dynamic rule for normal Spot/Bear/runtime scenarios.
+   * Report reconciliation always uses reportFiscalTakeUSD instead.
+   * If omitted, normal runtime fails closed rather than silently reusing the report-locked series.
+   */
+  runtimeProxyRule?: FiscalTakeRule | null;
+  sourceId?: string | null;
+  pageOrTable?: string | null;
+  notes?: string | null;
+};
+
 export type ProjectJsonV3FiscalTakeModel =
   | { mode: 'UNKNOWN' }
   | { mode: 'NONE' }
-  | { mode: 'RULES'; items: FiscalTakeRule[] }
-  | { mode: 'LOCKED_SERIES'; fiscalTakeUSD: Array<number | null>; placement: 'OPERATING_EXPENSE' | 'PRE_TAX_CHARGE' | 'POST_TAX_CHARGE' };
+  | {
+      mode: 'RULES';
+      /** Source-faithful dynamic fiscal rules that apply in both report and runtime scenarios. */
+      items: FiscalTakeRule[];
+      /** Individually report-locked takes may coexist with dynamic rules without becoming a second fiscal model. */
+      reportLockedItems?: ProjectJsonV3ReportLockedFiscalTakeItem[] | null;
+    }
+  | {
+      mode: 'LOCKED_SERIES';
+      fiscalTakeUSD: Array<number | null>;
+      placement: 'REVENUE_DEDUCTION' | 'OPERATING_EXPENSE' | 'PRE_TAX_CHARGE' | 'POST_TAX_CHARGE';
+      notes?: string | null;
+    };
 
 export type ProjectJsonV3TaxModel =
   | { mode: 'UNKNOWN' }
@@ -101,6 +128,8 @@ export type ProjectJsonV3ReportVerification = {
   priceDeckByKey: Record<string, number>;
   reportNPVPostTaxUSD: number;
   reportIRRPostTax: number;
+  reportNPVPreTaxUSD?: number | null;
+  reportIRRPreTax?: number | null;
   toleranceRelative?: number;
   reportInitialCapexUSD?: number | null;
   reportSustainingCapexUSD?: number | null;

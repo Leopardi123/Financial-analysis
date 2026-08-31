@@ -1,3 +1,4 @@
+import '../../jsonv3/__tests__/vizcachitasPfs.test.ts';
 import { computeFiscalTake } from '../engine.ts';
 import type { FiscalTakeRule } from '../types.ts';
 
