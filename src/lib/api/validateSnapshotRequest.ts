@@ -16,19 +16,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function v3ValidationProxy(rawJson: Record<string, unknown>): Record<string, unknown> {
   const time = isRecord(rawJson.time) ? rawJson.time : {};
-  const masterN = time.masterN;
-  const productionStartPeriod = time.productionStartPeriod;
-  const dates = Array.isArray(time.periodEndDatesUtc) ? time.periodEndDatesUtc : [];
-  const productionStartYear = Number.isInteger(productionStartPeriod)
-    && typeof dates[productionStartPeriod as number] === 'string'
-    ? Number(String(dates[productionStartPeriod as number]).slice(0, 4))
-    : null;
+  const runtimePlacement = isRecord(time.runtimePlacement) ? time.runtimePlacement : {};
   return {
     version: 'project_json_v2',
     time: {
-      masterN,
-      productionStartPeriod,
-      productionStartYear,
+      masterN: time.masterN,
+      productionStartPeriod: time.productionStartPeriod,
+      productionStartYear: runtimePlacement.productionStartYear,
     },
   };
 }
@@ -39,8 +33,10 @@ function v3ValidationProxy(rawJson: Record<string, unknown>): Record<string, unk
  * The legacy validator still validates all corporate/request fields. V3 project
  * documents are independently parsed through the canonical project parser, then
  * represented by a minimal V2 time proxy only while the legacy request-shape
- * checks run. The original V3 document is restored before the snapshot pipeline
- * receives the validated request, so Project/Corporate always calculate from V3.
+ * checks run. The proxy uses the sourced V3 runtime placement; relative report
+ * economics remain untouched. The original V3 document is restored before the
+ * snapshot pipeline receives the validated request, so Project/Corporate always
+ * calculate from V3.
  */
 export function validateSnapshotRequest(body: unknown): ReturnType<typeof validateSnapshotRequestLegacy> {
   if (!isRecord(body) || !Array.isArray(body.projects)) {
