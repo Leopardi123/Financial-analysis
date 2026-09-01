@@ -45,17 +45,28 @@ function scaleWindowForReportFixture(raw: ProjectJsonV3): Tier1ScaleWindow {
   });
 }
 
-for (const fixture of [VIZCACHITAS_PFS_V3, BERG_PFS_V3, WARINTZA_PFS_V3, COPPER_CREEK_PEA_V3]) {
-  const scale = scaleWindowForReportFixture(fixture);
-  const projectName = fixture.meta?.projectName ?? fixture.meta?.projectId ?? 'project';
+const moGoldenCases: Array<{
+  fixture: ProjectJsonV3;
+  combinedEquivalent: number;
+  moEquivalent: number;
+}> = [
+  { fixture: VIZCACHITAS_PFS_V3, combinedEquivalent: 2.306319333333333, moEquivalent: 0.4976 },
+  { fixture: BERG_PFS_V3, combinedEquivalent: 2.2377290042566664, moEquivalent: 0.9797595192 },
+  { fixture: WARINTZA_PFS_V3, combinedEquivalent: 3.1626266666666667, moEquivalent: 0.958 },
+  { fixture: COPPER_CREEK_PEA_V3, combinedEquivalent: 0.62396115129, moEquivalent: 0.09344002822 },
+];
+
+for (const expected of moGoldenCases) {
+  const scale = scaleWindowForReportFixture(expected.fixture);
+  const projectName = expected.fixture.meta?.projectName ?? expected.fixture.meta?.projectId ?? 'project';
   const mo = scale.products.Mo;
 
   assert.ok(mo, `${projectName}: Mo must remain visible in the selected sustained scale window`);
   assert.equal(mo.scored, true, `${projectName}: accepted Mo=10 kt/year policy must be scored`);
   assert.equal(mo.threshold, 10_000, `${projectName}: Mo threshold must remain 10 kt/year`);
   assert.equal(mo.thresholdUnit, 'tonne');
-  assert.ok(typeof mo.equivalent === 'number' && mo.equivalent > 0, `${projectName}: payable Mo must contribute positively to scale`);
-  assert.ok(typeof scale.combinedEquivalent === 'number' && scale.combinedEquivalent >= mo.equivalent, `${projectName}: combined scale must include Mo contribution`);
+  assert.ok(typeof mo.equivalent === 'number' && Math.abs(mo.equivalent - expected.moEquivalent) < 1e-10, `${projectName}: payable Mo scale contribution changed unexpectedly`);
+  assert.ok(typeof scale.combinedEquivalent === 'number' && Math.abs(scale.combinedEquivalent - expected.combinedEquivalent) < 1e-10, `${projectName}: combined scale changed unexpectedly`);
 }
 
 const bergScale = scaleWindowForReportFixture(BERG_PFS_V3);
@@ -67,7 +78,8 @@ assert.ok(arcticScale.products.Zn, 'Arctic: Zn must remain visible');
 assert.equal(arcticScale.products.Zn.scored, true);
 assert.equal(arcticScale.products.Zn.threshold, 150_000);
 assert.equal(arcticScale.products.Zn.thresholdUnit, 'tonne');
-assert.ok(typeof arcticScale.products.Zn.equivalent === 'number' && arcticScale.products.Zn.equivalent > 0);
+assert.ok(typeof arcticScale.products.Zn.equivalent === 'number' && Math.abs(arcticScale.products.Zn.equivalent - 0.5426818426018734) < 1e-10);
+assert.ok(typeof arcticScale.combinedEquivalent === 'number' && Math.abs(arcticScale.combinedEquivalent - 1.6430524341015067) < 1e-10);
 
 for (const fixture of [VIZCACHITAS_PFS_V3, BERG_PFS_V3, WARINTZA_PFS_V3, COPPER_CREEK_PEA_V3, ARCTIC_FS_V3]) {
   const scale = scaleWindowForReportFixture(fixture);
