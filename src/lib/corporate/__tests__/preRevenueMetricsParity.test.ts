@@ -109,7 +109,7 @@ function legacyMetrics(snapshot: CorporateSnapshotWithValuationSeries, metals: s
   const targetRaw = marker
     ? finite(marker.value_mid_if_any)
       ? marker.value_mid_if_any
-      : (marker.value_low + marker.value_high) / 2
+      : ((marker.value_low as number) + (marker.value_high as number)) / 2
     : null;
   const targetPrice = finite(targetRaw) ? targetRaw * scale : null;
   const targetYear = markerYear(marker);
