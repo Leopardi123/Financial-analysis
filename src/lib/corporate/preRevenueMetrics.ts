@@ -31,7 +31,7 @@ export type CorporatePreRevenueReferenceMetalMetrics = {
   metal: string;
   unit: 'oz' | 't';
   capexPerAnnualEqUSD: number | null;
-  lomEqPerShare: number | null;
+  tenYearEqPerShare: number | null;
   marketCapPerTenYearEqUSD: number | null;
   marketCapPerLomEqUSD: number | null;
   evPerLomEqUSD: number | null;
@@ -261,7 +261,7 @@ export function deriveCorporatePreRevenueMetrics(args: {
       metal,
       unit: eq.unit,
       capexPerAnnualEqUSD: eq.status === 'OK' && finite(initialCapexUSD) && finite(eq.annualEq) && eq.annualEq > 0 ? initialCapexUSD / eq.annualEq : null,
-      lomEqPerShare: eq.status === 'OK' && finite(sharesPostFinancing) && sharesPostFinancing > 0 && finite(eq.lomEq) ? eq.lomEq / sharesPostFinancing : null,
+      tenYearEqPerShare: eq.status === 'OK' && finite(sharesPostFinancing) && sharesPostFinancing > 0 && finite(eq.tenYearEq) ? eq.tenYearEq / sharesPostFinancing : null,
       marketCapPerTenYearEqUSD: eq.status === 'OK' && finite(marketCapUSD) && finite(eq.tenYearEq) && eq.tenYearEq > 0 ? marketCapUSD / eq.tenYearEq : null,
       marketCapPerLomEqUSD: eq.status === 'OK' && finite(marketCapUSD) && finite(eq.lomEq) && eq.lomEq > 0 ? marketCapUSD / eq.lomEq : null,
       evPerLomEqUSD: eq.status === 'OK' && finite(enterpriseValueUSD) && finite(eq.lomEq) && eq.lomEq > 0 ? enterpriseValueUSD / eq.lomEq : null,
