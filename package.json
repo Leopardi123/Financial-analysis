@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "postinstall": "node scripts/finalize-project-price-source.mjs",
     "prebuild": "npm run test:tier && npm run test:investment-score && npm run test:project-tax && npm run test:project-v3 && npm run test:imf-project-price && npm run test:production-start && npm run test:snapshot-cashflow && npm run test:project-grid && npm run test:corporate-financing && npm run test:pre-revenue-corporate",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
