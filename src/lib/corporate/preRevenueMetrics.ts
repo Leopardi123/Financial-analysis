@@ -1,9 +1,15 @@
 import type { CorporateSnapshot } from './snapshot/types.ts';
 import { getPriceKeyDefinition } from '../prices/keys.ts';
+import { UNIT_CONSTANTS } from '../prices/units/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical } from '../units/conversion.ts';
-
-const LB_PER_TONNE = 2204.6226218;
+import {
+  computePreRevenuePNavPostFinancing,
+  computePreRevenuePeakSixTimesValuePerShare,
+  normalizeManualExtraShares,
+  preRevenueExtraShareScale,
+  preRevenuePostFinancingShares,
+} from './preRevenueValuation.ts';
 
 export type CorporateSnapshotWithValuationSeries = CorporateSnapshot & {
   corporateValuationTimeSeries?: {
@@ -71,7 +77,7 @@ function metalRecordValue<T>(record: Record<string, T> | undefined, metal: strin
 function outputEqUnitAndDivisor(metal: string): { unit: 'oz' | 't'; divisor: number } {
   const canonicalQtyUnit = canonicalUnitForMetal(metal);
   if (canonicalQtyUnit === 'toz') return { unit: 'oz', divisor: 1 };
-  if (canonicalQtyUnit === 'lb') return { unit: 't', divisor: LB_PER_TONNE };
+  if (canonicalQtyUnit === 'lb') return { unit: 't', divisor: UNIT_CONSTANTS.LB_PER_TONNE };
   return { unit: 't', divisor: 1 };
 }
 
@@ -105,37 +111,11 @@ function canonicalMarkerTarget(marker: ValuationMarker | null): number | null {
   return finite(marker.value_low) && finite(marker.value_high) ? (marker.value_low + marker.value_high) / 2 : null;
 }
 
-function extraShareScale(snapshot: CorporateSnapshotWithValuationSeries, extraShares: number): number {
-  if (!(extraShares > 0)) return 1;
-  const sharesPostFinancing = snapshot.financing?.shares_post_financing;
-  if (!finite(sharesPostFinancing) || sharesPostFinancing <= 0) return 1;
-  return sharesPostFinancing / (sharesPostFinancing + extraShares);
-}
-
-function postFinancingShares(snapshot: CorporateSnapshotWithValuationSeries, extraShares: number): number | null {
-  const modeledShares = snapshot.financing?.shares_post_financing;
-  if (!finite(modeledShares) || modeledShares <= 0) return null;
-  const manualShares = Number.isSafeInteger(extraShares) && extraShares >= 0 ? extraShares : 0;
-  return modeledShares + manualShares;
-}
-
 function targetCurrencyToUsd(snapshot: CorporateSnapshotWithValuationSeries, value: number | null): number | null {
   if (!finite(value)) return null;
   const fx = readFinite(snapshot.fx_USD_to_TargetCurrency);
   if (!finite(fx) || fx <= 0) return null;
   return value / fx;
-}
-
-function peakSixTimesValuePerShare(snapshot: CorporateSnapshotWithValuationSeries, scale = 1): number | null {
-  const rows = snapshot.corporateValuationTimeSeries?.rows;
-  if (!Array.isArray(rows)) return null;
-  let peak: number | null = null;
-  for (const row of rows) {
-    if (!finite(row.evEbitda6xPerShare)) continue;
-    const adjusted = row.evEbitda6xPerShare * scale;
-    peak = peak === null ? adjusted : Math.max(peak, adjusted);
-  }
-  return peak;
 }
 
 function canonicalProductionYears(snapshot: CorporateSnapshotWithValuationSeries): number | null {
@@ -250,9 +230,9 @@ export function deriveCorporatePreRevenueMetrics(args: {
   referenceMetals?: string[];
 }): CorporatePreRevenueMetrics {
   const { snapshot } = args;
-  const extraShares = Number.isSafeInteger(args.manualExtraShares) && (args.manualExtraShares ?? 0) >= 0 ? (args.manualExtraShares ?? 0) : 0;
+  const extraShares = normalizeManualExtraShares(args.manualExtraShares ?? 0);
   const price = readFinite(args.currentPriceTargetCurrency);
-  const scale = extraShareScale(snapshot, extraShares);
+  const scale = preRevenueExtraShareScale(snapshot, extraShares);
   const marker = nextRelevantProjectMarker(snapshot, args.valuationYear);
   const rawTarget = canonicalMarkerTarget(marker);
   const targetPrice = finite(rawTarget) ? rawTarget * scale : null;
@@ -261,15 +241,12 @@ export function deriveCorporatePreRevenueMetrics(args: {
   const annualizedReturnToTarget = finite(targetPrice) && finite(price) && price > 0 && finite(yearsToProduction) && yearsToProduction > 0
     ? (targetPrice / price) ** (1 / yearsToProduction) - 1
     : null;
-  const peak6xValuePerShare = peakSixTimesValuePerShare(snapshot, scale);
-  const sharesPostFinancing = postFinancingShares(snapshot, extraShares);
+  const peak6xValuePerShare = computePreRevenuePeakSixTimesValuePerShare(snapshot, extraShares);
+  const sharesPostFinancing = preRevenuePostFinancingShares(snapshot, extraShares);
   const initialCapexUSD = targetCurrencyToUsd(snapshot, marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null);
   const marketCapUSD = targetCurrencyToUsd(snapshot, snapshot.MarketCap_TargetCurrency);
   const enterpriseValueUSD = targetCurrencyToUsd(snapshot, snapshot.EV_TargetCurrency);
-  const nav = readFinite(snapshot.NAV_today_TargetCurrency);
-  const pNavPostFinancing = finite(price) && price >= 0 && finite(sharesPostFinancing) && sharesPostFinancing > 0 && finite(nav) && nav > 0
-    ? (price * sharesPostFinancing) / nav
-    : null;
+  const pNavPostFinancing = computePreRevenuePNavPostFinancing(snapshot, price, extraShares);
 
   const equivalentByMetal: Record<string, EquivalentMetalMetrics> = {};
   const byReferenceMetal: Record<string, CorporatePreRevenueReferenceMetalMetrics> = {};
