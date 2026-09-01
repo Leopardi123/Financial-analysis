@@ -5,7 +5,6 @@ import { S_AND_P_CO_PRODUCT_C1_CU_DEFINITION, assessCuC1DefinitionReadiness } fr
 
 const M = 1_000_000;
 const raw = BERG_PFS_V3;
-const start = raw.time.productionStartPeriod;
 const length = raw.time.masterN + 1;
 
 assert.equal(raw.streamsByMetal, null, 'Berg has no stream contract, so generic stream-treatment uncertainty is not project-applicable.');
@@ -30,8 +29,9 @@ const royaltyCadM = [
 ];
 const royaltyUSD = operatingCadM(royaltyCadM);
 
-// Table 22-4 exposes exact product-level net revenue rows. This is materially
-// stronger evidence than Vizcachitas, where selling/payability is aggregated.
+// Table 22-4 exposes published annual product-level net revenue rows. This is
+// materially stronger project evidence than Vizcachitas, where the comparable
+// selling/payability line is aggregated across products.
 const netRevenueCadMByProduct = {
   Cu: [1363.6, 1751.5, 1221.0, 1501.9, 1887.5, 1320.1, 974.0, 1091.6, 801.1, 908.7, 659.6, 928.4, 985.7, 758.4, 1116.7, 1262.8, 1071.2, 940.1, 875.9, 741.5, 951.1, 927.3, 753.9, 813.1, 676.1, 606.8, 735.8, 401.6],
   Mo: [572.7, 581.6, 384.8, 433.7, 759.9, 837.2, 661.1, 457.8, 405.8, 523.3, 162.4, 592.3, 505.7, 249.3, 423.9, 658.4, 696.2, 618.4, 590.4, 426.9, 645.1, 762.9, 575.8, 711.7, 499.7, 491.4, 677.0, 568.3],
@@ -86,10 +86,10 @@ const grossRevenueAllocatedCuC1 = reportTotalC1PoolUSD * grossCuShare / (reportP
 assert.ok(Math.abs(grossRevenueAllocatedCuC1 - 1.951929844320298) < 1e-12);
 assert.ok(Math.abs(grossRevenueAllocatedCuC1 - reportCuEqC1) < 0.0001, 'Berg CuEq C1 should match gross-revenue pro-rata Cu allocation to rounding precision.');
 
-// Table 22-4 also publishes product-level NET revenue. Applying the generic
-// allocator period by period therefore requires no guessed price or selling-cost
-// decomposition for Berg. This remains a diagnostic until the S&P component
-// boundary and 2024 cost-vintage alignment are verified.
+// Table 22-4 also publishes product-level NET revenue at the PFS report deck.
+// The allocator can therefore execute a source-locked report-deck diagnostic
+// without guessing a per-product selling-cost split. This does NOT close the
+// benchmark allocation-price/revenue-basis question for the 2024 S&P curve.
 const allocation = allocateTier1CoProductCost({
   components: [{
     id: 'berg-report-c1-pool',
@@ -116,23 +116,21 @@ assert.ok(Math.abs(aggregateNetRevenueDiagnosticC1 - 1.9131478227692833) < 1e-12
 assert.ok(grossRevenueAllocatedCuC1 - aggregateNetRevenueDiagnosticC1 > 0.03, 'Gross-equivalent and net-revenue allocation must not be treated as interchangeable.');
 
 // Year 1 is an additional denominator identity check: the published by-product
-// C1 row (-0.34) is reproduced only on the payable-Cu quantity shown in Table 22-4.
+// C1 row (-0.34) is reproduced on the payable-Cu quantity shown in Table 22-4.
 const year1CostPoolUSD = (615.8 + 156.8 + 22.3) * M * BERG_CAD_TO_USD;
 const year1SecondaryGrossRevenueUSD = (604.6 + 215.7 + 80.9) * M * BERG_CAD_TO_USD;
 const year1ByProductC1 = (year1CostPoolUSD - year1SecondaryGrossRevenueUSD) / (228 * M);
-assert.ok(Math.abs(year1ByProductC1 - (-0.340346052631579)) < 1e-12);
+assert.ok(Math.abs(year1ByProductC1 - (-0.34034649122807037)) < 1e-12);
 assert.ok(Math.abs(year1ByProductC1 - (-0.34)) < 0.005);
 const year1CuEqC1 = year1CostPoolUSD / (367 * M);
-assert.ok(Math.abs(year1CuEqC1 - 1.5811356948228883) < 1e-12);
+assert.ok(Math.abs(year1CuEqC1 - 1.5811362397820161) < 1e-12);
 assert.ok(Math.abs(year1CuEqC1 - 1.58) < 0.005);
 
-const readiness = assessCuC1DefinitionReadiness(
-  S_AND_P_CO_PRODUCT_C1_CU_DEFINITION,
-  { hasStreams: false, hasExactAllocationRevenueVector: true },
-);
+const readiness = assessCuC1DefinitionReadiness(S_AND_P_CO_PRODUCT_C1_CU_DEFINITION, { hasStreams: false });
 assert.deepEqual(readiness, {
   status: 'NOT_VERIFIED',
   blockers: [
+    'exact allocation revenue/price vector',
     'full current C1 component boundary',
     'project-to-benchmark cost-vintage alignment',
   ],
