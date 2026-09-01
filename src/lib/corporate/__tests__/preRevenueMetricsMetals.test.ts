@@ -1,25 +1,24 @@
 import assert from 'node:assert/strict';
+import { UNIT_CONSTANTS } from '../../prices/units/types.ts';
 import {
   deriveCorporatePreRevenueMetrics,
   type CorporateSnapshotWithValuationSeries,
 } from '../preRevenueMetrics.ts';
-
-const LB_PER_TONNE = 2204.6226218;
 
 const metalPrices: Record<string, { key: string; price: number; unit: string; expectedLomEq: number; expectedUnit: 'oz' | 't' }> = {
   Au: { key: 'XAU_USD_TOZ', price: 100, unit: 'USD_toz', expectedLomEq: 30, expectedUnit: 'oz' },
   Ag: { key: 'XAG_USD_TOZ', price: 20, unit: 'USD_toz', expectedLomEq: 150, expectedUnit: 'oz' },
   Pt: { key: 'XPT_USD_TOZ', price: 25, unit: 'USD_toz', expectedLomEq: 120, expectedUnit: 'oz' },
   Pd: { key: 'XPD_USD_TOZ', price: 50, unit: 'USD_toz', expectedLomEq: 60, expectedUnit: 'oz' },
-  Cu: { key: 'CU_USD_LB', price: 2, unit: 'USD_lb', expectedLomEq: 1500 / LB_PER_TONNE, expectedUnit: 't' },
-  Zn: { key: 'ZN_USD_LB', price: 1, unit: 'USD_lb', expectedLomEq: 3000 / LB_PER_TONNE, expectedUnit: 't' },
-  Pb: { key: 'PB_USD_LB', price: 1.5, unit: 'USD_lb', expectedLomEq: 2000 / LB_PER_TONNE, expectedUnit: 't' },
-  Ni: { key: 'NI_USD_LB', price: 5, unit: 'USD_lb', expectedLomEq: 600 / LB_PER_TONNE, expectedUnit: 't' },
-  Sn: { key: 'SN_USD_LB', price: 10, unit: 'USD_lb', expectedLomEq: 300 / LB_PER_TONNE, expectedUnit: 't' },
+  Cu: { key: 'CU_USD_LB', price: 2, unit: 'USD_lb', expectedLomEq: 1500 / UNIT_CONSTANTS.LB_PER_TONNE, expectedUnit: 't' },
+  Zn: { key: 'ZN_USD_LB', price: 1, unit: 'USD_lb', expectedLomEq: 3000 / UNIT_CONSTANTS.LB_PER_TONNE, expectedUnit: 't' },
+  Pb: { key: 'PB_USD_LB', price: 1.5, unit: 'USD_lb', expectedLomEq: 2000 / UNIT_CONSTANTS.LB_PER_TONNE, expectedUnit: 't' },
+  Ni: { key: 'NI_USD_LB', price: 5, unit: 'USD_lb', expectedLomEq: 600 / UNIT_CONSTANTS.LB_PER_TONNE, expectedUnit: 't' },
+  Sn: { key: 'SN_USD_LB', price: 10, unit: 'USD_lb', expectedLomEq: 300 / UNIT_CONSTANTS.LB_PER_TONNE, expectedUnit: 't' },
   Mo: { key: 'MO_USD_TONNE', price: 20000, unit: 'USD_tonne', expectedLomEq: 0.15, expectedUnit: 't' },
   Fe: { key: 'IRON_ORE_USD_TONNE', price: 100, unit: 'USD_tonne', expectedLomEq: 30, expectedUnit: 't' },
   Al: { key: 'AL_USD_TONNE', price: 2000, unit: 'USD_tonne', expectedLomEq: 1.5, expectedUnit: 't' },
-  U: { key: 'URANIUM_USD_LB', price: 50, unit: 'USD_lb', expectedLomEq: 60 / LB_PER_TONNE, expectedUnit: 't' },
+  U: { key: 'URANIUM_USD_LB', price: 50, unit: 'USD_lb', expectedLomEq: 60 / UNIT_CONSTANTS.LB_PER_TONNE, expectedUnit: 't' },
 };
 
 const priceKeyByMetal = Object.fromEntries(Object.entries(metalPrices).map(([metal, spec]) => [metal, spec.key]));
