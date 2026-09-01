@@ -75,8 +75,8 @@ function tierAssessment(args: {
   assert.equal(result.inputs.downsideRobustnessPass, true, 'Score-3 downside robustness reuses the canonical Tier cycle gate during v0 calibration');
   assert.equal(result.sources.downsideRobustnessPass, 'TIER1_PRE_REVENUE_CYCLE_GATE_V0_CALIBRATION');
   assert.equal(result.inputs.rawScore, null);
-  assert.equal(result.sources.pNav, 'COMPARE_STOCKS_PNAV_PF');
-  assert.equal(result.sources.peak6xVsPrice, 'COMPARE_STOCKS_PEAK_6X_VS_PRICE');
+  assert.equal(result.sources.pNav, 'CORPORATE_PNAV_POST_FINANCING');
+  assert.equal(result.sources.peak6xVsPrice, 'CORPORATE_PEAK_6X_VS_CURRENT_PRICE');
 }
 
 {
