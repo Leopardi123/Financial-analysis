@@ -69,9 +69,16 @@ The public SNL Mine Economics description says its cost analysis covers:
 
 It also describes **total cash costs** as including mine-site cash costs, milling/processing costs, by-product credits, royalties and production taxes.
 
-This is important methodology evidence, but it is **not sufficient to equate historical `total cash cost` with the exact current `Cash Operating Costs / C1` curve used by Santa Cruz**. Metric names differ and the current curve carries the additional note `excluding processing facilities`.
+A contemporaneous public transcript of the same SNL cost-curve material further defines **realisation charges** as off-site treatment and refining charges plus freight and marketing costs.
 
-Accordingly, this evidence narrows the search space but does not authorize a full current C1 component boundary.
+Sources:
+
+- `https://www.prweb.com/releases/for_immediate_release_latest_data_from_snl_metals_mining_shows_copper_mine_production_costs_continue_to_fall/prweb12597716.htm`
+- `https://studyres.com/doc/7744499/latest-data-from-snl-metals-and-mining-shows`
+
+This is important methodology evidence, but it is **not sufficient to equate historical SNL `total cash cost` with the exact current `Cash Operating Costs / C1` curve used by Santa Cruz**. Metric names differ and the current curve carries the additional note `excluding processing facilities`.
+
+Accordingly, the historical evidence now establishes that SNL explicitly modelled realization charges, TC/RC, freight/marketing, royalties and production taxes in its broader mine-cost framework. It still does **not** establish which of those lines belong inside the exact 2024-current C1 numerator used for Tier.
 
 ## 4. Santa Cruz definition control
 
@@ -99,9 +106,13 @@ It is **not sufficient evidence that every mine on S&P's current curve excludes 
 
 ## 5. Supporting industry evidence, not S&P authority
 
-Other current mining disclosures demonstrate why Tier must keep the boundary explicit rather than assume that the label `C1` is standardized. For example, Central Asia Metals states that its C1 includes direct production costs, local administration and realization charges such as freight and treatment charges, while royalties, stream commitments, taxes/duties and D&A are excluded. Other issuers use different reconciliations.
+Other current mining disclosures demonstrate why Tier must keep the boundary explicit rather than assume that the label `C1` is standardized. For example, current copper disclosures can include treatment, refining and other realization charges in C1, while royalties may be reported outside C1. Ero Copper's 2025 reconciliation, for example, has mining, processing, indirect, by-product credits and `Treatment, refining and other` inside copper C1.
 
-This confirms that `C1` alone is not a sufficient schema contract.
+Source:
+
+- `https://www.sec.gov/Archives/edgar/data/1853860/000162828026017765/a2025eroannualreport.htm`
+
+This is supporting industry evidence only. It is not authority for the S&P benchmark definition and therefore cannot close the component-boundary blocker.
 
 ## 6. Current Tier definition contract
 
@@ -117,14 +128,34 @@ The evidence now supports locking these parts:
 | Common-cost allocation principle | Verified at high level | net-revenue share |
 | Benchmark data year | Verified | 2024 actual |
 | Exact allocation price/revenue vector | **Ej verifierad** | fail closed |
-| Exact stream treatment | **Ej verifierad** | fail closed |
+| Exact stream treatment | **Ej verifierad when applicable** | fail closed for streamed projects; not a blocker when a project has no stream |
 | Full current C1 component inclusion/exclusion | **Ej verifierad** | fail closed |
-| Project-cost-year normalization to 2024 | **Ej verifierad** unless same vintage | fail closed |
+| Project-cost-year normalization to 2024 | **Ej verifierad** unless source-locked/aligned | fail closed |
 
 ## 7. Implementation consequence
 
-The generic allocator may now safely support `MIXED_REVENUE_WEIGHTED` as the high-level co-product mechanism, provided the allocation-revenue vector is supplied explicitly and source-locked.
+The generic allocator may safely support `MIXED_REVENUE_WEIGHTED` as the high-level co-product mechanism, provided the allocation-revenue vector is supplied explicitly and source-locked.
 
 The allocator must not decide which Project cost components belong in the benchmark numerator. It must not choose spot prices as allocation prices. It must not decide stream treatment. Those belong to a separate benchmark-definition contract.
 
-Until all mandatory definition fields are verified, the externally benchmarked Cu Cost Tier remains **Ej verifierad**, even if a canonical allocation can be mathematically computed.
+The readiness guard may treat `stream treatment` as **not applicable** for a specific project only when canonical Project evidence confirms that no stream/encumbrance affects product revenue. This does not mark the global S&P stream methodology as verified.
+
+Until all mandatory definition fields applicable to the project are verified, the externally benchmarked Cu Cost Tier remains **Ej verifierad**, even if a canonical allocation can be mathematically computed.
+
+## 8. Method audit · second pass, September 2026
+
+A second targeted search did **not** find public current S&P documentation that closes the remaining universal C1 boundary or the exact 2024 allocation-price vector.
+
+What changed after the second pass:
+
+- historical SNL evidence now explicitly identifies realisation charges as off-site treatment/refining plus freight and marketing;
+- the historical Mine Economics framework is therefore known to model these charges rather than ignoring them;
+- current S&P Mine Economics still presents itself as standardized mine-level cost/economic data, but the public product page does not expose the exact current C1 component formula;
+- the Santa Cruz control continues to support mining + processing + G&A as a compatible core C1 bridge and royalty exclusion for that specific project comparison;
+- no public source found in this pass authorizes us to generalize Santa Cruz's royalty/off-site treatment to every observation in the current 2024 S&P curve.
+
+Current S&P product page:
+
+- `https://www.spglobal.com/market-intelligence/en/solutions/products/mine-economics`
+
+**Result:** the external definition is materially narrower than before, but the full current C1 component boundary and exact net-revenue price vector remain **Ej verifierade**. The correct implementation remains fail-closed.
