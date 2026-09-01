@@ -1,6 +1,6 @@
 # Tier Cu cost golden-case synthesis
 
-Status: **five source-locked report bridges implemented; external S&P Cu Cost Tier remains NOT_VERIFIED.**
+Status: **five source-locked report bridges + generic normalization kernel implemented; external S&P Cu Cost Tier remains NOT_VERIFIED.**
 
 This note summarizes what the Vizcachitas, Berg, Warintza, Arctic and Copper Creek report audits prove about a generic polymetallic Cu cost engine. It does not activate a Cu percentile gate and it does not modify project economics.
 
@@ -41,12 +41,33 @@ Copper Creek also source-locks the denominator as payable Cu: the first producti
 8. **Keep benchmark compatibility separate from report reconstruction.** A report cost can be reconstructed exactly while still being incompatible with the external percentile curve.
 9. **Reported checkpoints are evidence, not parallel economics.** They validate canonical rows but may not overwrite the project's single-source cash-flow model.
 
+## Generic runtime normalization kernel
+
+`src/lib/tier1/costNormalization.ts` implements the common arithmetic established by the five cases. The caller must explicitly provide:
+
+- metric identity and reported label;
+- report cost basis;
+- signed numerator terms (`ADD` / `SUBTRACT`) with source/page provenance;
+- denominator product, semantic basis, physical unit and target unit;
+- period scope (`ALL_PERIODS`, positive denominator periods, first N positive denominator periods, or explicit periods);
+- cost base year when actually verified;
+- report checkpoint/tolerance when one exists;
+- source conflicts when the report is internally inconsistent.
+
+The kernel performs dimensional denominator conversion only, preserves negative by-product costs, preserves terminal costs when the selected scope includes them, and fails closed on missing provenance, null/invalid selected values, mismatched series lengths, duplicate component ids, zero denominator or a failed report checkpoint.
+
+`costNormalizationReportFixtures.test.ts` runs the same normalizer across all five source patterns. Project-specific bridge tests are retained as **source-mapping evidence/oracles**; the normalization mathematics itself now has one generic implementation.
+
+`assessNormalizedCuC1BenchmarkReadiness()` is a second fail-closed stage. A normalized number can reach the S&P Cu C1 benchmark only when metric, co-product basis, payable-Cu denominator, USD/lb unit, cost vintage, source-conflict state and the external S&P definition contract all agree. The current S&P contract still has unresolved blockers, so this function deliberately returns `NOT_VERIFIED` today.
+
+The runtime Tier route is **not allowed to infer a normalization recipe from component names**. Until a source-locked project recipe/reference layer is stored, the generic kernel is available for runtime use but the Cu cost gate remains `Ej verifierad`. This prevents the new generic engine from reintroducing project-specific guesses through hidden heuristics.
+
 ## Resulting architecture
 
 The safe sequence is:
 
-`canonical project economics -> report-defined cost bridge -> definition/denominator check -> optional co-product allocation using verified net-revenue evidence -> cost-vintage normalization using a verified method -> external benchmark comparison`.
+`canonical project economics -> explicit source-locked normalization recipe -> generic report-defined cost normalization -> definition/denominator check -> optional co-product allocation using verified net-revenue evidence -> cost-vintage normalization using a verified method -> external benchmark comparison`.
 
 Every arrow is fail-closed. A project-specific hidden formula, implicit price assumption, inferred stream treatment, guessed off-site split or silent vintage conversion is prohibited.
 
-The five golden cases therefore support the current design: the generic allocator can exist independently of benchmark readiness, while the S&P-compatible Cu Cost Tier remains **Ej verifierad** until the outstanding benchmark definition and vintage requirements are source-locked.
+The five golden cases therefore support the current design: the generic normalization and allocation kernels can exist independently of benchmark readiness, while the S&P-compatible Cu Cost Tier remains **Ej verifierad** until the outstanding benchmark definition/vintage requirements and project recipe layer are source-locked.
