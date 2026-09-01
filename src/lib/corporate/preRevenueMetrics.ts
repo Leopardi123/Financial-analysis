@@ -4,6 +4,7 @@ import { UNIT_CONSTANTS } from '../prices/units/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical } from '../units/conversion.ts';
 import { deriveCorporateProductionLife } from './preRevenueProductionLife.ts';
+import { deriveNextInitialCapexMilestone } from './preRevenueInitialCapex.ts';
 import {
   computePreRevenuePNavPostFinancing,
   computePreRevenuePeakSixTimesValuePerShare,
@@ -47,6 +48,8 @@ export type CorporatePreRevenueMetrics = {
   paybackYears: number | null;
   lomYears: number | null;
   initialCapexUSD: number | null;
+  initialCapexMarkerYear: number | null;
+  initialCapexBasis: 'NEXT_PRODUCTION_MILESTONE_INCREMENTAL';
   sharesPostFinancing: number | null;
   marketCapUSD: number | null;
   enterpriseValueUSD: number | null;
@@ -244,7 +247,8 @@ export function deriveCorporatePreRevenueMetrics(args: {
     : null;
   const peak6xValuePerShare = computePreRevenuePeakSixTimesValuePerShare(snapshot, extraShares);
   const sharesPostFinancing = preRevenuePostFinancingShares(snapshot, extraShares);
-  const initialCapexUSD = targetCurrencyToUsd(snapshot, marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null);
+  const capexMilestone = deriveNextInitialCapexMilestone(snapshot, args.valuationYear);
+  const initialCapexUSD = targetCurrencyToUsd(snapshot, capexMilestone.initialCapexTargetCurrency);
   const marketCapUSD = targetCurrencyToUsd(snapshot, snapshot.MarketCap_TargetCurrency);
   const enterpriseValueUSD = targetCurrencyToUsd(snapshot, snapshot.EV_TargetCurrency);
   const pNavPostFinancing = computePreRevenuePNavPostFinancing(snapshot, price, extraShares);
@@ -254,6 +258,7 @@ export function deriveCorporatePreRevenueMetrics(args: {
   const byReferenceMetal: Record<string, CorporatePreRevenueReferenceMetalMetrics> = {};
   const diagnostics: string[] = [];
   if (productionLife.diagnostic) diagnostics.push(`LOM: ${productionLife.diagnostic}`);
+  if (capexMilestone.diagnostic) diagnostics.push(`Initial CAPEX: ${capexMilestone.diagnostic}`);
   for (const metal of candidateMetals(snapshot, args.referenceMetals)) {
     const eq = deriveEquivalentMetalMetrics(snapshot, metal);
     equivalentByMetal[metal] = eq;
@@ -277,6 +282,8 @@ export function deriveCorporatePreRevenueMetrics(args: {
     paybackYears: readFinite(snapshot.Payback_real_years) ?? readFinite(snapshot.Payback_approx_years),
     lomYears: productionLife.lomYears,
     initialCapexUSD,
+    initialCapexMarkerYear: capexMilestone.markerYear,
+    initialCapexBasis: capexMilestone.basis,
     sharesPostFinancing,
     marketCapUSD,
     enterpriseValueUSD,
