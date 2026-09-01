@@ -33,6 +33,15 @@ export type Tier1ScaleAssessment = {
   combinedEquivalent: number | null;
 };
 
+export type Tier1ScaleWindow = Tier1ScaleAssessment & {
+  startYear: number | null;
+  endYear: number | null;
+  years: number | null;
+  averagesByProduct: Record<string, Tier1ScaleProductInput>;
+};
+
+const PRECIOUS_PRODUCT_IDS = new Set(['Au', 'Ag', 'Pt', 'Pd']);
+
 const LEGACY_SCALE_THRESHOLDS = Object.fromEntries(
   Object.entries(TIER1_PRODUCTION_THRESHOLDS).map(([product, row]) => [
     product,
@@ -108,6 +117,26 @@ export function normalizeTier1ScaleQuantity(args: {
 
   if (!isMassUnit(args.fromUnit)) return null;
   return convertMass(args.value, args.fromUnit, args.toUnit);
+}
+
+/**
+ * Canonical aggregation unit for physical discovery. This is deliberately not
+ * a Tier policy decision: precious metals aggregate in toz and all other mass
+ * products in tonnes. Product identity remains unchanged.
+ */
+export function normalizeDiscoveredScaleQuantity(args: {
+  product: string;
+  value: number;
+  unit: string;
+}): { value: number; unit: 'toz' | 'tonne' } | null {
+  const targetUnit: 'toz' | 'tonne' = PRECIOUS_PRODUCT_IDS.has(args.product) ? 'toz' : 'tonne';
+  const value = normalizeTier1ScaleQuantity({
+    product: args.product,
+    value: args.value,
+    fromUnit: args.unit,
+    toUnit: targetUnit,
+  });
+  return value === null ? null : { value, unit: targetUnit };
 }
 
 /**
@@ -199,4 +228,54 @@ export function assessTier1ScaleProducts(
     products,
     combinedEquivalent: scoredCount > 0 ? combined : null,
   };
+}
+
+/**
+ * Select the best contiguous sustained-scale window using all physical products
+ * for visibility and only threshold-enabled exact products for the score.
+ */
+export function bestSustainedTier1ScaleWindow(args: {
+  quantityByProductByYear: Map<string, Map<number, number>>;
+  unitByProduct: Map<string, string>;
+  productionYears: Set<number>;
+  sustainedScaleYears: number;
+}): Tier1ScaleWindow {
+  if (args.productionYears.size === 0) {
+    return { startYear: null, endYear: null, years: null, averagesByProduct: {}, products: {}, combinedEquivalent: null };
+  }
+
+  const years = [...args.productionYears].sort((a, b) => a - b);
+  const minYear = years[0];
+  const maxYear = years[years.length - 1];
+  const span = maxYear - minYear + 1;
+  const windowYears = Math.min(args.sustainedScaleYears, span);
+  let best: Tier1ScaleWindow | null = null;
+
+  for (let start = minYear; start <= maxYear - windowYears + 1; start += 1) {
+    const end = start + windowYears - 1;
+    const averagesByProduct: Record<string, Tier1ScaleProductInput> = {};
+
+    for (const [product, byYear] of args.quantityByProductByYear.entries()) {
+      const unit = args.unitByProduct.get(product);
+      if (!unit) continue;
+      let sum = 0;
+      for (let year = start; year <= end; year += 1) sum += byYear.get(year) ?? 0;
+      averagesByProduct[product] = { averageAnnualQuantity: sum / windowYears, unit };
+    }
+
+    const assessment = assessTier1ScaleProducts(averagesByProduct);
+    const candidate: Tier1ScaleWindow = {
+      startYear: start,
+      endYear: end,
+      years: windowYears,
+      averagesByProduct,
+      products: assessment.products,
+      combinedEquivalent: assessment.combinedEquivalent,
+    };
+    const candidateScore = candidate.combinedEquivalent ?? -Infinity;
+    const bestScore = best?.combinedEquivalent ?? -Infinity;
+    if (!best || candidateScore > bestScore) best = candidate;
+  }
+
+  return best ?? { startYear: null, endYear: null, years: null, averagesByProduct: {}, products: {}, combinedEquivalent: null };
 }
