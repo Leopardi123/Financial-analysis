@@ -53,10 +53,6 @@ export type CanonicalPreRevenueAdapterResult = {
   };
 };
 
-function finite(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
 function tierFromAssessment(assessment: Tier1PreRevenueAssessment | null): 1 | 2 | 3 | null {
   if (!assessment) return null;
   if (assessment.status === 'TIER_1') return 1;
