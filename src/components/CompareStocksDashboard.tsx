@@ -74,7 +74,7 @@ function metricGroups(referenceMetal: string): readonly MetricGroup[] {
     { label: 'RELATIV VÄRDERING', columns: [
       ['mcap10yAueq', `MCap / 10y ${eq}`, `Market cap i USD per canonical 10y ${eq}`],
       ['mcapLomAueq', `MCap / LOM ${eq}`, `Market cap i USD per canonical LOM ${eq}`],
-      ['evLomAueq', `EV / LOM ${eq}`, `Enterprise value i USD inklusive Corporate cash/debt/financing bridge per canonical LOM ${eq}`],
+      ['evLomAueq', `EV / LOM ${eq}`, 'n/a — EV-definitionen är i karantän. Ingen proxy används innan separat EV-audit har låst en apples-to-apples enterprise-basis.'],
     ] },
   ];
 }
@@ -126,7 +126,7 @@ function getMetric(row: PreRevenueCompany, key: MetricKey, referenceMetal: strin
     case 'aueqPerShare': return reference && finite(reference.lomEqPerShare) ? `${formatNumber(reference.lomEqPerShare, 4)} ${unit}/aktie` : '—';
     case 'mcap10yAueq': return reference && finite(reference.marketCapPerTenYearEqUSD) ? `${formatNumber(reference.marketCapPerTenYearEqUSD)} USD/${unit}` : '—';
     case 'mcapLomAueq': return reference && finite(reference.marketCapPerLomEqUSD) ? `${formatNumber(reference.marketCapPerLomEqUSD)} USD/${unit}` : '—';
-    case 'evLomAueq': return reference && finite(reference.evPerLomEqUSD) ? `${formatNumber(reference.evPerLomEqUSD)} USD/${unit}` : '—';
+    case 'evLomAueq': return 'n/a';
   }
 }
 
