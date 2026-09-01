@@ -62,9 +62,11 @@ const LEGACY_SCALE_THRESHOLDS = Object.fromEntries(
  * price source. Product ids are exact: U is not U3O8, W is not WO3, and Fe is
  * not saleable iron-ore product.
  *
- * Mo=10 kt payable Mo/year is an accepted Instrumentbrädan scale policy from
- * the research foundation in PR #516. U3O8 and WO3 remain deliberately absent
- * until their research recommendations are explicitly accepted as policy.
+ * Product-scale policy locked in PR #516:
+ * - Mo = 10 kt payable Mo/year
+ * - U3O8 = 5.0 Mlb recovered/payable U3O8/year
+ * - WO3 = 2,000 t recovered/payable WO3/year
+ * Existing Ni/Zn and other legacy scale thresholds remain unchanged.
  */
 export const TIER1_SCALE_THRESHOLDS: Readonly<Record<string, Tier1ScaleThreshold>> = {
   ...LEGACY_SCALE_THRESHOLDS,
@@ -73,6 +75,18 @@ export const TIER1_SCALE_THRESHOLDS: Readonly<Record<string, Tier1ScaleThreshold
     minimumAnnualQuantity: 10_000,
     unit: 'tonne',
     label: '10 kt Mo/år',
+  },
+  U3O8: {
+    product: 'U3O8',
+    minimumAnnualQuantity: 5_000_000,
+    unit: 'lb',
+    label: '5,0 Mlb U3O8/år',
+  },
+  WO3: {
+    product: 'WO3',
+    minimumAnnualQuantity: 2_000,
+    unit: 'tonne',
+    label: '2 000 t WO3/år',
   },
 };
 
