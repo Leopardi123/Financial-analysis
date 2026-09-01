@@ -11,18 +11,22 @@ const raw = WARINTZA_PFS_V3;
 const length = raw.time.masterN + 1;
 
 function sumSeries(values: readonly (number | null | undefined)[]): number {
-  return values.reduce((total, value) => total + (typeof value === 'number' && Number.isFinite(value) ? value : 0), 0);
+  let total = 0;
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) total += value;
+  }
+  return total;
 }
 
 const stream = raw.streamsByMetal?.Au;
 if (!stream) throw new Error('Warintza golden fixture must preserve the Royal Gold Au stream.');
 assert.equal(stream.deliveryMode, 'DIRECT_QTY_SERIES');
 assert.equal(stream.inputPayableBasis, 'POST_STREAM');
-assert.equal(stream.purchasePrice.kind, 'CUMULATIVE_QTY_TIERED_PCT_OF_SPOT');
-if (stream.purchasePrice.kind !== 'CUMULATIVE_QTY_TIERED_PCT_OF_SPOT') {
+const purchasePrice = stream.purchasePrice;
+if (!purchasePrice || purchasePrice.kind !== 'CUMULATIVE_QTY_TIERED_PCT_OF_SPOT') {
   throw new Error('Warintza Royal Gold purchase price must remain cumulative-quantity tiered.');
 }
-assert.deepEqual(stream.purchasePrice.tiers, [
+assert.deepEqual(purchasePrice.tiers, [
   { upToCumulativeQty: 90_000, value: 0.2 },
   { upToCumulativeQty: null, value: 0.6 },
 ]);
@@ -32,12 +36,14 @@ if (!report) throw new Error('Warintza golden fixture requires verification.repo
 const goldPriceSeries = report.priceDeckSeriesByKey?.XAU_USD_TOZ;
 if (!goldPriceSeries) throw new Error('Warintza report gold price series is required.');
 assert.equal(goldPriceSeries.length, length);
-assert.equal(stream.deliveredQtyByPeriod.length, length);
+const deliveredQtyByPeriod = stream.deliveredQtyByPeriod;
+if (!deliveredQtyByPeriod) throw new Error('Warintza direct stream-delivery quantity series is required.');
+assert.equal(deliveredQtyByPeriod.length, length);
 
 let cumulativeDeliveredAuOz = 0;
 let reconstructedStreamRevenueUSD = 0;
 for (let t = 0; t < length; t += 1) {
-  const deliveredOz = stream.deliveredQtyByPeriod[t] ?? 0;
+  const deliveredOz = deliveredQtyByPeriod[t] ?? 0;
   const goldPrice = goldPriceSeries[t] ?? 0;
   const firstTierRemainingOz = Math.max(0, 90_000 - cumulativeDeliveredAuOz);
   const firstTierOz = Math.min(deliveredOz, firstTierRemainingOz);
