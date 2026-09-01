@@ -22,7 +22,7 @@ const containedCu = raw.metals.metalInProductQtyByMetal?.Cu;
 const payableCu = raw.metals.payableQtyByMetal.Cu;
 const payableMo = raw.metals.payableQtyByMetal.Mo;
 const payableAg = raw.metals.payableQtyByMetal.Ag;
-assert.ok(containedCu && payableCu && payableMo && payableAg);
+if (!containedCu || !payableCu || !payableMo || !payableAg) throw new Error('Vizcachitas physical quantity series are required.');
 
 function reportDefinedC1Pool(t: number): number {
   // Section 21.2.3 defines Vizcachitas C1 as mining + processing. Table 22.7
@@ -32,7 +32,7 @@ function reportDefinedC1Pool(t: number): number {
 }
 
 const reportSiteC1PoolUSD = first8.reduce((sum, t) => sum + reportDefinedC1Pool(t), 0);
-const containedCuLb = first8.reduce((sum, t) => sum + ((containedCu?.[t] as number) ?? 0) * LB_PER_TONNE, 0);
+const containedCuLb = first8.reduce((sum, t) => sum + ((containedCu[t] as number) ?? 0) * LB_PER_TONNE, 0);
 const payableCuLb = first8.reduce((sum, t) => sum + ((payableCu[t] as number) ?? 0) * LB_PER_TONNE, 0);
 const reportBasisC1ProducedCu = reportSiteC1PoolUSD / containedCuLb;
 const samePoolOnPaidCu = reportSiteC1PoolUSD / payableCuLb;
@@ -51,22 +51,22 @@ const lomProductionPeriods = payableCu
   .filter(({ value, t }) => t >= start && typeof value === 'number' && value > 0)
   .map(({ t }) => t);
 const lomReportPoolUSD = lomProductionPeriods.reduce((sum, t) => sum + reportDefinedC1Pool(t), 0);
-const lomContainedCuLb = lomProductionPeriods.reduce((sum, t) => sum + (((containedCu?.[t] as number) ?? 0) * LB_PER_TONNE), 0);
+const lomContainedCuLb = lomProductionPeriods.reduce((sum, t) => sum + (((containedCu[t] as number) ?? 0) * LB_PER_TONNE), 0);
 const lomReportBasisC1 = lomReportPoolUSD / lomContainedCuLb;
 assert.ok(Math.abs(lomReportBasisC1 - 1.2411286741265457) < 1e-9);
 assert.ok(Math.abs(lomReportBasisC1 - 1.25) < 0.01, 'Rounded producing-period Table 22.7 rows should reconcile the report LOM C1 within one cent.');
 
 const verification = raw.verification?.report;
-assert.ok(verification, 'Vizcachitas report verification is required.');
-assert.equal(verification?.pricesPageOrTable, 'Table 22.1 p.351; Summary/Table 1.3 and Section 25.14 confirm Mo price basis');
-assert.equal(verification?.npvIrrPageOrTable, 'Table 22.8 p.363');
-assert.equal(verification?.discountRate, 0.08);
+if (!verification) throw new Error('Vizcachitas report verification is required.');
+assert.equal(verification.pricesPageOrTable, 'Table 22.1 p.351; Summary/Table 1.3 and Section 25.14 confirm Mo price basis');
+assert.equal(verification.npvIrrPageOrTable, 'Table 22.8 p.363');
+assert.equal(verification.discountRate, 0.08);
 
-const priceCu = verification?.priceDeckByKey.CU_USD_LB;
-const priceMo = verification?.priceDeckByKey.MO_USD_TONNE;
-const priceAg = verification?.priceDeckByKey.XAG_USD_TOZ;
+const priceCu: number = verification.priceDeckByKey.CU_USD_LB;
+const priceMo: number = verification.priceDeckByKey.MO_USD_TONNE;
+const priceAg: number = verification.priceDeckByKey.XAG_USD_TOZ;
 assert.equal(priceCu, 3.68);
-assert.ok(typeof priceMo === 'number' && priceMo > 0);
+assert.ok(priceMo > 0);
 assert.equal(priceAg, 21.79);
 
 let grossPayableRevenueCuUSD = 0;
@@ -74,10 +74,10 @@ let grossPayableRevenueMoUSD = 0;
 let grossPayableRevenueAgUSD = 0;
 let diagnosticAllocatedCuCostUSD = 0;
 for (const t of first8) {
-  const cuRevenue = (payableCu[t] as number) * LB_PER_TONNE * (priceCu as number);
-  const moRevenue = (payableMo[t] as number) * (priceMo as number);
-  const agRevenue = (payableAg[t] as number) * (priceAg as number);
-  const total = cuRevenue + moRevenue + agRevenue;
+  const cuRevenue: number = (payableCu[t] as number) * LB_PER_TONNE * priceCu;
+  const moRevenue: number = (payableMo[t] as number) * priceMo;
+  const agRevenue: number = (payableAg[t] as number) * priceAg;
+  const total: number = cuRevenue + moRevenue + agRevenue;
   assert.ok(total > 0);
   grossPayableRevenueCuUSD += cuRevenue;
   grossPayableRevenueMoUSD += moRevenue;
