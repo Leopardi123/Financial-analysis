@@ -1,19 +1,19 @@
 # Tier · Pre Revenue — polymetallisk cost- och scale-foundation
 
-Status: **RESEARCH / IMPLEMENTATION FOUNDATION — NOT YET A COST-TIER CLAIM**
+Status: **SCALE PHASE A IMPLEMENTED / COST RESEARCH FOUNDATION — NOT YET A COST-TIER CLAIM**
 
-Syfte: Bevara den fulla audit- och forskningsbilden för nästa Tier-arbetsblock så att arbetet kan fortsätta även om den pågående ChatGPT-tråden avslutas. Dokumentet beskriver vad som är verifierat, vad som saknas, varför nuvarande Tier-cost misslyckas för de fem golden testprojekten, och vilken arkitektur som krävs för att få en definitionssäker kostnadsposition utan att bryta project_json_v3 SSOT.
+Syfte: Bevara den fulla audit- och forskningsbilden för Tier-arbetet så att implementation och fortsatt cost-research kan fortsätta utan att tappa definitionsgränserna. Dokumentet beskriver vad som är verifierat, vad som saknas, varför nuvarande Tier-cost misslyckas för de fem golden testprojekten, och vilken arkitektur som krävs för att få en definitionssäker kostnadsposition utan att bryta project_json_v3 SSOT. Scale-delen är nu implementerad produktbaserat i PR #516.
 
 ## 1. Scope och icke-förhandlingsbara regler
 
 Detta arbete gäller **Compare Stocks → Pre Revenue → Tier** och omfattar framför allt:
 
-1. `Skala · metall för metall` ska visa samtliga fysiska projektmetaller som finns i canonical Project-data.
-2. Endast metaller med en explicit, beslutad Tier-produktionsgräns får bidra till `combinedScaleEquivalent`.
+1. `Skala · produkt för produkt` ska visa samtliga fysiska projektprodukter som finns i canonical Project-data.
+2. Endast produkter med en explicit, beslutad Tier-produktionsgräns får bidra till `combinedScaleEquivalent`.
 3. Kostnadsposition ska klassificeras mot en extern kostnadskurva endast när projektmåttet och benchmarken är definitionskompatibla.
 4. Rapporterade C1/AISC/cash-cost-värden är **evidence/checkpoints**, inte parallella ekonomiska inputs och inte manuella Tier-overrides.
 5. `project_json_v3` förblir single source för projektets ekonomiska dollarserier. Cost-allocation-semantik får beskriva hur en redan kanonisk kostnad allokeras mellan produkter, men får inte skapa en andra kostnadsledger.
-6. Gissa aldrig metallgränser, price keys, benchmarkdefinitioner, cost-basis eller kostnadskomponenter.
+6. Gissa aldrig produkt-/metallgränser, price keys, benchmarkdefinitioner, cost-basis eller kostnadskomponenter.
 
 ## 2. Golden cases i detta arbetsblock
 
@@ -27,44 +27,64 @@ De fem testprojekten är:
 
 De används inte bara som exempel utan som regression/golden cases för att bevisa att Tier-motorn kan hantera verkliga polymetalliska PFS/FS/PEA-modeller.
 
-## 3. Problem A — `Skala · metall för metall` tappar riktiga projektmetaller
+## 3. Problem A — scale tappade riktiga projektprodukter
 
-### 3.1 Nuvarande orsak
+### 3.1 Tidigare orsak — nu korrigerad i PR #516
 
-Tier har idag en hård typ/whitelist:
+Tier hade en hård typ/whitelist:
 
 `Au | Ag | Cu | Zn | Pb | Ni | Pt | Pd`
 
-och `TIER1_PRODUCTION_THRESHOLDS` finns endast för dessa metaller. Tier-routen filtrerar fysisk payable-produktion med `isTier1Metal(metal)` innan scale-output byggs.
+och `TIER1_PRODUCTION_THRESHOLDS` fanns endast för dessa metaller. Tier-routen filtrerade fysisk payable-produktion med `isTier1Metal(metal)` innan scale-output byggdes.
 
-Konsekvensen är att en metall kan finnas fullt ut i canonical Project-data, ha canonical quantity-unit och canonical price key, men ändå försvinna ur `Skala · metall för metall` bara därför att Tier-policy ännu inte har en skalegräns för metallen.
+Konsekvensen var att en produkt kunde finnas fullt ut i canonical Project-data, ha canonical quantity-unit och canonical price key, men ändå försvinna ur scale-output bara därför att Tier-cost/threshold-whitelisten inte innehöll produkten.
+
+PR #516 separerar nu fysisk product discovery från scale-policy och cost-benchmark-stöd. Fysisk payable production läses först; därefter avgör ett separat exakt product-id-register om produkten får bidra till combined scale.
 
 ### 3.2 Golden-case coverage
 
-- Vizcachitas: Cu, **Mo**, Ag → Mo faller bort.
-- Berg: Cu, **Mo**, Ag, Au → Mo faller bort.
-- Warintza: Cu, Au, Ag, **Mo** → Mo faller bort.
-- Arctic: Cu, Zn, Pb, Au, Ag → alla stöds redan av Tier-whitelisten.
-- Copper Creek: Cu, Ag, **Mo** → Mo faller bort.
+Tidigare felbild:
+
+- Vizcachitas: Cu, **Mo**, Ag → Mo föll bort.
+- Berg: Cu, **Mo**, Ag, Au → Mo föll bort.
+- Warintza: Cu, Au, Ag, **Mo** → Mo föll bort.
+- Arctic: Cu, Zn, Pb, Au, Ag → alla stöddes redan av Tier-whitelisten.
+- Copper Creek: Cu, Ag, **Mo** → Mo föll bort.
+
+Nuvarande regression i PR #516:
+
+- Mo är synligt och score-genererande i Vizcachitas, Berg, Warintza och Copper Creek.
+- Berg verifierar dessutom dimensionssäker `lb → tonne`-normalisering för payable Mo.
+- Arctic verifierar att befintlig Zn-policy 150 kt/år bevaras.
 
 ### 3.3 Beslutad arkitektur
 
 Separera:
 
-- **physical project metals**: alla metaller som faktiskt finns i payable production i canonical Project-data,
-- **Tier scale policy metals**: metaller med explicit beslutad fysisk Tier-1-gräns.
+- **physical project products**: alla faktiska payable-produkter som finns i canonical Project-data,
+- **Tier scale policy products**: exakta product-id:n med explicit beslutad fysisk Tier-1-gräns,
+- **Tier cost benchmark metals/products**: den separata mängd som har en definitionskompatibel extern cost-benchmark.
 
 Tier-output ska därför kunna visa exempelvis:
 
-- `Mo: 6.4 kt/år · Tier-gräns ej definierad`
+- `Mo: 6.4 kt/år · 0.64x mot 10 kt Mo/år`
+- `U3O8: fysisk produktion · ej poängsatt` om produkten finns men ingen aktiv scale-policy ännu finns.
 
-utan att Mo bidrar till combined scale.
+Detta är generiskt. Samma princip ska fungera för framtida Sn, U3O8, WO3, Al, järnmalmsprodukt osv. En price key eller fysisk produktion innebär **inte** automatiskt att en Tier-produktionsgräns eller cost benchmark finns.
 
-Detta ska vara generiskt. Samma princip ska fungera för framtida Sn, U, Al, järnmalm osv. En price key eller fysisk produktion innebär **inte** automatiskt att en Tier-produktionsgräns finns.
+### 3.4 Beslutad scale-policy och öppna kandidater
 
-### 3.4 Ej beslutat
+**Mo = 10 kt payable Mo/år är beslutad och implementerad i PR #516.**
 
-Ingen Mo-gräns är beslutad. Ingen sådan får uppfinnas i implementationen.
+Befintliga policygränser för bland annat **Ni = 40 kt/år** och **Zn = 150 kt/år** bevaras.
+
+Följande research recommendations är däremot ännu inte aktiva scale-policyer och ska därför förbli synliga men `ej poängsatta` tills de uttryckligen accepteras:
+
+- U3O8 = 5.0 Mlb recovered/payable U3O8/år,
+- WO3 = 2,000 t recovered/payable WO3/år,
+- iron ore = 25 Mt/år saleable/usable product.
+
+Hard product-identity guards gäller: `U != U3O8`, `W != WO3`, contained Fe != saleable iron-ore product och concentrate tonnes != recovered/payable product tonnes.
 
 ## 4. Problem B — kostnadsposition fungerar inte för våra fem Cu-primary golden cases
 
@@ -380,16 +400,25 @@ Befintligt:
 - benchmark compatibility guards,
 - five golden V3 projects with reconciled economics.
 
-Den centrala saknade länken är alltså **product-allocation semantics + full benchmark component contract + vintage alignment**.
+Nu också implementerat i PR #516:
+
+- generisk physical-product discovery före cost/threshold-filter,
+- separat scale threshold registry,
+- Mo = 10 kt/år,
+- samma sammanhängande 10-årsfönster över samtliga produkter,
+- generic `scaleProducts` output med visible/scored-separation,
+- golden scale-regressioner för Vizcachitas, Berg, Warintza, Copper Creek och Arctic.
+
+Den centrala saknade länken för **cost** är alltså **product-allocation semantics + full benchmark component contract + vintage alignment**.
 
 ## 14. Har vi det som krävs?
 
-### Ja — för att bygga rätt arkitektur och börja implementera
+### Ja — scale-arkitekturen är implementerad och cost-arkitekturen kan byggas vidare
 
 Vi har tillräckligt för att:
 
-- göra scale-output komplett för alla fysiska metaller,
-- separera visible metals från scored metals,
+- göra scale-output komplett för alla fysiska produkter,
+- separera visible products från scored products,
 - införa cost-allocation metadata utan att bryta SSOT,
 - bygga en generic co-product cost allocator,
 - använda payable Cu som denominator,
@@ -410,14 +439,15 @@ Implementation får därför byggas i steg där cost-resultatet kan vara `COMPUT
 
 ## 15. Rekommenderad implementation sequence
 
-### Phase A — scale completeness
+### Phase A — scale completeness — IMPLEMENTED IN PR #516
 
-- Introducera generisk physical-metal output från canonical payable production.
-- Bevara nuvarande `Tier1Metal`/threshold-policy separat.
-- UI visar alla projektmetaller.
-- Metaller utan threshold visas med fysisk produktion men `Tier-gräns ej definierad`.
-- Combined scale summerar endast threshold-enabled metals.
-- Golden regression: Mo ska synas för Vizcachitas, Berg, Warintza och Copper Creek men får inte bidra till combined scale innan Mo-policy finns.
+- Generisk physical-product output från canonical payable production är implementerad.
+- `Tier1Metal`/cost-policy hålls separat från fysisk product discovery.
+- UI visar alla verifierade projektprodukter.
+- Produkter utan threshold visas med fysisk produktion och `ej poängsatt`.
+- Combined scale summerar endast threshold-enabled exact product ids.
+- Mo = 10 kt payable Mo/år bidrar nu till combined scale.
+- Golden regressioner låser Mo i Vizcachitas, Berg, Warintza och Copper Creek samt Zn i Arctic.
 
 ### Phase B — allocation contract
 
@@ -473,10 +503,10 @@ Annars: `Ej verifierad` med exakt blocker.
 
 ## 16. Testkrav
 
-Minst följande tester ska finnas innan merge av implementation:
+Scale-kraven är nu implementerade; cost-kraven kvarstår innan cost-delen får mergeas som verifierad benchmarkfunktion:
 
-1. **All-metals scale visibility:** Mo syns i fyra golden cases.
-2. **No invented threshold:** Mo contribution till combined scale är 0/ignored med explicit status, inte implicit 0 som fysisk produktion.
+1. **All-products scale visibility — IMPLEMENTED:** Mo syns och score:as i fyra golden cases.
+2. **No invented threshold — IMPLEMENTED:** U3O8, WO3 och andra unsupported exact product ids kan vara synliga men bidrar inte till combined scale; Mo bidrar först efter explicit 10 kt-policy.
 3. **Allocation conservation:** sum allocated mixed cost == source mixed cost per period och LOM inom numerisk tolerans.
 4. **Direct cost isolation:** direct-to-Cu cost tilldelas 100 % Cu.
 5. **Revenue-weighting:** ändrade allocation prices ändrar shares för polymetalliska projekt men ändrar inte canonical Project FCFF.
@@ -531,17 +561,17 @@ Before declaring S&P-compatible Cu Cost Tier verified, search and source-lock:
 
 ## 19. Merge/implementation guard
 
-This documentation PR does **not** authorize a cost-Tier classification change by itself.
+Scale implementation i PR #516 är separat från den ännu ofullständiga cost-benchmark-claimen.
 
 Do not activate a Cu percentile gate merely because a number can be computed.
 
-A future implementation PR must distinguish clearly between:
+Cost-implementationen måste skilja tydligt mellan:
 
-- `canonical cost derivation computable`, and
+- `canonical cost derivation computable`, och
 - `external benchmark comparison verified`.
 
 Only the second may set Cost Tier 1/2/3.
 
 ---
 
-Handoff summary: **Vi har tillräcklig Project-data och kodstruktur för att bygga den polymetalliska co-product-bryggan korrekt. Vi saknar fortfarande vissa externa S&P-definitioner för att göra den slutliga benchmarkclaimen. Scale-problemet kan lösas omedelbart utan att invänta dessa cost-definitioner.**
+Handoff summary: **Scale-problemet är nu implementerat produktbaserat: fysisk produktion upptäcks generiskt, Mo=10 kt/år är aktiv policy och unsupported produkter förblir synliga men unscored. Vi har tillräcklig Project-data och kodstruktur för att bygga den polymetalliska co-product-bryggan korrekt, men saknar fortfarande vissa externa S&P-definitioner för den slutliga cost-benchmark-claimen.**
