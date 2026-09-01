@@ -104,4 +104,6 @@ const noFallback = deriveCorporatePreRevenueMetrics({ snapshot: noCorporateIrr, 
 assert.equal(noFallback.irr, null, 'Corporate derivation must not fall back to Project IRR');
 assert.ok(noFallback.diagnostics.some((message) => message.includes('no Project-engine fallback')));
 
+await import('./preRevenueMetricsParity.test.ts');
+
 console.log('preRevenueMetrics.test.ts passed');
