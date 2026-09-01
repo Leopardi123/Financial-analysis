@@ -3,6 +3,7 @@ import { getPriceKeyDefinition } from '../prices/keys.ts';
 import { UNIT_CONSTANTS } from '../prices/units/types.ts';
 import { canonicalUnitForMetal } from '../units/metalUnits.ts';
 import { convertPriceToCanonical } from '../units/conversion.ts';
+import { deriveCorporateProductionLife } from './preRevenueProductionLife.ts';
 import {
   computePreRevenuePNavPostFinancing,
   computePreRevenuePeakSixTimesValuePerShare,
@@ -118,11 +119,11 @@ function targetCurrencyToUsd(snapshot: CorporateSnapshotWithValuationSeries, val
   return value / fx;
 }
 
-function canonicalProductionYears(snapshot: CorporateSnapshotWithValuationSeries): number | null {
-  const payable = snapshot.aggregation?.payableAuEqOz_total;
-  if (!Array.isArray(payable)) return null;
-  const count = payable.filter((value) => finite(value) && value > 0).length;
-  return count > 0 ? count : null;
+function canonicalProductionLife(snapshot: CorporateSnapshotWithValuationSeries) {
+  return deriveCorporateProductionLife({
+    payableQtyByMetal: snapshot.series?.payableQtyByMetal,
+    corporateYearsByPeriod: snapshot.aggregation?.corporateYearsByPeriod,
+  });
 }
 
 function candidateMetals(snapshot: CorporateSnapshotWithValuationSeries, requested?: string[]): string[] {
@@ -247,10 +248,12 @@ export function deriveCorporatePreRevenueMetrics(args: {
   const marketCapUSD = targetCurrencyToUsd(snapshot, snapshot.MarketCap_TargetCurrency);
   const enterpriseValueUSD = targetCurrencyToUsd(snapshot, snapshot.EV_TargetCurrency);
   const pNavPostFinancing = computePreRevenuePNavPostFinancing(snapshot, price, extraShares);
+  const productionLife = canonicalProductionLife(snapshot);
 
   const equivalentByMetal: Record<string, EquivalentMetalMetrics> = {};
   const byReferenceMetal: Record<string, CorporatePreRevenueReferenceMetalMetrics> = {};
   const diagnostics: string[] = [];
+  if (productionLife.diagnostic) diagnostics.push(`LOM: ${productionLife.diagnostic}`);
   for (const metal of candidateMetals(snapshot, args.referenceMetals)) {
     const eq = deriveEquivalentMetalMetrics(snapshot, metal);
     equivalentByMetal[metal] = eq;
@@ -272,7 +275,7 @@ export function deriveCorporatePreRevenueMetrics(args: {
   return {
     irr,
     paybackYears: readFinite(snapshot.Payback_real_years) ?? readFinite(snapshot.Payback_approx_years),
-    lomYears: canonicalProductionYears(snapshot),
+    lomYears: productionLife.lomYears,
     initialCapexUSD,
     sharesPostFinancing,
     marketCapUSD,
