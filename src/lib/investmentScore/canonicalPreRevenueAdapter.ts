@@ -1,4 +1,8 @@
 import type { Tier1PreRevenueAssessment } from '../tier1/preRevenue.ts';
+import {
+  computePreRevenuePNavPostFinancing,
+  computePreRevenuePeakSixTimesVsPrice,
+} from '../corporate/preRevenueValuation.ts';
 import { assessValuationConvergence } from './valuationConvergence.ts';
 import type {
   InvestmentScoreInputs,
@@ -49,57 +53,6 @@ function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function validExtraShares(value: number): number {
-  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
-}
-
-function postFinancingShares(
-  snapshot: CorporateSnapshotForInvestmentScore,
-  manualExtraShares: number,
-): number | null {
-  const modeled = snapshot.financing?.shares_post_financing;
-  if (!finite(modeled) || modeled <= 0) return null;
-  return modeled + validExtraShares(manualExtraShares);
-}
-
-function pNavPostFinancing(
-  snapshot: CorporateSnapshotForInvestmentScore,
-  price: number | null,
-  manualExtraShares: number,
-): number | null {
-  const sharesPf = postFinancingShares(snapshot, manualExtraShares);
-  const nav = snapshot.NAV_today_TargetCurrency;
-  if (!finite(price) || price < 0 || !finite(sharesPf) || sharesPf <= 0 || !finite(nav) || nav <= 0) {
-    return null;
-  }
-  return (price * sharesPf) / nav;
-}
-
-function peakSixTimesVsPrice(
-  snapshot: CorporateSnapshotForInvestmentScore,
-  price: number | null,
-  manualExtraShares: number,
-): number | null {
-  if (!finite(price) || price <= 0) return null;
-  const rows = snapshot.corporateValuationTimeSeries?.rows;
-  if (!Array.isArray(rows)) return null;
-
-  const modeledShares = snapshot.financing?.shares_post_financing;
-  const extra = validExtraShares(manualExtraShares);
-  const scale = extra > 0 && finite(modeledShares) && modeledShares > 0
-    ? modeledShares / (modeledShares + extra)
-    : 1;
-
-  let peakPerShare: number | null = null;
-  for (const row of rows) {
-    const value = row?.evEbitda6xPerShare;
-    if (!finite(value)) continue;
-    const adjusted = value * scale;
-    peakPerShare = peakPerShare === null ? adjusted : Math.max(peakPerShare, adjusted);
-  }
-  return peakPerShare === null ? null : peakPerShare / price;
-}
-
 function canonicalPayableAuEqProductionYears(
   values: Array<number | null> | null | undefined,
 ): number | null {
@@ -146,10 +99,10 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
   const snapshot = args.snapshot;
 
   const pNav = snapshot
-    ? pNavPostFinancing(snapshot, args.priceCurrentTargetCurrency, args.manualExtraShares)
+    ? computePreRevenuePNavPostFinancing(snapshot, args.priceCurrentTargetCurrency, args.manualExtraShares)
     : null;
   const peak6xVsPrice = snapshot
-    ? peakSixTimesVsPrice(snapshot, args.priceCurrentTargetCurrency, args.manualExtraShares)
+    ? computePreRevenuePeakSixTimesVsPrice(snapshot, args.priceCurrentTargetCurrency, args.manualExtraShares)
     : null;
   const convergence = assessValuationConvergence({ pNav, peak6xVsPrice });
   const lomYears = snapshot
