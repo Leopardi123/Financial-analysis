@@ -1,11 +1,93 @@
-name: Nightly Refresh (Disabled)
+name: Temporary Corporate Snapshot Type Cleanup
 
-# Scheduling handled by Vercel Cron (vercel.json).
-on: []
+on:
+  push:
+    branches:
+      - feature/corporate-pre-revenue-metrics
+
+permissions:
+  contents: write
 
 jobs:
-  refresh:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Workflow disabled
-        run: echo "Nightly refresh scheduling is handled by Vercel Cron."
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/corporate-pre-revenue-metrics
+          fetch-depth: 0
+
+      - name: Remove local valuation-series compatibility aliases
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # 1) Corporate pre-revenue metrics consumes CorporateSnapshot directly.
+          p = Path('src/lib/corporate/preRevenueMetrics.ts')
+          s = p.read_text()
+          alias = """export type CorporateSnapshotWithValuationSeries = CorporateSnapshot & {\n  corporateValuationTimeSeries?: {\n    rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }>;\n  };\n};\n\n"""
+          if alias not in s:
+              raise SystemExit('preRevenueMetrics alias anchor not found')
+          s = s.replace(alias, '', 1).replace('CorporateSnapshotWithValuationSeries', 'CorporateSnapshot')
+          p.write_text(s)
+
+          # 2) Compare consumes the canonical CorporateSnapshot contract directly.
+          p = Path('src/components/CompareStocksDashboard.tsx')
+          s = p.read_text()
+          old_import = """import {\n  deriveCorporatePreRevenueMetrics,\n  type CorporatePreRevenueMetrics,\n  type CorporateSnapshotWithValuationSeries,\n} from '../lib/corporate/preRevenueMetrics.ts';\n"""
+          new_import = """import {\n  deriveCorporatePreRevenueMetrics,\n  type CorporatePreRevenueMetrics,\n} from '../lib/corporate/preRevenueMetrics.ts';\nimport type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';\n"""
+          if old_import not in s:
+              raise SystemExit('Compare import anchor not found')
+          s = s.replace(old_import, new_import, 1)
+          s = s.replace('CorporateSnapshotWithValuationSeries', 'CorporateSnapshot')
+          p.write_text(s)
+
+          # 3) Investment Score cell consumes the canonical CorporateSnapshot contract directly.
+          p = Path('src/components/investmentScore/InvestmentScoreCell.tsx')
+          s = p.read_text()
+          alias = """type SnapshotWithValuationSeries = CorporateSnapshot & Record<string, unknown> & {\n  corporateValuationTimeSeries?: { rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }> };\n};\n\n"""
+          if alias not in s:
+              raise SystemExit('InvestmentScoreCell alias anchor not found')
+          s = s.replace(alias, '', 1).replace('SnapshotWithValuationSeries', 'CorporateSnapshot')
+          p.write_text(s)
+          PY
+
+      - name: Verify no compatibility aliases remain in migrated consumers
+        shell: bash
+        run: |
+          if grep -R "CorporateSnapshotWithValuationSeries\|SnapshotWithValuationSeries" \
+            src/lib/corporate/preRevenueMetrics.ts \
+            src/components/CompareStocksDashboard.tsx \
+            src/components/investmentScore/InvestmentScoreCell.tsx; then
+            echo "Compatibility alias remains"
+            exit 1
+          fi
+
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Restore disabled workflow and commit cleanup
+        shell: bash
+        run: |
+          cat > .github/workflows/nightly-refresh.yml <<'EOF'
+          name: Nightly Refresh (Disabled)
+
+          # Scheduling handled by Vercel Cron (vercel.json).
+          on: []
+
+          jobs:
+            refresh:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Workflow disabled
+                  run: echo "Nightly refresh scheduling is handled by Vercel Cron."
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/corporate/preRevenueMetrics.ts src/components/CompareStocksDashboard.tsx src/components/investmentScore/InvestmentScoreCell.tsx .github/workflows/nightly-refresh.yml
+          git commit -m "Use Corporate snapshot contract in pre-revenue consumers"
+          git push origin HEAD:feature/corporate-pre-revenue-metrics
