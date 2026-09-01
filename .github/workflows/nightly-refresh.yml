@@ -1,100 +1,11 @@
-name: Temporary Project Price Grid Patch
+name: Nightly Refresh (Disabled)
 
-on:
-  push:
-    branches:
-      - feature/corporate-pre-revenue-metrics
-
-permissions:
-  contents: write
+# Scheduling handled by Vercel Cron (vercel.json).
+on: []
 
 jobs:
-  patch-project-price-grid:
-    if: github.actor != 'github-actions[bot]'
+  refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: feature/corporate-pre-revenue-metrics
-          fetch-depth: 0
-
-      - name: Patch grouped Project price rows and unit-safe display prices
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('src/components/SingleStockDashboard.tsx')
-          text = path.read_text()
-
-          old_price = """        priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},"""
-          new_price = """        // priceUsedByMetal_USD preserves the source price-key unit, which can differ
-        // from the payable quantity unit shown in this grid (for example USD/tonne vs lb).
-        // Derive the display price from the canonical snapshot revenue identity so the
-        // displayed price and displayed payable quantity always use matching units.
-        priceUSDByMetal: (() => {
-          const revenueByMetal = (projectSeriesRecord.revenueByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {};
-          return Object.fromEntries(
-            Object.entries(revenueByMetal).map(([metal, revenueSeries]) => {
-              const payableSeries = payableSeriesByMetal[metal] ?? [];
-              const displayPriceSeries = revenueSeries.map((revenue, t) => {
-                const quantity = payableSeries[t];
-                if (
-                  typeof revenue !== 'number'
-                  || !Number.isFinite(revenue)
-                  || typeof quantity !== 'number'
-                  || !Number.isFinite(quantity)
-                  || quantity === 0
-                ) return null;
-                return revenue / quantity;
-              });
-              return [metal, displayPriceSeries];
-            }),
-          );
-        })(),"""
-          if old_price not in text:
-              raise SystemExit('Expected priceUSDByMetal source block not found')
-          text = text.replace(old_price, new_price, 1)
-
-          payable_block = """      ...orderedMetals.map((metal) => {
-        const values = getSeries(payableSeriesByMetal[metal]);
-        const unit = payableUnits[metal];
-        const include = rowHasDisplayValue(values);
-        return {
-          label: `Payable ${metal} (${unit ?? '—'})`,
-          values: include ? values : null,
-        };
-      }),"""
-          price_rows = """      ...orderedMetals.map((metal) => {
-        const unit = payableUnits[metal] ?? '—';
-        const label = `Price ${metal} (USD/${unit})`;
-        const values = seriesByLabel.get(label) ?? null;
-        if (!rowHasDisplayValue(values)) return null;
-        return { label, values };
-      }),"""
-          if price_rows not in text:
-              if payable_block not in text:
-                  raise SystemExit('Expected payable production-row block not found')
-              text = text.replace(payable_block, payable_block + "\n" + price_rows, 1)
-
-          path.write_text(text)
-          PY
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Commit patch
-        shell: bash
-        run: |
-          if git diff --quiet; then
-            echo "No patch needed"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/components/SingleStockDashboard.tsx
-          git commit -m "Show unit-safe metal prices in Project grid"
-          git push origin HEAD:feature/corporate-pre-revenue-metrics
+      - name: Workflow disabled
+        run: echo "Nightly refresh scheduling is handled by Vercel Cron."
