@@ -1,11 +1,162 @@
-name: Nightly Refresh (Disabled)
+name: Temporary LOM Canonicalization Patch
 
-# Scheduling handled by Vercel Cron (vercel.json).
-on: []
+on:
+  push:
+    branches:
+      - feature/corporate-pre-revenue-metrics
+
+permissions:
+  contents: write
 
 jobs:
-  refresh:
+  patch-lom:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Workflow disabled
-        run: echo "Nightly refresh scheduling is handled by Vercel Cron."
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/corporate-pre-revenue-metrics
+          fetch-depth: 0
+      - name: Canonicalize LOM consumers
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          metrics = Path('src/lib/corporate/preRevenueMetrics.ts')
+          text = metrics.read_text()
+          anchor = "import { convertPriceToCanonical } from '../units/conversion.ts';\n"
+          ins = anchor + "import { deriveCorporateProductionLife } from './preRevenueProductionLife.ts';\n"
+          if "deriveCorporateProductionLife" not in text:
+              if anchor not in text: raise SystemExit('metrics import anchor missing')
+              text = text.replace(anchor, ins, 1)
+
+          old = """function canonicalProductionYears(snapshot: CorporateSnapshotWithValuationSeries): number | null {
+  const payable = snapshot.aggregation?.payableAuEqOz_total;
+  if (!Array.isArray(payable)) return null;
+  const count = payable.filter((value) => finite(value) && value > 0).length;
+  return count > 0 ? count : null;
+}
+"""
+          new = """function canonicalProductionLife(snapshot: CorporateSnapshotWithValuationSeries) {
+  return deriveCorporateProductionLife({
+    payableQtyByMetal: snapshot.series?.payableQtyByMetal,
+    corporateYearsByPeriod: snapshot.aggregation?.corporateYearsByPeriod,
+  });
+}
+"""
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('metrics LOM helper anchor missing')
+
+          old_return = """    lomYears: canonicalProductionYears(snapshot),
+"""
+          new_return = """    lomYears: canonicalProductionLife(snapshot).lomYears,
+"""
+          if old_return in text:
+              text = text.replace(old_return, new_return, 1)
+          elif new_return not in text:
+              raise SystemExit('metrics return LOM anchor missing')
+          metrics.write_text(text)
+
+          adapter = Path('src/lib/investmentScore/canonicalPreRevenueAdapter.ts')
+          text = adapter.read_text()
+          anchor = "} from '../corporate/preRevenueValuation.ts';\n"
+          ins = anchor + "import { deriveCorporateProductionLife } from '../corporate/preRevenueProductionLife.ts';\n"
+          if "preRevenueProductionLife" not in text:
+              if anchor not in text: raise SystemExit('adapter import anchor missing')
+              text = text.replace(anchor, ins, 1)
+
+          old_type = """  aggregation?: {
+    payableAuEqOz_total?: Array<number | null> | null;
+  } | null;
+"""
+          new_type = """  aggregation?: {
+    corporateYearsByPeriod?: number[] | null;
+  } | null;
+  series?: {
+    payableQtyByMetal?: Record<string, Array<number | null>> | null;
+  } | null;
+"""
+          if old_type in text:
+              text = text.replace(old_type, new_type, 1)
+          elif new_type not in text:
+              raise SystemExit('adapter type anchor missing')
+
+          start = text.find("function canonicalPayableAuEqProductionYears(")
+          if start >= 0:
+              end = text.find("\nfunction tierFromAssessment", start)
+              if end < 0: raise SystemExit('adapter helper end missing')
+              text = text[:start] + text[end+1:]
+
+          old_lom = """  const lomYears = snapshot
+    ? canonicalPayableAuEqProductionYears(snapshot.aggregation?.payableAuEqOz_total)
+    : null;
+"""
+          new_lom = """  const lomYears = snapshot
+    ? deriveCorporateProductionLife({
+        payableQtyByMetal: snapshot.series?.payableQtyByMetal,
+        corporateYearsByPeriod: snapshot.aggregation?.corporateYearsByPeriod,
+      }).lomYears
+    : null;
+"""
+          if old_lom in text:
+              text = text.replace(old_lom, new_lom, 1)
+          elif new_lom not in text:
+              raise SystemExit('adapter LOM usage anchor missing')
+
+          text = text.replace("LOM: Ej verifierad från canonical payable AuEq production series.", "LOM: Ej verifierad från canonical physical payable-by-metal production span.")
+          text = text.replace("COMPARE_STOCKS_CANONICAL_PAYABLE_AUEQ_PRODUCTION_YEARS", "CORPORATE_CANONICAL_PHYSICAL_PAYABLE_PRODUCTION_SPAN")
+          adapter.write_text(text)
+
+          test = Path('src/lib/corporate/__tests__/preRevenueMetrics.test.ts')
+          text = test.read_text()
+          old = """    payableAuEqOz_total: [0, 10, 20],
+"""
+          if old in text and "corporateYearsByPeriod" not in text:
+              text = text.replace(old, old + "    corporateYearsByPeriod: [2029, 2030, 2031],\n", 1)
+          test.write_text(text)
+
+          parity = Path('src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts')
+          if parity.exists():
+              text = parity.read_text()
+              old = """  const productionYears = Array.isArray(snapshot.aggregation?.payableAuEqOz_total)
+    ? snapshot.aggregation.payableAuEqOz_total.filter((value) => finite(value) && value > 0).length || null
+    : null;
+"""
+              new = """  const payableEntries = Object.values(snapshot.series?.payableQtyByMetal ?? {});
+  const activePeriods = payableEntries.length > 0
+    ? Array.from({ length: payableEntries[0].length }, (_, t) => payableEntries.some((series) => finite(series[t]) && (series[t] as number) > 0))
+    : [];
+  const firstProduction = activePeriods.findIndex(Boolean);
+  let lastProduction = -1;
+  for (let t = activePeriods.length - 1; t >= 0; t -= 1) { if (activePeriods[t]) { lastProduction = t; break; } }
+  const productionYears = firstProduction >= 0 && lastProduction >= firstProduction ? lastProduction - firstProduction + 1 : null;
+"""
+              if old in text:
+                  text = text.replace(old, new, 1)
+              parity.write_text(text)
+
+          package = Path('package.json')
+          text = package.read_text()
+          old = '"test:pre-revenue-corporate": "node --experimental-strip-types src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts && node --experimental-strip-types src/lib/corporate/__tests__/preRevenueMetrics.test.ts && node --experimental-strip-types src/lib/corporate/__tests__/preRevenueMetricsMetals.test.ts"'
+          new = '"test:pre-revenue-corporate": "node --experimental-strip-types src/lib/corporate/__tests__/preRevenueProductionLife.test.ts && node --experimental-strip-types src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts && node --experimental-strip-types src/lib/corporate/__tests__/preRevenueMetrics.test.ts && node --experimental-strip-types src/lib/corporate/__tests__/preRevenueMetricsMetals.test.ts"'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('package pre-revenue test anchor missing')
+          package.write_text(text)
+          PY
+
+      - run: npm ci
+      - run: npm run build
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/corporate/preRevenueMetrics.ts src/lib/investmentScore/canonicalPreRevenueAdapter.ts src/lib/corporate/__tests__/preRevenueMetrics.test.ts src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts package.json
+          git commit -m "Lock canonical pre-revenue LOM definition"
+          git push origin HEAD:feature/corporate-pre-revenue-metrics
