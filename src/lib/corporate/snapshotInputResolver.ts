@@ -306,7 +306,7 @@ export function resolveCanonicalCorporateSnapshotInputs(args: {
     ? { source: 'manual', anchor: 'today', scenario: { mode: 'spot' }, manual_fx_USD_to_TargetCurrency: 1 }
     : { source: 'auto', anchor: 'today', scenario: { mode: 'spot' } };
 
-  const request: SnapshotRequest = {
+  const request = {
     symbol,
     valuationYear,
     targetCurrency,
@@ -324,7 +324,7 @@ export function resolveCanonicalCorporateSnapshotInputs(args: {
     scenario: args.scenario ?? { mode: 'spot' },
     fx,
     manualMetalPrices: args.manualMetalPrices,
-  };
+  } as unknown as SnapshotRequest;
 
   return {
     request,

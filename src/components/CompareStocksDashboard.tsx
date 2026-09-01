@@ -4,6 +4,9 @@ import Tier1StatusCell from './Tier1StatusCell.tsx';
 import InvestmentScoreCell from './investmentScore/InvestmentScoreCell.tsx';
 import { getCompanyProject, listCompanyProjects, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
 import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancingStateStore.ts';
+import { postCorporateSnapshot } from '../lib/client/snapshotClient.ts';
+import { getManualMetalPriceStore } from '../lib/engine/pricing/manualMetalPriceStore.ts';
+import { resolveCanonicalCorporateSnapshotInputs } from '../lib/corporate/snapshotInputResolver.ts';
 import {
   deriveCorporatePreRevenueMetrics,
   type CorporatePreRevenueMetrics,
@@ -20,7 +23,6 @@ type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 type CompanyListResponse = { ok: boolean; companies?: Array<{ ticker: string; name: string }> };
 type ProfileResponse = { ok?: boolean; profile?: Record<string, unknown> | null };
 type CompanyResponse = { balance?: Record<string, Array<number | null>>; income?: Record<string, Array<number | null>> };
-type SnapshotResponse = { ok: boolean; snapshot?: CorporateSnapshot; diagnostics?: { errors?: string[]; warnings?: string[] } };
 
 type PreRevenueCompany = {
   ticker: string;
@@ -37,13 +39,6 @@ type PreRevenueCompany = {
 };
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-const readFinite = (value: unknown): number | null => finite(value) ? value : null;
-const clamp01 = (value: unknown, fallback: number): number => finite(value) ? Math.max(0, Math.min(1, value)) : fallback;
-const lastFinite = (values: Array<number | null> | undefined): number | null => {
-  if (!Array.isArray(values)) return null;
-  for (let i = values.length - 1; i >= 0; i -= 1) if (finite(values[i])) return values[i] as number;
-  return null;
-};
 
 function metricGroups(referenceMetal: string): readonly MetricGroup[] {
   const eq = `${referenceMetal}Eq`;
@@ -79,17 +74,6 @@ function metricGroups(referenceMetal: string): readonly MetricGroup[] {
   ];
 }
 
-function resolveShares(statements: CompanyResponse): number | null {
-  const candidates = [statements.balance?.commonStockSharesOutstanding, statements.balance?.commonStockSharesIssued, statements.income?.weightedAverageShsOutDil, statements.income?.weightedAverageShsOut];
-  for (const series of candidates) { const value = lastFinite(series); if (value !== null && value > 0) return value; }
-  return null;
-}
-function resolveLatestCash(statements: CompanyResponse): number | null { return lastFinite(statements.balance?.cashAndCashEquivalents) ?? lastFinite(statements.balance?.cashAndShortTermInvestments); }
-function resolveLatestDebt(statements: CompanyResponse): number | null {
-  const direct = lastFinite(statements.balance?.totalDebt); if (direct !== null) return direct;
-  const shortTerm = lastFinite(statements.balance?.shortTermDebt); const longTerm = lastFinite(statements.balance?.longTermDebt);
-  return shortTerm === null && longTerm === null ? null : (shortTerm ?? 0) + (longTerm ?? 0);
-}
 function readManualExtraShares(ticker: string): number { if (typeof window === 'undefined') return 0; return parseExtraShares(window.localStorage.getItem(extraSharesStorageKey('corporate', ticker)) ?? '0'); }
 function formatNumber(value: number | null, digits = 2): string {
   if (!finite(value)) return '—'; const abs = Math.abs(value);
@@ -140,25 +124,89 @@ function extractMetals(rawProjects: Array<Record<string, unknown>>): string[] {
 }
 
 async function loadCanonicalCompany(company: { ticker: string; name: string }): Promise<PreRevenueCompany | null> {
-  const projects = await listCompanyProjects(company.ticker); if (projects.length === 0) return null; const localExtraShares = readManualExtraShares(company.ticker);
+  const projects = await listCompanyProjects(company.ticker);
+  if (projects.length === 0) return null;
+  const localExtraShares = readManualExtraShares(company.ticker);
   try {
     const [profileRes, statementsRes, persistedFinancing, projectRecords] = await Promise.all([
-      fetch(`/api/company/profile?ticker=${encodeURIComponent(company.ticker)}`), fetch(`/api/company?ticker=${encodeURIComponent(company.ticker)}&period=fy`), loadLiveCorporateFinancingState(company.ticker), Promise.all(projects.map((project) => getCompanyProject(company.ticker, project.project_id))),
+      fetch(`/api/company/profile?ticker=${encodeURIComponent(company.ticker)}`),
+      fetch(`/api/company?ticker=${encodeURIComponent(company.ticker)}&period=fy`),
+      loadLiveCorporateFinancingState(company.ticker),
+      Promise.all(projects.map((project) => getCompanyProject(company.ticker, project.project_id))),
     ]);
-    const profileBody = await profileRes.json() as ProfileResponse; const statements = await statementsRes.json() as CompanyResponse; const profile = profileBody.profile ?? null;
-    const price = readFinite(profile?.price); const sharesCurrent = resolveShares(statements); const latestCash = resolveLatestCash(statements); const latestDebt = resolveLatestDebt(statements);
-    const targetCurrency = typeof profile?.currency === 'string' && profile.currency.trim() ? profile.currency.trim().toUpperCase() : 'USD'; const manualExtraShares = persistedFinancing?.extraShares ?? localExtraShares; const metals = extractMetals(projectRecords.map((record) => record.raw_json));
-    if (!finite(price) || price <= 0 || !finite(sharesCurrent) || sharesCurrent <= 0) return { ...company, projects, metals, snapshot: null, metrics: null, price, sharesCurrent, targetCurrency, manualExtraShares, metricError: 'Saknar kanoniskt marknadspris eller aktieantal.' };
-    const financingPlanByProject = Object.fromEntries(projects.map((project) => { const saved = persistedFinancing?.financingPlanByProject?.[project.project_id]; const equityFraction = clamp01(saved?.equity_fraction, 1); return [project.project_id, { equity_fraction: equityFraction, debt_fraction: 1 - equityFraction, equity_raise_price_TargetCurrency: price }]; }));
-    const firstProjectId = projects[0]?.project_id ?? null; const firstProjectPlan = firstProjectId ? financingPlanByProject[firstProjectId] : null; const savedPlan = persistedFinancing?.financingPlan; const equityFraction = firstProjectPlan?.equity_fraction ?? clamp01(savedPlan?.equity_fraction, 1);
-    const financingPlan = { equity_fraction: equityFraction, debt_fraction: 1 - equityFraction, use_cash_first: savedPlan?.use_cash_first === true, cash_use_percent: clamp01(savedPlan?.cash_use_percent, 1), minimum_cash_reserve_TargetCurrency: 0, equity_raise_price_TargetCurrency: price };
-    const valuationYear = new Date().getUTCFullYear();
-    const response = await fetch('/api/snapshot/corporate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: company.ticker, valuationYear, targetCurrency, discountRate: 0.1, market: { shares_current: sharesCurrent, price_current_TargetCurrency: price }, balanceSheet: { cash_t0_TargetCurrency: latestCash, debt_t0_TargetCurrency: latestDebt }, financingPlan, financingPlanByProject, scenario: { mode: 'spot' }, fx: { source: targetCurrency === 'USD' ? 'manual' : 'auto', anchor: 'today', scenario: { mode: 'spot' }, manual_fx_USD_to_TargetCurrency: targetCurrency === 'USD' ? 1 : undefined } }) });
-    const body = await response.json() as SnapshotResponse;
-    const snapshot = response.ok && body.ok && body.snapshot ? body.snapshot : null;
-    const metrics = snapshot ? deriveCorporatePreRevenueMetrics({ snapshot, currentPriceTargetCurrency: price, valuationYear, manualExtraShares, referenceMetals: metals }) : null;
-    return { ...company, projects, metals, snapshot, metrics, price, sharesCurrent, targetCurrency, manualExtraShares, metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.') };
-  } catch (error) { return { ...company, projects, metals: [], snapshot: null, metrics: null, price: null, sharesCurrent: null, targetCurrency: null, manualExtraShares: localExtraShares, metricError: (error as Error).message }; }
+    const profileBody = await profileRes.json() as ProfileResponse;
+    const statements = await statementsRes.json() as CompanyResponse;
+    const profile = profileBody.profile ?? null;
+    const metals = extractMetals(projectRecords.map((record) => record.raw_json));
+    const resolution = resolveCanonicalCorporateSnapshotInputs({
+      symbol: company.ticker,
+      profile,
+      statements,
+      projectIds: projects.map((project) => project.project_id),
+      financingPlan: persistedFinancing?.financingPlan,
+      financingPlanByProject: persistedFinancing?.financingPlanByProject,
+      manualExtraShares: persistedFinancing?.extraShares ?? localExtraShares,
+      manualMetalPrices: getManualMetalPriceStore(),
+      valuationYear: new Date().getUTCFullYear(),
+      discountRate: 0.1,
+      scenario: { mode: 'spot' },
+    });
+    const price = resolution.currentPriceTargetCurrency;
+    const sharesCurrent = resolution.sharesCurrent;
+    const targetCurrency = resolution.targetCurrency;
+    const manualExtraShares = resolution.manualExtraShares;
+    if (!resolution.request) {
+      return {
+        ...company,
+        projects,
+        metals,
+        snapshot: null,
+        metrics: null,
+        price,
+        sharesCurrent,
+        targetCurrency,
+        manualExtraShares,
+        metricError: resolution.diagnostics.join(' · ') || 'Kanoniska Corporate-inputs saknas.',
+      };
+    }
+
+    const body = await postCorporateSnapshot(resolution.request, { refresh: targetCurrency !== 'USD' });
+    const snapshot = body.ok && body.snapshot ? body.snapshot : null;
+    const metrics = snapshot
+      ? deriveCorporatePreRevenueMetrics({
+          snapshot,
+          currentPriceTargetCurrency: price,
+          valuationYear: resolution.valuationYear,
+          manualExtraShares,
+          referenceMetals: metals,
+        })
+      : null;
+    return {
+      ...company,
+      projects,
+      metals,
+      snapshot,
+      metrics,
+      price,
+      sharesCurrent,
+      targetCurrency,
+      manualExtraShares,
+      metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.'),
+    };
+  } catch (error) {
+    return {
+      ...company,
+      projects,
+      metals: [],
+      snapshot: null,
+      metrics: null,
+      price: null,
+      sharesCurrent: null,
+      targetCurrency: null,
+      manualExtraShares: localExtraShares,
+      metricError: (error as Error).message,
+    };
+  }
 }
 
 function PreRevenueCompareDashboard() {
