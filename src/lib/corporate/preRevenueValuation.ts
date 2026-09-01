@@ -7,7 +7,7 @@ export type PreRevenueValuationSnapshot = {
   NAV_today_TargetCurrency?: CorporateSnapshot['NAV_today_TargetCurrency'];
   financing?: Partial<Pick<CorporateSnapshot['financing'], 'shares_post_financing'>> | null;
   corporateValuationTimeSeries?: {
-    rows?: Array<Pick<CorporateValuationTimeSeriesRow, 'evEbitda6xPerShare'>> | null;
+    rows?: Array<Partial<Pick<CorporateValuationTimeSeriesRow, 'evEbitda6xPerShare'>>> | null;
   } | null;
 };
 
