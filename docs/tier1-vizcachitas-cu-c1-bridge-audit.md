@@ -90,13 +90,13 @@ That is about **3.34 cents/lb higher** than the reconstructed produced-Cu metric
 
 ### LOM
 
-Canonical mining + processing divided by contained/produced Cu reconstructs:
+The Table 22.7 total Mining Opex includes mining activity in the two pre-production periods, so the C1 bridge must use only periods with positive Cu production. Canonical producing-period mining + processing divided by contained/produced Cu reconstructs:
 
-- **1.254422 USD/lb produced Cu**
+- **1.241243 USD/lb produced Cu**
 - report Table 21.11: **1.25 USD/lb**
-- difference: **+0.004422 USD/lb**.
+- difference: **-0.008757 USD/lb**, within one cent.
 
-This strongly verifies that the canonical Project cost rows preserve the PFS report C1 basis.
+This strongly verifies that the canonical Project cost rows preserve the PFS report C1 basis while also preventing pre-production mining cost from being silently placed in the operating C1 numerator.
 
 ## 5. Why this is not yet the S&P co-product C1 metric
 
@@ -141,7 +141,7 @@ Current canonical V3 components can be classified against the **Vizcachitas repo
 
 | Canonical component | Viz report C1 | S&P current C1 allocation status |
 |---|---|---|
-| `mining_opex` | included | allocation metadata not yet authorized |
+| `mining_opex` | included in producing periods | allocation metadata not yet authorized |
 | `processing_opex` | included | allocation metadata not yet authorized |
 | `stockpile_rehandling` | separate Table 22.7 line; not silently folded into report mining+processing C1 | Ej verifierad |
 | `surface_infrastructure` | outside Viz report C1; enters C3 | current S&P universal treatment Ej verifierad |
@@ -169,6 +169,7 @@ Three blockers remain:
 `vizcachitasCostBridge.test.ts` now locks the source-supported findings:
 
 - report-defined mining + processing reconstruction;
+- producing-period guard for LOM C1;
 - produced-Cu versus payable-Cu denominator mismatch;
 - report price deck used for diagnostics;
 - no-stream project context;
