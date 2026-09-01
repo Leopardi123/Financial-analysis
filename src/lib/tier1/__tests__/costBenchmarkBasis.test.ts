@@ -3,6 +3,7 @@ import './costAllocation.test.ts';
 import './costDefinitionContract.test.ts';
 import './costNormalization.test.ts';
 import './costNormalizationReportFixtures.test.ts';
+import './costVintagePolicy.test.ts';
 import './vizcachitasCostBridge.test.ts';
 import './bergCostBridge.test.ts';
 import './arcticCostBridge.test.ts';
