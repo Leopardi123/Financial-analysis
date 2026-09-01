@@ -17,9 +17,9 @@ const snapshot = {
   MarketCap_TargetCurrency: 200,
   EV_TargetCurrency: 300,
   NAV_today_TargetCurrency: 240,
-  Payback_real_years: 3,
-  Payback_approx_years: 4,
-  corporate: { lista3Metrics: { IRR: 0.25 } },
+  Payback_real_years: 99,
+  Payback_approx_years: 88,
+  corporate: { lista3Metrics: { IRR: 0.25, Payback_real_years: 3 } },
   series: {
     totalRevenue_USD: [0, 1000, 2000],
     payableQtyByMetal: { Au: [0, 10, 20], Cu: [0, 1, 2] },
@@ -102,6 +102,17 @@ const noFallback = deriveCorporatePreRevenueMetrics({ snapshot: noCorporateIrr, 
 assert.equal(noFallback.irr, null, 'Corporate derivation must not fall back to Project IRR');
 assert.ok(noFallback.diagnostics.some((message) => message.includes('no Project-engine fallback')));
 
+const noCorporatePayback = {
+  ...snapshot,
+  Payback_real_years: 7,
+  Payback_approx_years: 6,
+  corporate: { lista3Metrics: { IRR: 0.25, Payback_real_years: null } },
+} as unknown as CorporateSnapshot;
+const noPaybackFallback = deriveCorporatePreRevenueMetrics({ snapshot: noCorporatePayback, currentPriceTargetCurrency: 2, valuationYear: 2026 });
+assert.equal(noPaybackFallback.paybackYears, null, 'Compare must not fall back to root Lista3a/Project/JSON payback');
+assert.ok(noPaybackFallback.diagnostics.some((message) => message.includes('no root Lista3a/Project/JSON fallback')));
+
+await import('./payback.test.ts');
 await import('./preRevenueMetricsParity.test.ts');
 
 console.log('preRevenueMetrics.test.ts passed');

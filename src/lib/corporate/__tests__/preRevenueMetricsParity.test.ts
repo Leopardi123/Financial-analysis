@@ -223,7 +223,8 @@ for (const testCase of cases) {
   });
 
   assertNear(derived.irr, legacy.irr, `${testCase.name} IRR`);
-  assertNear(derived.paybackYears, legacy.payback, `${testCase.name} payback`);
+  const canonicalCorporatePayback = snapshot.corporate?.lista3Metrics?.Payback_real_years ?? null;
+  assertNear(derived.paybackYears, canonicalCorporatePayback, `${testCase.name} canonical Corporate payback`);
   if (testCase.name === 'Copper Creek PEA') {
     assert.equal(legacy.lom, null, 'Legacy Compare LOM was unavailable for Copper Creek because it depended on payable AuEq.');
     assert.equal(derived.lomYears, 32, 'Canonical Corporate LOM must resolve from the physical payable-metal production span.');

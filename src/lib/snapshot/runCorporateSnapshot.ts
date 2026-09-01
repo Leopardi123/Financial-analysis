@@ -14,6 +14,7 @@ import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
 import { computeLista3 } from '../metrics/lista3.ts';
+import { deriveCorporateRealPayback } from '../corporate/payback.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import { buildCorporateModeledValuationTimeline } from './corporateModeledValuationTimeline.ts';
 import { aggregateProjectsToCorporateTotals } from './aggregateProjectsToCorporateTotals.ts';
@@ -2858,6 +2859,19 @@ export async function runCorporateSnapshotPipeline(args: {
       paybackRealUseInitialCapex: true,
       paybackApproxAsRatio: true,
     }, { debug: true });
+    // Canonical Corporate real payback is deliberately NOT valuation-rebased.
+    // It carries the complete project FCFF balance into the first production period
+    // on the same internal Corporate calendar axis. This prevents historical build
+    // cash flow from becoming an accidental sunk-cost exclusion when valuationYear
+    // is later than the project's first cash-flow year.
+    const corporateRealPayback = deriveCorporateRealPayback({
+      fcffUSD: aggregationEffective.fcffUSD_total,
+      productionStartPeriod: tpEff,
+      masterN: aggregationEffective.corporateMasterN,
+    });
+    if (corporateRealPayback.diagnostic) {
+      diagnostics.warnings.push(`Corporate real payback unavailable: ${corporateRealPayback.diagnostic}`);
+    }
     const discountFactors_toToday = Array.from(
       { length: aggregationEffective.corporateMasterN + 1 },
       (_, t) => 1 / ((1 + input.discountRate) ** t),
@@ -3099,6 +3113,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const corporateLista3 = {
       ...corporateLista3Result.metrics,
+      Payback_real_years: corporateRealPayback.paybackYears,
       AISC_LOM: additionalLista3ByMetric.AISC_LOM.value,
       BreakEven_AuEq: additionalLista3ByMetric.BreakEven_AuEq.value,
       CAPEX_per_Annual_AuEq: additionalLista3ByMetric.CAPEX_per_Annual_AuEq.value,
@@ -3131,10 +3146,20 @@ export async function runCorporateSnapshotPipeline(args: {
     corporateLista3Debug.perMetric.Payback_real.output.value = corporateLista3.Payback_real_years;
     corporateLista3Debug.perMetric.ROI_10Y.output.value = corporateLista3.ROI_10Y_pct;
     corporateLista3Debug.perMetric.IRR.output.value = corporateLista3.IRR;
-    corporateLista3Debug.perMetric.Payback_real.inputs.initialCapexUSD_main_passed = initialCapexUSD_main;
-    corporateLista3Debug.perMetric.Payback_real.intermediates.investmentAbs_used = initialCapexUSD_main === null
-      ? null
-      : Math.abs(initialCapexUSD_main);
+    corporateLista3Debug.perMetric.Payback_real.formula = 'full-project cumulative FCFF carried into production start; linear interpolation at first zero crossing';
+    corporateLista3Debug.perMetric.Payback_real.inputs = {
+      fcfUSD_total: aggregationEffective.fcffUSD_total,
+      corporateYearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+      productionStartPeriod_internal: tpEff,
+    };
+    corporateLista3Debug.perMetric.Payback_real.intermediates = {
+      cumulativeAtProductionStartUSD: corporateRealPayback.cumulativeAtProductionStartUSD,
+      initialDeficitUSD: corporateRealPayback.initialDeficitUSD,
+      crossingPeriod: corporateRealPayback.crossingPeriod,
+      interpolation: corporateRealPayback.interpolation,
+      diagnostic: corporateRealPayback.diagnostic,
+    };
+    corporateLista3Debug.perMetric.Payback_real.missingInputs = corporateRealPayback.diagnostic ? [corporateRealPayback.diagnostic] : [];
 
     const hasRequiredInputValue = (value: unknown): boolean => {
       if (Array.isArray(value)) {
@@ -3189,7 +3214,7 @@ export async function runCorporateSnapshotPipeline(args: {
       BreakEven_AuEq: ['capexUSD_total', 'sustainingCostUSD_total', 'payableAuEqOz_total', 'tp_main'],
       CAPEX_per_Annual_AuEq: ['initialCapexUSD_main', 'payableAuEqOz_total', 'tp_main', 'masterN'],
       Payback_approx: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
-      Payback_real: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
+      Payback_real: ['fcfUSD_total', 'tp_payback_real'],
       IRR: ['fcfUSD_total', 'masterN'],
       ROI_10Y: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
       LOM_avg_EBIT_ROCE: ['ebitUSD_total', 'initialCapexUSD_main', 'tp_main'],
@@ -3202,6 +3227,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const commonInputValues: Record<string, unknown> = {
       tp_main,
+      tp_payback_real: tpEff,
       masterN: aggregationEffective.corporateMasterN,
       initialCapexUSD_main,
       fcfUSD_total: aggregationEffective.fcffUSD_total,

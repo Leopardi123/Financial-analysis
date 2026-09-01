@@ -270,10 +270,11 @@ export function deriveCorporatePreRevenueMetrics(args: {
 
   const irr = readFinite(snapshot.corporate?.lista3Metrics?.IRR);
   if (irr === null) diagnostics.push('Corporate IRR is unavailable; no Project-engine fallback is used.');
+  if (readFinite(snapshot.corporate?.lista3Metrics?.Payback_real_years) === null) diagnostics.push('Canonical Corporate real payback is unavailable; no root Lista3a/Project/JSON fallback is used.');
 
   return {
     irr,
-    paybackYears: readFinite(snapshot.Payback_real_years) ?? readFinite(snapshot.Payback_approx_years),
+    paybackYears: readFinite(snapshot.corporate?.lista3Metrics?.Payback_real_years),
     lomYears: productionLife.lomYears,
     initialCapexUSD,
     initialCapexMarkerYear: capexMilestone.markerYear,
