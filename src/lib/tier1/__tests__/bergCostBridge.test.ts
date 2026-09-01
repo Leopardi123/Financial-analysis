@@ -101,7 +101,6 @@ const allocation = allocateTier1CoProductCost({
   toleranceAbsUSD: 0.01,
 });
 assert.equal(allocation.status, 'COMPUTABLE');
-if (allocation.status !== 'COMPUTABLE') throw new Error(allocation.reason);
 
 const roundedAnnualPayableCuLb = sum(raw.metals.payableQtyByMetal.Cu.map((value) => typeof value === 'number' ? value : 0));
 const periodAllocatedCuCostUSD = sum(allocation.allocatedCostUSDByProduct.Cu);
