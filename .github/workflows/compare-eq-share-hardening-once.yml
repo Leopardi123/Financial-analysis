@@ -1,0 +1,64 @@
+name: Compare 10y Eq per share one-shot
+
+on:
+  push:
+    branches:
+      - fix/compare-pre-revenue-ssot-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/compare-pre-revenue-ssot-hardening
+          fetch-depth: 0
+
+      - name: Patch Compare Eq/share consumer and regressions
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/CompareStocksDashboard.tsx')
+          text = path.read_text()
+          old = "['aueqPerShare', `${eq} / aktie`, `LOM ${eq} dividerat med canonical aktier efter modellerad finansiering och manuellt tillagda extra aktier`],"
+          new = "['aueqPerShare', `10y ${eq} / aktie`, `10y ${eq} dividerat med canonical aktier efter modellerad finansiering och manuellt tillagda extra aktier`],"
+          if old not in text:
+              raise SystemExit('Eq/share tooltip anchor missing')
+          text = text.replace(old, new, 1)
+          old = "case 'aueqPerShare': return reference && finite(reference.lomEqPerShare) ? `${formatNumber(reference.lomEqPerShare, 4)} ${unit}/aktie` : '—';"
+          new = "case 'aueqPerShare': return reference && finite(reference.tenYearEqPerShare) ? `${formatNumber(reference.tenYearEqPerShare, 4)} ${unit}/aktie` : '—';"
+          if old not in text:
+              raise SystemExit('Eq/share render anchor missing')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          path = Path('src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts')
+          text = path.read_text()
+          old = "assertNear(ref.lomEqPerShare, oldEq && finite(legacy.sharesPf) ? oldEq.lomEq / legacy.sharesPf : null, `${testCase.name} ${metal} LOM Eq/share`, 1e-9);"
+          new = "assertNear(ref.tenYearEqPerShare, oldEq && finite(legacy.sharesPf) ? oldEq.tenYearEq / legacy.sharesPf : null, `${testCase.name} ${metal} 10y Eq/share`, 1e-9);"
+          if old not in text:
+              raise SystemExit('Eq/share parity anchor missing')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+
+      - name: Install
+        run: npm install
+
+      - name: Regression build
+        run: npm run build
+
+      - name: Commit 10y Eq/share semantics
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/CompareStocksDashboard.tsx src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts
+          git commit -m "Use 10y Eq per share in Compare"
+          git push origin HEAD:fix/compare-pre-revenue-ssot-hardening
