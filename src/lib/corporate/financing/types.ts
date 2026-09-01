@@ -26,7 +26,7 @@ export type CorporateFinancingInput = {
     minimum_cash_reserve_TargetCurrency?: number | null;
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
-    /** Explicit evidence provenance when the plan comes from a known source. */
+    /** Explicit evidence provenance for callers that already resolved the plan source. */
     provenance_source?: Exclude<CorporateFinancingProvenanceSource, 'DEFAULT'> | null;
   } | null;
   buildFundingNeed_USD?: number | null;
