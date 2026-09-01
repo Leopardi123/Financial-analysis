@@ -64,10 +64,10 @@ const berg = {
         reportedLabel: 'C1 cost – by-product basis',
         value: -0.17,
         unit: 'USD/lb',
-        definitionNotes: 'PFS Table 22-3 footnote 1: mine + mill + G&A + off-site costs + royalties less by-product credits. Table labels denominator US$/lb Cu; payable-vs-produced is not made explicit in the cost-table label.',
+        definitionNotes: 'PFS Table 22-3 footnote 1: mine + mill + G&A + off-site costs + royalties less by-product credits. Table 22-4 annual identities reproduce the published C1 rows using payable Cu, so the denominator is source-verified as payable primary metal.',
         primaryMetal: 'Cu',
         basis: 'net_by_product',
-        denominator: 'other',
+        denominator: 'payable_primary_metal',
         period: { kind: 'LOM' },
         byProductTreatment: 'credited',
         royaltyTreatment: 'included',
@@ -75,7 +75,7 @@ const berg = {
         costBaseYear: 2026,
         quality: 'reported_exact',
         sourceId: 'berg-pfs-2026',
-        pageOrTable: 'Table 22-3, pp.322-323',
+        pageOrTable: 'Table 22-3, pp.320-321; Table 22-4, pp.322-324',
       },
       {
         metric: 'C1_CU_USD_PER_LB',
@@ -95,7 +95,7 @@ const berg = {
         costBaseYear: 2026,
         quality: 'reported_exact',
         sourceId: 'berg-pfs-2026',
-        pageOrTable: 'Table 22-3, pp.322-323',
+        pageOrTable: 'Table 22-3, pp.320-321; Table 22-4, pp.322-324',
       },
     ],
   },
@@ -105,6 +105,7 @@ const bergCandidates = extractReportedCostEvidenceCandidates(berg, 'C1_CU_USD_PE
 assert.equal(bergCandidates.length, 2);
 assert.equal(bergCandidates[0].value, -0.17);
 assert.equal(bergCandidates[0].basis, 'net_by_product');
+assert.equal(bergCandidates[0].denominator, 'payable_primary_metal');
 assert.equal(bergCandidates[1].value, 1.95);
 assert.equal(bergCandidates[1].basis, 'co_product');
 assert.equal(bergCandidates[1].denominator, 'metal_equivalent');
