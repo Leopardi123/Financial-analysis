@@ -1,12 +1,13 @@
+import type {
+  CorporateSnapshot,
+  CorporateValuationTimeSeriesRow,
+} from './snapshot/types.ts';
+
 export type PreRevenueValuationSnapshot = {
-  NAV_today_TargetCurrency?: number | null;
-  financing?: {
-    shares_post_financing?: number | null;
-  } | null;
+  NAV_today_TargetCurrency?: CorporateSnapshot['NAV_today_TargetCurrency'];
+  financing?: Pick<CorporateSnapshot['financing'], 'shares_post_financing'> | null;
   corporateValuationTimeSeries?: {
-    rows?: Array<{
-      evEbitda6xPerShare?: number | null;
-    }> | null;
+    rows?: Array<Pick<CorporateValuationTimeSeriesRow, 'evEbitda6xPerShare'>> | null;
   } | null;
 };
 
