@@ -24,10 +24,14 @@ const payableMo = raw.metals.payableQtyByMetal.Mo;
 const payableAg = raw.metals.payableQtyByMetal.Ag;
 assert.ok(containedCu && payableCu && payableMo && payableAg);
 
-const reportSiteC1PoolUSD = first8.reduce((sum, t) => sum
-  + componentValue('mining_opex', t)
-  + componentValue('stockpile_rehandling', t)
-  + componentValue('processing_opex', t), 0);
+function reportDefinedC1Pool(t: number): number {
+  // Section 21.2.3 defines Vizcachitas C1 as mining + processing. Table 22.7
+  // exposes Stockpile Rehandling separately, so it is not silently folded into
+  // this report-defined bridge.
+  return componentValue('mining_opex', t) + componentValue('processing_opex', t);
+}
+
+const reportSiteC1PoolUSD = first8.reduce((sum, t) => sum + reportDefinedC1Pool(t), 0);
 const containedCuLb = first8.reduce((sum, t) => sum + ((containedCu?.[t] as number) ?? 0) * LB_PER_TONNE, 0);
 const payableCuLb = first8.reduce((sum, t) => sum + ((payableCu[t] as number) ?? 0) * LB_PER_TONNE, 0);
 const reportBasisC1ProducedCu = reportSiteC1PoolUSD / containedCuLb;
@@ -35,12 +39,22 @@ const samePoolOnPaidCu = reportSiteC1PoolUSD / payableCuLb;
 
 // Table 21.11 reports 0.93 USD/lb Cu for the first eight years and explicitly
 // defines Vizcachitas C1 as mining + processing per pound copper produced.
-// The canonical Table 22.7 pool reconstructs that reported basis closely, while
-// merely switching the denominator to payable Cu moves the metric materially.
-assert.ok(Math.abs(reportBasisC1ProducedCu - 0.9248625493493497) < 1e-12);
+// Rounded annual Table 22.7 rows reconstruct that reported basis within 1 cent,
+// while merely switching the denominator to payable Cu moves the metric.
+assert.ok(Math.abs(reportBasisC1ProducedCu - 0.9205063747772041) < 1e-9);
 assert.ok(Math.abs(reportBasisC1ProducedCu - 0.93) < 0.01);
-assert.ok(Math.abs(samePoolOnPaidCu - 0.9583903714016351) < 1e-12);
+assert.ok(Math.abs(samePoolOnPaidCu - 0.9538762781787814) < 1e-9);
 assert.ok(samePoolOnPaidCu - reportBasisC1ProducedCu > 0.03, 'Produced-Cu and paid-Cu denominators must not be treated as interchangeable.');
+
+const lomProductionPeriods = payableCu
+  .map((value, t) => ({ value, t }))
+  .filter(({ value, t }) => t >= start && typeof value === 'number' && value > 0)
+  .map(({ t }) => t);
+const lomReportPoolUSD = lomProductionPeriods.reduce((sum, t) => sum + reportDefinedC1Pool(t), 0);
+const lomContainedCuLb = lomProductionPeriods.reduce((sum, t) => sum + (((containedCu?.[t] as number) ?? 0) * LB_PER_TONNE), 0);
+const lomReportBasisC1 = lomReportPoolUSD / lomContainedCuLb;
+assert.ok(Math.abs(lomReportBasisC1 - 1.2544224226436176) < 1e-9);
+assert.ok(Math.abs(lomReportBasisC1 - 1.25) < 0.01, 'Rounded Table 22.7 rows should reconcile the report LOM C1 within one cent.');
 
 const verification = raw.verification?.report;
 assert.ok(verification, 'Vizcachitas report verification is required.');
@@ -68,25 +82,22 @@ for (const t of first8) {
   grossPayableRevenueCuUSD += cuRevenue;
   grossPayableRevenueMoUSD += moRevenue;
   grossPayableRevenueAgUSD += agRevenue;
-  diagnosticAllocatedCuCostUSD += (
-    componentValue('mining_opex', t)
-    + componentValue('stockpile_rehandling', t)
-    + componentValue('processing_opex', t)
-  ) * (cuRevenue / total);
+  diagnosticAllocatedCuCostUSD += reportDefinedC1Pool(t) * (cuRevenue / total);
 }
 
 const grossPayableCuShare = grossPayableRevenueCuUSD
   / (grossPayableRevenueCuUSD + grossPayableRevenueMoUSD + grossPayableRevenueAgUSD);
 const grossRevenueWeightedDiagnosticC1 = diagnosticAllocatedCuCostUSD / payableCuLb;
 
-assert.ok(Math.abs(grossPayableCuShare - 0.8984478340879477) < 1e-12);
-assert.ok(Math.abs(grossRevenueWeightedDiagnosticC1 - 0.8598949375467866) < 1e-12);
+assert.ok(Math.abs(grossPayableCuShare - 0.8984478340879477) < 1e-9);
+assert.ok(Math.abs(grossRevenueWeightedDiagnosticC1 - 0.8557933816530243) < 1e-9);
 
 // This diagnostic is deliberately NOT promoted to S&P-compatible C1. S&P/SNL
-// co-product methodology requires a net-revenue vector, while Vizcachitas Table
-// 22.7 aggregates Selling & Payability Expenses across Cu/Mo/Ag and does not
-// expose a source-locked annual net-revenue vector by product. The exact current
-// C1 component boundary and 2023-real -> 2024-actual cost-vintage alignment also
+// co-product methodology requires a net-revenue vector. Vizcachitas reports LOM
+// net-revenue contributions as rounded 88% Cu / 10% Mo / balance Ag, but Table
+// 22.7 aggregates Selling & Payability Expenses across products and does not
+// expose an exact annual net-revenue vector by product. The exact current C1
+// component boundary and 2023-real -> 2024-actual cost-vintage alignment also
 // remain unresolved.
 const readiness = assessCuC1DefinitionReadiness(S_AND_P_CO_PRODUCT_C1_CU_DEFINITION, { hasStreams: false });
 assert.deepEqual(readiness, {
