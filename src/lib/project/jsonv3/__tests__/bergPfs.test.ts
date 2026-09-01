@@ -1,5 +1,6 @@
 import { computeProjectEngineFullProductionV1 } from '../../engineFullProductionV1.ts';
 import { resolveProjectPricesToEngineInput } from '../../jsonv1/resolvePrices.ts';
+import { convertPriceToCanonical } from '../../../units/conversion.ts';
 import { parseProjectJsonV3 } from '../compile.ts';
 import { reconcileProjectJsonV3ToReport } from '../reconciliation.ts';
 import type { ProjectJsonV3 } from '../schema.ts';
@@ -51,6 +52,18 @@ async function runReportEngine(raw: ProjectJsonV3) {
   assert(BERG_PFS_V3.time.productionStartPeriod === 3, 'Berg production Year 1 must be t=3 after report Years -3,-2,-1');
   assert(BERG_PFS_V3.metals.revenueBasisByMetal.Cu === 'PAYABLE_DIRECT', 'Berg Cu revenue must use directly reported payable metal');
   assert(BERG_PFS_V3.metals.revenueBasisByMetal.Mo === 'PAYABLE_DIRECT', 'Berg Mo revenue must use directly reported payable metal');
+  assert(BERG_PFS_V3.metals.payableQtyUnitByMetal.Mo === 'lb', 'Berg report payable Mo must remain represented in lb');
+
+  const report = BERG_PFS_V3.verification?.report;
+  assert(report, 'Berg fixture requires report assumptions');
+  const moReportPriceUsdPerTonne = report.priceDeckByKey.MO_USD_TONNE;
+  assert(finite(moReportPriceUsdPerTonne), 'Berg report deck must provide MO_USD_TONNE');
+  const moReportPriceUsdPerLb = convertPriceToCanonical('Mo', moReportPriceUsdPerTonne, 'USD_tonne');
+  assert(finite(moReportPriceUsdPerLb), 'Berg Mo USD/tonne must convert to canonical USD/lb');
+  assert(Math.abs(moReportPriceUsdPerLb - 20) < 1e-9, `Berg report Mo price must convert from USD/tonne to $20/lb, received ${String(moReportPriceUsdPerLb)}`);
+  const firstProductionMoLb = BERG_PFS_V3.metals.payableQtyByMetal.Mo[3];
+  assert(finite(firstProductionMoLb), 'Berg Year 1 payable Mo must be finite');
+  assert(Math.abs(firstProductionMoLb * moReportPriceUsdPerLb - 440_000_000) < 1, 'Berg Year 1 report-deck Mo revenue identity must be 22m lb × $20/lb = $440m before off-site/fiscal deductions');
 
   const reconciliation = await reconcileProjectJsonV3ToReport(BERG_PFS_V3);
   assert(reconciliation.status === 'VERIFIED', `Berg PFS must reconcile: ${JSON.stringify(reconciliation.hardChecks)}`);
@@ -86,21 +99,21 @@ async function runReportEngine(raw: ProjectJsonV3) {
       asOfDate: '2026-08-31',
     },
   };
-  const report = runtimeFixture.verification?.report;
-  assert(report, 'Berg runtime fixture requires report fixed deck for deterministic test');
+  const runtimeReport = runtimeFixture.verification?.report;
+  assert(runtimeReport, 'Berg runtime fixture requires report fixed deck for deterministic test');
   const runtimeParsed = parseProjectJsonV3(runtimeFixture, { taxScenario: 'runtime', fiscalScenario: 'runtime' });
   const runtimeInput = await resolveProjectPricesToEngineInput({
     parsed: runtimeParsed,
-    scenario: { mode: 'fixed', fixedPriceByKey: report.priceDeckByKey },
+    scenario: { mode: 'fixed', fixedPriceByKey: runtimeReport.priceDeckByKey },
     allowRefresh: false,
     projectId: 'berg-golden-runtime',
   });
-  runtimeInput.phase2.discountRate = report.discountRate;
+  runtimeInput.phase2.discountRate = runtimeReport.discountRate;
   const runtimeOutput = computeProjectEngineFullProductionV1(runtimeInput);
   assert(runtimeOutput.phase1.fcffUSD.every(finite), 'Berg runtime FCFF must remain finite with the simplified tax proxy');
   assert(runtimeOutput.phase1.taxUSD.some((value, t) => finite(value) && value !== reportOutput.phase1.taxUSD[t]), 'Berg runtime tax proxy must not silently reuse the Table 22-4 report tax series');
 
   console.log(
-    `Berg PFS V3 VERIFIED | NPV8 post report=${reconciliation.reportNPVPostTaxUSD} model=${reconciliation.modelNPVPostTaxUSD} relDiff=${reconciliation.npvRelativeDifference} | IRR post report=${reconciliation.reportIRRPostTax} model=${reconciliation.modelIRRPostTax} relDiff=${reconciliation.irrRelativeDifference} | NPV8 pre report=${reconciliation.reportNPVPreTaxUSD} model=${reconciliation.modelNPVPreTaxUSD} relDiff=${reconciliation.npvPreTaxRelativeDifference} | IRR pre report=${reconciliation.reportIRRPreTax} model=${reconciliation.modelIRRPreTax} relDiff=${reconciliation.irrPreTaxRelativeDifference} | maxFCFFdiff post=${postTaxMaxDiff} pre=${preTaxMaxDiff}`,
+    `Berg PFS V3 VERIFIED | NPV8 post report=${reconciliation.reportNPVPostTaxUSD} model=${reconciliation.modelNPVPostTaxUSD} relDiff=${reconciliation.npvRelativeDifference} | IRR post report=${reconciliation.reportIRRPostTax} model=${reconciliation.modelIRRPostTax} relDiff=${reconciliation.irrRelativeDifference} | NPV8 pre report=${reconciliation.reportNPVPreTaxUSD} model=${reconciliation.modelNPVPreTaxUSD} relDiff=${reconciliation.npvPreTaxRelativeDifference} | IRR pre report=${reconciliation.reportIRRPreTax} model=${reconciliation.modelIRRPreTax} relDiff=${reconciliation.irrPreTaxRelativeDifference} | maxFCFFdiff post=${postTaxMaxDiff} pre=${preTaxMaxDiff} | Mo report price=${moReportPriceUsdPerLb} USD/lb`,
   );
 })();
