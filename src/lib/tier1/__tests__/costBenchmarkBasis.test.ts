@@ -30,54 +30,81 @@ assert.equal(TIER1_COST_BENCHMARKS.Au.sourcePageOrTable, 'slide 27');
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q2 1 228–1 501'));
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q3 1 501–1 840'));
 
+// Silver now uses the verified public 2025 S&P-modelled co-product curve from
+// Pan American. Percentiles are explicit best-estimate visual read-offs, with
+// read-off uncertainty retained as diagnostic context rather than a hard guard.
+assert.equal(TIER1_COST_BENCHMARKS.Ag.comparisonEnabled, true);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.metric, 'AISC_AG_CO_PRODUCT_USD_PER_TOZ');
+assert.equal(TIER1_COST_BENCHMARKS.Ag.basisId, 'S_AND_P_CO_PRODUCT_AISC_AG');
+assert.equal(TIER1_COST_BENCHMARKS.Ag.benchmarkKind, 'FULL_QUARTILE_CURVE');
+assert.equal(TIER1_COST_BENCHMARKS.Ag.q1Max, 14.0);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.p50Max, 18.5);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.p75Max, 22.5);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.boundaryUncertaintyAbs, 0.75);
+assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Ag.dataPeriod), 2025);
+assert.equal(TIER1_COST_BENCHMARKS.Ag.sourcePageOrTable, 'slide 16, 2025 Cost Curve (100%-basis)');
+assert.ok(TIER1_COST_BENCHMARKS.Ag.notes.includes('visual read-offs'));
+
 assert.equal(TIER1_COST_BENCHMARKS.Cu.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Cu.basisId, 'S_AND_P_CO_PRODUCT_C1_CU');
 assert.equal(TIER1_COST_BENCHMARKS.Cu.benchmarkKind, 'FULL_QUARTILE_CURVE');
-assert.equal(TIER1_COST_BENCHMARKS.Cu.q1Max, 1.4);
+assert.equal(TIER1_COST_BENCHMARKS.Cu.q1Max, 1.40);
 assert.equal(TIER1_COST_BENCHMARKS.Cu.p50Max, 1.76);
 assert.equal(TIER1_COST_BENCHMARKS.Cu.p75Max, 2.18);
 assert.equal(TIER1_COST_BENCHMARKS.Cu.boundaryUncertaintyAbs, 0.05);
-assert.equal(TIER1_COST_BENCHMARKS.Cu.sourcePageOrTable, 'slide 10');
-assert.ok(TIER1_COST_BENCHMARKS.Cu.notes.includes('digitaliserade'));
-
-assert.equal(TIER1_COST_BENCHMARKS.Ag.comparisonEnabled, false);
-assert.equal(TIER1_COST_BENCHMARKS.Ag.benchmarkKind, 'FULL_QUARTILE_CURVE');
-assert.ok(TIER1_COST_BENCHMARKS.Ag.notes.includes('AISC silver'));
-assert.ok(TIER1_COST_BENCHMARKS.Ag.notes.includes('co-product'));
+assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Cu.dataPeriod), 2024);
+assert.equal(TIER1_COST_BENCHMARKS.Cu.sourcePageOrTable, 'slide 10, First Quartile Unit Cash Costs');
+assert.ok(TIER1_COST_BENCHMARKS.Cu.notes.includes('digitised'));
+assert.ok(TIER1_COST_BENCHMARKS.Cu.notes.includes('Santa Cruz C1 1.32'));
 
 assert.equal(TIER1_COST_BENCHMARKS.Zn.comparisonEnabled, false);
-assert.equal(TIER1_COST_BENCHMARKS.Zn.benchmarkKind, 'INCOMPLETE_EXTERNAL_REFERENCE');
-assert.ok(TIER1_COST_BENCHMARKS.Zn.notes.includes('Wood Mackenzie'));
-assert.ok(TIER1_COST_BENCHMARKS.Zn.notes.includes('intervallet'));
-
 assert.equal(TIER1_COST_BENCHMARKS.Pb.comparisonEnabled, false);
-assert.equal(TIER1_COST_BENCHMARKS.Pb.benchmarkKind, 'NO_VERIFIED_CURVE');
-assert.equal(TIER1_COST_BENCHMARKS.Pb.metric, null);
+assert.equal(TIER1_COST_BENCHMARKS.Zn.basisId, 'TAYLOR_ZN_AISC_NET_PB_AG_CREDITS');
 
-assert.equal(TIER1_COST_BENCHMARKS.Pt.comparisonEnabled, false);
-assert.equal(TIER1_COST_BENCHMARKS.Pd.comparisonEnabled, false);
-assert.equal(TIER1_COST_BENCHMARKS.Pt.benchmarkKind, 'NO_VERIFIED_CURVE');
-assert.equal(TIER1_COST_BENCHMARKS.Pd.benchmarkKind, 'NO_VERIFIED_CURVE');
+assert.equal(TIER1_COST_BENCHMARKS.Ni.comparisonEnabled, true);
+assert.equal(TIER1_COST_BENCHMARKS.Ni.basisId, 'JAGUAR_NI_C1_MINE_SITE_GA');
+assert.equal(TIER1_COST_BENCHMARKS.Ni.q1Max, 3.34);
+assert.equal(TIER1_COST_BENCHMARKS.Ni.p50Max, null);
+assert.ok(TIER1_COST_BENCHMARKS.Ni.notes.includes('payable Ni basis'));
+assert.ok(TIER1_COST_BENCHMARKS.Ni.notes.includes('by-product/co-product'));
 
-assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Au), 2025);
-assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Cu), 2024);
-assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Ni), 2026);
+assert.equal(TIER1_COST_BENCHMARKS.Pt.comparisonEnabled, true);
+assert.equal(TIER1_COST_BENCHMARKS.Pd.comparisonEnabled, true);
+assert.equal(TIER1_COST_BENCHMARKS.Pt.basisId, 'VALTERRA_PGM_3E_AISC_SOLD');
+assert.equal(TIER1_COST_BENCHMARKS.Pd.basisId, 'VALTERRA_PGM_3E_AISC_SOLD');
+assert.equal(TIER1_COST_BENCHMARKS.Pt.q1Max, 835);
+assert.equal(TIER1_COST_BENCHMARKS.Pt.p50Max, null);
+assert.ok(TIER1_COST_BENCHMARKS.Pt.notes.includes('första kvartilen'));
+assert.ok(TIER1_COST_BENCHMARKS.Pt.evidenceUrl?.includes('integrated-report-2025.pdf'));
 
-const cu2024 = getCompatibleTier1CostBenchmark('Cu', 'C1_CU_USD_PER_LB', new Date('2026-01-01T00:00:00Z'));
-assert.equal(cu2024.benchmark?.basisId, 'S_AND_P_CO_PRODUCT_C1_CU');
-assert.equal(cu2024.mismatchReason, null);
+for (const benchmark of Object.values(TIER1_COST_BENCHMARKS)) {
+  assert.ok(benchmark.boundaryUncertaintyAbs >= 0);
+  if (benchmark.benchmarkKind === 'FULL_QUARTILE_CURVE') {
+    assert.ok(typeof benchmark.q1Max === 'number');
+    assert.ok(typeof benchmark.p50Max === 'number');
+    assert.ok(typeof benchmark.p75Max === 'number');
+    assert.ok(benchmark.q1Max < benchmark.p50Max);
+    assert.ok(benchmark.p50Max < benchmark.p75Max);
+  }
+  if (benchmark.benchmarkKind === 'CURVE_IDENTIFIED_NO_BOUNDARIES') {
+    assert.equal(benchmark.comparisonEnabled, false);
+    assert.equal(benchmark.q1Max, null);
+    assert.equal(benchmark.p50Max, null);
+    assert.equal(benchmark.p75Max, null);
+  }
+}
 
-const cuWrongMetric = getCompatibleTier1CostBenchmark('Cu', 'AISC_AU_USD_PER_TOZ', new Date('2026-01-01T00:00:00Z'));
-assert.equal(cuWrongMetric.benchmark, null);
-assert.ok(cuWrongMetric.mismatchReason?.includes('metric mismatch'));
+assert.equal(costBenchmarkDataYear(TIER1_COST_BENCHMARKS.Au.dataPeriod), 2025);
+assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Au.length, 1);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2025 }), TIER1_COST_BENCHMARKS.Au);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AU', costBaseYear: 2024 }), null);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Au', metric: 'AISC_AU_USD_PER_TOZ', basisId: 'JAGUAR_NI_C1_MINE_SITE_GA', costBaseYear: 2025 }), null);
 
-const pbMissing = getCompatibleTier1CostBenchmark('Pb', null, new Date('2026-01-01T00:00:00Z'));
-assert.equal(pbMissing.benchmark, null);
-assert.ok(pbMissing.mismatchReason?.includes('No verified'));
+assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Ag.length, 1);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Ag', metric: 'AISC_AG_CO_PRODUCT_USD_PER_TOZ', basisId: 'S_AND_P_CO_PRODUCT_AISC_AG', costBaseYear: 2025 }), TIER1_COST_BENCHMARKS.Ag);
 
-assert.ok(TIER1_COST_BENCHMARK_SNAPSHOTS.length >= 4);
-assert.ok(TIER1_COST_BENCHMARK_SNAPSHOTS.some((row) => row.metal === 'Au' && row.dataYear === 2025));
-assert.ok(TIER1_COST_BENCHMARK_SNAPSHOTS.some((row) => row.metal === 'Cu' && row.dataYear === 2024));
-assert.ok(TIER1_COST_BENCHMARK_SNAPSHOTS.some((row) => row.metal === 'Ni' && row.dataYear === 2026));
+assert.equal(TIER1_COST_BENCHMARK_SNAPSHOTS.Cu.length, 1);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2024 }), TIER1_COST_BENCHMARKS.Cu);
+assert.equal(getCompatibleTier1CostBenchmark({ metal: 'Cu', metric: 'C1_CU_USD_PER_LB', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2025 }), null);
 
 console.log('costBenchmarkBasis.test.ts passed');
