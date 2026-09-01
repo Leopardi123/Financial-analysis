@@ -1,6 +1,6 @@
 # Compare · Pre Revenue — SSOT hardening after PR #513
 
-Status: **ACTIVE / NOT READY TO MERGE**
+Status: **READY FOR REVIEW — MERGE GATES PASSED**
 
 This document is the handoff/source-of-truth for the follow-up work after PR #513. It exists so the work can be resumed safely in a new chat without reconstructing the audit from memory.
 
@@ -223,7 +223,7 @@ Tier and Investment Score are intentionally excluded from this PR's semantic aud
 
 ## Merge gate
 
-This PR is **not mergeable by policy** until:
+All eight merge gates below have been satisfied by the branch implementation and regression suite:
 
 1. Viscaria real payback is reproduced from one coherent Corporate FCFF/timeline and the displayed Corporate/Compare value agrees.
 2. Compare uses the same canonical Corporate input resolver as Corporate.
@@ -233,3 +233,16 @@ This PR is **not mergeable by policy** until:
 6. EV/LOM Eq is `n/a` everywhere.
 7. Header sorting obeys the investment-direction table above.
 8. Cross-view source-path tests and full regression/build pass.
+
+## Completion evidence — 2026-09-01
+
+- Canonical Corporate real payback uses one coherent full-project FCFF/calendar axis. The Viscaria regression resolves to `3.574880...` years, displayed as `3.6 years`, and rejects the old rebased ~`3.2` result.
+- Corporate and Compare both use `resolveCanonicalCorporateSnapshotInputs`; shares, balance sheet, financing, extra shares, metal-price context, FX/target currency, discount rate and valuation-year policy are resolved through the shared input layer.
+- Compare Payback consumes only `snapshot.corporate.lista3Metrics.Payback_real_years`; no root Lista3a/Project/JSON payback fallback is active.
+- `snapshot.preRevenueValuation` materializes Target from the canonical valuation timeline/project-start milestone and Peak 6x from Corporate rows aligned to that same canonical period axis. Compare consumes those materialized outputs and asserts their source paths.
+- Eq/share is `10y Eq / canonical post-financing fully-adjusted shares`. `EV / LOM Eq` remains literal `n/a` and is not economically sortable.
+- Compare metric-header sorting follows the locked investment-direction table. Peak sorting uses `peak6xOverCurrentPrice`; Target sorting uses `targetOverCurrentPrice`; missing values sort last.
+- LOM help text now states the locked chronological first-positive-through-last-positive payable-production span, including internal zero-production gaps and excluding later closure periods.
+- Real-project cross-view/source-path regressions pass for Warintza PFS, Arctic FS and Copper Creek PEA. The full prebuild, TypeScript build and Vite production build passed on 2026-09-01.
+
+Tier and Investment Score remain intentionally outside this PR's semantic audit, and the separate EV-definition audit remains a non-goal.
