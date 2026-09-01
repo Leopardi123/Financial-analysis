@@ -36,6 +36,6 @@ jobs:
             echo "No source changes"
             exit 0
           fi
-          git add src/lib/snapshot/runCorporateSnapshot.ts src/lib/corporate/preRevenueMetrics.ts src/lib/corporate/__tests__/preRevenueMetrics.test.ts
+          git add src/lib/snapshot/runCorporateSnapshot.ts src/lib/corporate/preRevenueMetrics.ts src/lib/corporate/__tests__/preRevenueMetrics.test.ts src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts
           git commit -m "Fix canonical Corporate real payback axis"
           git push origin HEAD:fix/compare-pre-revenue-ssot-hardening
