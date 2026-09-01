@@ -1,8 +1,8 @@
 # Tier · Pre Revenue — physical scale threshold research
 
-Status: **POLICY FOUNDATION — Mo/U3O8/WO3 IMPLEMENTED; IRON ORE REMAINS RESEARCH-ONLY**
+Status: **RESEARCH NOTE / POLICY FOUNDATION — CURRENT POLICY STATUS RECORDED**
 
-Syfte: komplettera `docs/tier1-polymetallic-cost-and-scale-foundation.md` med source-backed fysisk skalevidens för Mo, uranium/U3O8, iron ore, Ni och tungsten/WO3. Scale-policy är fysisk och separat från price-key- och cost-benchmark-stöd. Ingen scale-policy får skapa en price key eller ekonomisk input.
+Syfte: komplettera `docs/tier1-polymetallic-cost-and-scale-foundation.md` med source-backed fysisk skalevidens för Mo, uranium/U3O8, iron ore, Ni och tungsten/WO3. Quantity semantics måste vara explicita och inga chemical/product conversions får infereras.
 
 ## Grundregel
 
@@ -21,13 +21,13 @@ Produktbasis måste vara explicit:
 |---|---:|---|---|
 | Mo | **10,000 t/år** | payable Mo | **aktiv policy** |
 | U3O8 | **5.0 Mlb/år** | recovered/payable U3O8 | **aktiv policy** |
-| Iron ore | **25 Mt/år** | saleable/usable iron ore product | **research recommendation — ej aktiv** |
-| Ni | **40,000 t/år** | contained/payable Ni | **aktiv befintlig policy** |
+| Iron ore | **25 Mt/år** | saleable/usable iron ore product | **research-only / unscored** |
+| Ni | **40,000 t/år** | contained/payable Ni | **befintlig aktiv policy** |
 | WO3 | **2,000 t/år** | recovered/payable WO3 | **aktiv policy** |
 
 ## 1. Molybdenum — 10 kt payable Mo/år
 
-**Aktiv Tier-policy:** `10,000 tonne payable Mo / year`.
+**Aktiv gräns:** `10,000 tonne payable Mo / year`.
 
 Evidens:
 
@@ -49,7 +49,7 @@ Källor:
 
 ## 2. Uranium — 5.0 Mlb U3O8/år
 
-**Aktiv Tier-policy:** `5.0 million lb recovered/payable U3O8 / year`.
+**Aktiv gräns:** `5.0 million lb recovered/payable U3O8 / year`.
 
 Varför U3O8:
 
@@ -72,15 +72,14 @@ Sanity checks:
 
 Bedömning:
 
-**5.0 Mlb U3O8/år är starkt underbyggd som fysisk Tier-1-skalegräns och är nu aktiverad.**
+**5.0 Mlb U3O8/år är source-backed och aktiv som fysisk Tier-1-skalegräns.**
 
 Implementation guard:
 
-- `U` och `U3O8` är separata exact product ids; `U` får inte träffa U3O8-policyn.
 - tU och t U3O8 får inte blandas.
-- Om source data anges i tU krävs explicit source-backed conversion innan quantity lagras som U3O8.
+- Om source data anges i tU krävs explicit source-backed conversion.
 - Om Project redan anger lb U3O8 ska ingen ytterligare metallkonvertering göras.
-- Scale-policyn får inte själv skapa eller inferera en price key. Den befintliga uranium-price stacken är en separat kontraktsfråga.
+- Exact product id gäller: `U` träffar inte `U3O8`.
 
 Källor:
 
@@ -89,7 +88,7 @@ Källor:
 
 ## 3. Iron ore / Fe — 25 Mt saleable iron ore product/år
 
-**Research recommendation — inte aktiv policy:** `25,000,000 tonne saleable/usable iron ore product / year`.
+**Research recommendation, inte aktiv policy:** `25,000,000 tonne saleable/usable iron ore product / year`.
 
 Viktig semantik:
 
@@ -109,7 +108,7 @@ Mine/project anchors:
 
 Bedömning:
 
-**25 Mt saleable iron ore product/år är en rimlig Tier-1 storleksmarkör**, men den förblir research-only tills product-id/basis och policy aktiveras separat.
+**25 Mt saleable iron ore product/år är en rimlig research-markör men är fortsatt unscored.**
 
 Implementation guard:
 
@@ -126,7 +125,7 @@ Källor:
 
 ## 4. Nickel — behåll 40 kt Ni/år
 
-**Aktiv befintlig Tier-policy:** `40,000 tonne contained/payable Ni / year`.
+Befintlig aktiv Tier-policy är `40,000 tonne contained/payable Ni / year`.
 
 Ny kontroll:
 
@@ -149,7 +148,7 @@ Källor:
 
 ## 5. Tungsten — 2,000 t recovered/payable WO3/år
 
-**Aktiv Tier-policy:** `2,000 tonne recovered/payable WO3 / year`.
+**Aktiv gräns:** `2,000 tonne recovered/payable WO3 / year`.
 
 Alternativ industrienhet: **200,000 MTU WO3/år**, eftersom 1 MTU = 10 kg WO3.
 
@@ -180,15 +179,15 @@ Project anchors:
 
 Bedömning:
 
-En **2,000 t WO3/år**-gräns ligger praktiskt taget exakt vid storleken på två av de mest betydande västliga tungstenprojekten/operationerna och är nu aktiverad som fysisk Tier-1-markör.
+En **2,000 t WO3/år**-gräns ligger praktiskt taget exakt vid storleken på två av de mest betydande västliga tungstenprojekten/operationerna och är aktiv som fysisk Tier-1-markör.
 
 Implementation guard:
 
-- `W` och `WO3` är separata exact product ids; `W` får inte träffa WO3-policyn.
 - WO3 tonnes, contained W tonnes, concentrate tonnes och MTU WO3 är separata quantity semantics.
 - 65–67% WO3 concentrate tonnes får inte behandlas som recovered WO3 tonnes.
 - Conversion från concentrate kräver explicit concentrate grade.
-- **Ingen canonical WO3/tungsten-price key finns verifierad i nuvarande price stack; scale-aktiveringen får därför inte skapa någon sådan key.**
+- Exact product id gäller: `W` träffar inte `WO3`.
+- Fysisk WO3-scale-policy skapar **inte** en price key; tungsten price support måste verifieras separat.
 
 Källor:
 
@@ -200,31 +199,29 @@ Källor:
 
 1. Product discovery är generisk och frikopplad från threshold registry.
 2. Alla physical products visas i `Skala · produkt för produkt`.
-3. Mo bidrar som `averageAnnualPayableMo / 10,000 t`.
-4. Ni fortsätter bidra som `averageAnnualPayableNi / 40,000 t`.
-5. U3O8 bidrar endast för exact product-id `U3O8` mot `5,000,000 lb/år`.
-6. WO3 bidrar endast för exact product-id `WO3` mot `2,000 tonne/år`.
-7. Iron ore förblir synligt men unscored tills separat policyacceptans och exact saleable-product basis finns.
-8. Combined scale summerar endast threshold-enabled exact products.
+3. Mo bidrar som `averageAnnualPayableMo / 10,000`.
+4. Ni bidrar som `averageAnnualPayableNi / 40,000`.
+5. U3O8 bidrar som `averageAnnualPayableU3O8 / 5,000,000 lb` endast för exact product id `U3O8`.
+6. WO3 bidrar som `averageAnnualPayableWO3 / 2,000 t` endast för exact product id `WO3`.
+7. Iron ore förblir synligt men unscored tills separat policyacceptans och exact saleable-product semantics finns.
+8. Combined scale summerar endast threshold-enabled products.
 9. Samma sammanhängande 10-årsfönster används för alla products.
-10. Scale-policy får aldrig inferera price key eller cost benchmark.
+10. Ingen ny scale commodity får automatiskt skapa eller gissa en price key.
 
 ## 7. Required regressions
 
-- Mo syns och score:as för Vizcachitas, Berg, Warintza och Copper Creek.
-- Mo 10 kt/år = 1.00x.
-- Ni 40 kt/år = 1.00x och Zn 150 kt/år = 1.00x.
-- U3O8 5.0 Mlb/år = 1.00x; `U` förblir unscored.
-- WO3 2,000 t/år = 1.00x; `W` förblir unscored.
+- Mo syns för Vizcachitas, Berg, Warintza och Copper Creek och bidrar korrekt mot 10 kt/år.
+- Ni 40 kt/år och Zn 150 kt/år behålls oförändrade.
+- Exact U3O8 5.0 Mlb/år = 1.00x; `U` får inte samma threshold.
+- Exact WO3 2,000 t/år = 1.00x; `W` får inte samma threshold.
 - Unsupported physical products syns men bidrar inte till combined scale.
-- Fe/iron ore product-basis får inte konverteras implicit.
+- U/U3O8, Fe/iron ore och W/WO3/concentrate-basis får inte konverteras implicit.
 - Ingen ny scale commodity får automatiskt skapa eller gissa en price key.
 
 ## Policy status at handoff
 
-- **Mo 10 kt/år:** aktiv policy och implementerad.
-- **Ni 40 kt/år:** aktiv befintlig policy; research stödjer att den behålls.
-- **Zn 150 kt/år:** aktiv befintlig policy och regressionslåst.
-- **U3O8 5.0 Mlb/år:** aktiv policy och implementerad med exact-product guard.
-- **Iron ore 25 Mtpa:** research recommendation; ännu inte aktiv policy.
-- **WO3 2,000 t/år:** aktiv policy och implementerad med exact-product guard; ingen tungsten-price key har uppfunnits.
+- **Mo 10 kt/år:** aktiv policy.
+- **Ni 40 kt/år:** aktiv befintlig policy.
+- **U3O8 5.0 Mlb/år:** aktiv policy med exact product-id guard.
+- **WO3 2,000 t/år:** aktiv policy med exact product-id guard.
+- **Iron ore 25 Mtpa:** research recommendation, fortsatt unscored.
