@@ -3,15 +3,9 @@ import type { ProjectJsonV3 } from '../../schema.ts';
 export const COPPER_CREEK_LB_PER_TONNE = 2204.6226218487757;
 export const COPPER_CREEK_REPORT_YEARS = [2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2044, 2045, 2046, 2047, 2048, 2049, 2050, 2051, 2052, 2053, 2054, 2055, 2056, 2057, 2058, 2059, 2060, 2061, 2062];
 
-function usdM(values: number[]): number[] {
-  return values.map((value) => value * 1_000_000);
-}
-function millionLb(values: number[]): number[] {
-  return values.map((value) => value * 1_000_000);
-}
-function thousandOz(values: number[]): number[] {
-  return values.map((value) => value * 1_000);
-}
+function usdM(values: number[]): number[] { return values.map((value) => value * 1_000_000); }
+function millionLb(values: number[]): number[] { return values.map((value) => value * 1_000_000); }
+function thousandOz(values: number[]): number[] { return values.map((value) => value * 1_000); }
 
 const payableCuMlb = [0, 0, 89, 178, 114, 106, 85, 107, 104, 105, 82, 85, 105, 111, 108, 107, 106, 112, 115, 109, 111, 127, 124, 123, 119, 115, 109, 101, 90, 76, 51, 33, 33, 23, 0, 0, 0, 0, 0];
 const payableAgKoz = [0, 0, 204, 464, 213, 139, 207, 182, 279, 436, 664, 852, 918, 832, 615, 426, 275, 211, 184, 169, 174, 183, 192, 199, 206, 214, 218, 216, 207, 191, 143, 108, 108, 74, 0, 0, 0, 0, 0];
@@ -49,16 +43,12 @@ export const COPPER_CREEK_PEA_V3: ProjectJsonV3 = {
     runtimePlacement: null,
   },
   metals: {
-    payableQtyByMetal: {
-      Cu: millionLb(payableCuMlb),
-      Ag: thousandOz(payableAgKoz),
-      Mo: millionLb(payableMoMlb),
-    },
+    payableQtyByMetal: { Cu: millionLb(payableCuMlb), Ag: thousandOz(payableAgKoz), Mo: millionLb(payableMoMlb) },
     metalInProductQtyByMetal: null,
     revenueBasisByMetal: { Cu: 'PAYABLE_DIRECT', Ag: 'PAYABLE_DIRECT', Mo: 'PAYABLE_DIRECT' },
     payableQtyUnitByMetal: { Cu: 'lb', Ag: 'toz', Mo: 'lb' },
     priceKeyByMetal: { Cu: 'CU_USD_LB', Ag: 'XAG_USD_TOZ', Mo: 'MO_USD_TONNE' },
-    auPriceKey: null,
+    auPriceKey: 'XAU_USD_TOZ',
   },
   streamsByMetal: null,
   economics: {
@@ -79,8 +69,7 @@ export const COPPER_CREEK_PEA_V3: ProjectJsonV3 = {
       ],
     },
     fiscalTakeModel: {
-      mode: 'RULES',
-      items: [],
+      mode: 'RULES', items: [],
       reportLockedItems: [{
         id: 'combined_south32_franco_royalties',
         label: 'Table 22-3 combined South32 + Franco royalties',
@@ -92,8 +81,7 @@ export const COPPER_CREEK_PEA_V3: ProjectJsonV3 = {
           placement: 'REVENUE_DEDUCTION',
           base: { line: 'NET_SMELTER_RETURN' },
           rate: { type: 'FIXED', rate: 0.03 },
-          start_t: 2,
-          end_t: 33,
+          start_t: 2, end_t: 33,
           sourceId: 'copper-creek-pea-2023',
           pageOrTable: 'Section 4.3.2-4.3.3 pp.54-55; Table 22-3 pp.353-354',
           notes: 'Report leg uses exact combined annual royalty cash flow. Runtime cannot allocate royalty-bearing tonnes by claim from public Table 22-3, so it uses 3% of all project NSR as a deliberately simple conservative proxy. This approximates the report-deck combined royalty within a modest upward buffer and avoids pretending to know annual claim-level production.',
@@ -131,11 +119,7 @@ export const COPPER_CREEK_PEA_V3: ProjectJsonV3 = {
       periodsPageOrTable: 'Section 22.4.1 p.351; Table 22-3 pp.353-354 (calendar columns 2024-2062; economic order mapped to relative t=0..38)',
       discountRate: 0.07,
       discountConvention: 'period_end_from_model_start',
-      priceDeckByKey: {
-        CU_USD_LB: 3.80,
-        XAG_USD_TOZ: 20,
-        MO_USD_TONNE: 13 * COPPER_CREEK_LB_PER_TONNE,
-      },
+      priceDeckByKey: { CU_USD_LB: 3.80, XAG_USD_TOZ: 20, MO_USD_TONNE: 13 * COPPER_CREEK_LB_PER_TONNE },
       reportNPVPostTaxUSD: 713_000_000,
       reportIRRPostTax: 0.156,
       reportNPVPreTaxUSD: 846_500_000,
@@ -152,24 +136,8 @@ export const COPPER_CREEK_PEA_V3: ProjectJsonV3 = {
       assumptionsNotes: '100% project basis, constant Q1 2023 USD, 100% equity, two-year construction, end-of-period cash flows discounted to start of construction. Table 22-3 directly reports payable Cu/Ag/Mo, off-site costs, combined royalties, operating costs, initial/expansion/sustaining/closure capital and cash tax. Change in Working Capital is blank/zero throughout and the published FCFF identity closes without a WC leg. Annual rows are rounded; no balancing entries are introduced. Initial capital US$797.9m and expansion capital US$1,620.6m are hard-checked separately in the Copper Creek golden test because the current verification checkpoint type has only one undifferentiated capex-total slot.',
     },
     reportedCostCheckpoints: [
-      {
-        metric: 'CASH_COST_BY_PRODUCT_CU_USD_PER_LB',
-        value: 1.67,
-        unit: 'USD/lb Cu',
-        period: { kind: 'LOM' },
-        sourceId: 'copper-creek-pea-2023',
-        pageOrTable: 'Table 22-1 pp.348-349; Table 22-3 p.354',
-        definitionNotes: 'Report label Cash Cost / Cash Costs (By-Product Basis). Footnote: cash costs consist of mining costs, processing costs, mine-level G&A and refining charges and royalties. Preserve report label; do not silently rename to C1 unless downstream compatibility rules prove equivalence.',
-      },
-      {
-        metric: 'AISC_CU_BY_PRODUCT_USD_PER_LB',
-        value: 1.85,
-        unit: 'USD/lb Cu',
-        period: { kind: 'LOM' },
-        sourceId: 'copper-creek-pea-2023',
-        pageOrTable: 'Table 22-1 pp.348-349; Table 22-3 p.354',
-        definitionNotes: 'Report explicitly labels this All-in Sustaining Cost (AISC). Footnote: AISC includes cash costs plus sustaining capital and closure costs; Table 22-3 also states AISC includes cash costs plus sustaining capital, royalties and closure costs. Retain the report definition as checkpoint evidence.',
-      },
+      { metric: 'CASH_COST_BY_PRODUCT_CU_USD_PER_LB', value: 1.67, unit: 'USD/lb Cu', period: { kind: 'LOM' }, sourceId: 'copper-creek-pea-2023', pageOrTable: 'Table 22-1 pp.348-349; Table 22-3 p.354', definitionNotes: 'Report label Cash Cost / Cash Costs (By-Product Basis). Footnote: cash costs consist of mining costs, processing costs, mine-level G&A and refining charges and royalties. Preserve report label; do not silently rename to C1 unless downstream compatibility rules prove equivalence.' },
+      { metric: 'AISC_CU_BY_PRODUCT_USD_PER_LB', value: 1.85, unit: 'USD/lb Cu', period: { kind: 'LOM' }, sourceId: 'copper-creek-pea-2023', pageOrTable: 'Table 22-1 pp.348-349; Table 22-3 p.354', definitionNotes: 'Report explicitly labels this All-in Sustaining Cost (AISC). Footnote: AISC includes cash costs plus sustaining capital and closure costs; Table 22-3 also states AISC includes cash costs plus sustaining capital, royalties and closure costs. Retain the report definition as checkpoint evidence.' },
     ],
   },
 };
