@@ -114,7 +114,7 @@ jobs:
 
       - name: Install and run full build gates
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Restore disabled workflow and commit final source implementation
