@@ -192,3 +192,7 @@ Because no Vizcachitas Project economic input was modified in this work block, t
 - IRR pre-tax: report 28.500% vs V3 28.5263%, difference +0.0263 percentage points (+0.0921% relative).
 
 All remain inside the existing 1% reconciliation tolerance. The unresolved status applies only to **external S&P-compatible co-product C1 classification**, not to the Project report reconciliation.
+
+## 11. Fail-closed conclusion
+
+Vizcachitas is now a proper first cost golden case: the report-defined C1 bridge is reconstructed and regression-locked, but the external Tier cost classification remains **Ej verifierad**. No reported checkpoint, gross-revenue diagnostic or rounded revenue share may be promoted to the S&P percentile gate until the three project-applicable blockers above are source-closed.
