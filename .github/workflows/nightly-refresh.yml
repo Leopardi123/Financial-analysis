@@ -24,7 +24,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          # 1) Corporate pre-revenue metrics consumes CorporateSnapshot directly.
           p = Path('src/lib/corporate/preRevenueMetrics.ts')
           s = p.read_text()
           alias = """export type CorporateSnapshotWithValuationSeries = CorporateSnapshot & {\n  corporateValuationTimeSeries?: {\n    rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }>;\n  };\n};\n\n"""
@@ -33,18 +32,15 @@ jobs:
           s = s.replace(alias, '', 1).replace('CorporateSnapshotWithValuationSeries', 'CorporateSnapshot')
           p.write_text(s)
 
-          # 2) Compare consumes the canonical CorporateSnapshot contract directly.
           p = Path('src/components/CompareStocksDashboard.tsx')
           s = p.read_text()
           old_import = """import {\n  deriveCorporatePreRevenueMetrics,\n  type CorporatePreRevenueMetrics,\n  type CorporateSnapshotWithValuationSeries,\n} from '../lib/corporate/preRevenueMetrics.ts';\n"""
           new_import = """import {\n  deriveCorporatePreRevenueMetrics,\n  type CorporatePreRevenueMetrics,\n} from '../lib/corporate/preRevenueMetrics.ts';\nimport type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';\n"""
           if old_import not in s:
               raise SystemExit('Compare import anchor not found')
-          s = s.replace(old_import, new_import, 1)
-          s = s.replace('CorporateSnapshotWithValuationSeries', 'CorporateSnapshot')
+          s = s.replace(old_import, new_import, 1).replace('CorporateSnapshotWithValuationSeries', 'CorporateSnapshot')
           p.write_text(s)
 
-          # 3) Investment Score cell consumes the canonical CorporateSnapshot contract directly.
           p = Path('src/components/investmentScore/InvestmentScoreCell.tsx')
           s = p.read_text()
           alias = """type SnapshotWithValuationSeries = CorporateSnapshot & Record<string, unknown> & {\n  corporateValuationTimeSeries?: { rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }> };\n};\n\n"""
@@ -67,7 +63,7 @@ jobs:
 
       - name: Install and build
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Restore disabled workflow and commit cleanup
