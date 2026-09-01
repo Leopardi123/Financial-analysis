@@ -53,8 +53,8 @@ const lomProductionPeriods = payableCu
 const lomReportPoolUSD = lomProductionPeriods.reduce((sum, t) => sum + reportDefinedC1Pool(t), 0);
 const lomContainedCuLb = lomProductionPeriods.reduce((sum, t) => sum + (((containedCu?.[t] as number) ?? 0) * LB_PER_TONNE), 0);
 const lomReportBasisC1 = lomReportPoolUSD / lomContainedCuLb;
-assert.ok(Math.abs(lomReportBasisC1 - 1.2544224226436176) < 1e-9);
-assert.ok(Math.abs(lomReportBasisC1 - 1.25) < 0.01, 'Rounded Table 22.7 rows should reconcile the report LOM C1 within one cent.');
+assert.ok(Math.abs(lomReportBasisC1 - 1.2412427970963822) < 1e-9);
+assert.ok(Math.abs(lomReportBasisC1 - 1.25) < 0.01, 'Rounded producing-period Table 22.7 rows should reconcile the report LOM C1 within one cent.');
 
 const verification = raw.verification?.report;
 assert.ok(verification, 'Vizcachitas report verification is required.');
