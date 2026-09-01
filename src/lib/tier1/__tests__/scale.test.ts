@@ -1,3 +1,4 @@
+import './scaleReportFixtures.test.ts';
 import assert from 'node:assert/strict';
 import {
   TIER1_SCALE_THRESHOLDS,
