@@ -2,7 +2,7 @@ import { computeProjectEngineFullProductionV1 } from '../engineFullProductionV1.
 import { resolveProjectPricesToEngineInput } from '../jsonv1/resolvePrices.ts';
 import { computeIrr } from '../../metrics/lista3.ts';
 import { parseProjectJsonV3 } from './compile.ts';
-import type { ProjectJsonV3, ProjectJsonV3ReportVerification } from './schema.ts';
+import type { ProjectJsonV3, ProjectJsonV3DiscountConvention, ProjectJsonV3ReportVerification } from './schema.ts';
 
 export type ProjectV3ReconciliationResult = {
   status: 'VERIFIED' | 'NOT_VERIFIED';
@@ -10,7 +10,7 @@ export type ProjectV3ReconciliationResult = {
   npvIrrPageOrTable: string;
   pricesPageOrTable: string;
   discountRate: number;
-  discountConvention: 'period_end' | 'mid_year';
+  discountConvention: ProjectJsonV3DiscountConvention;
   reportNPVPostTaxUSD: number;
   modelNPVPostTaxUSD: number | null;
   npvRelativeDifference: number | null;
@@ -27,6 +27,7 @@ export type ProjectV3ReconciliationResult = {
   hardChecks: Array<{ check: string; status: 'PASS' | 'FAIL'; detail: string }>;
   diagnostics: string[];
 };
+
 type Check = ProjectV3ReconciliationResult['hardChecks'][number];
 function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
 function sumFinite(series: Array<number | null>): number | null {
@@ -42,10 +43,15 @@ function within(actual: number | null, expected: number, tolerance: number): boo
   if (!finite(actual)) return false;
   return Math.abs(actual - expected) / Math.max(1, Math.abs(expected)) <= tolerance;
 }
-function npv(fcff: Array<number | null>, rate: number, convention: 'period_end' | 'mid_year'): number | null {
+function discountExponent(t: number, convention: ProjectJsonV3DiscountConvention): number {
+  if (convention === 'mid_year') return t + 0.5;
+  if (convention === 'period_end_from_model_start') return t + 1;
+  // Legacy/report convention retained for existing V3 fixtures: t=0 is the valuation date.
+  return t;
+}
+function npv(fcff: Array<number | null>, rate: number, convention: ProjectJsonV3DiscountConvention): number | null {
   if (!fcff.every(finite)) return null;
-  const shift = convention === 'mid_year' ? 0.5 : 1;
-  return (fcff as number[]).reduce((sum, value, t) => sum + value / ((1 + rate) ** (t + shift)), 0);
+  return (fcff as number[]).reduce((sum, value, t) => sum + value / ((1 + rate) ** discountExponent(t, convention)), 0);
 }
 function addMoneyCheck(checks: Check[], check: string, actual: number | null, expected: number | null | undefined, tolerance: number): void {
   if (expected == null) return;
@@ -55,8 +61,6 @@ function reportTargetChecks(parsed: ReturnType<typeof parseProjectJsonV3>, repor
   const checks: Check[] = [];
   const phase1 = parsed.engineInputWithoutPrices.phase1;
   const terminal = phase1.terminalProceedsUSD ?? [];
-  // capexUSD is report-defined initial/development CAPEX and may extend into an
-  // early production period. Classification is semantic, never t<productionStartPeriod.
   addMoneyCheck(checks, 'initial_capex', sumFinite(phase1.capexUSD), report.reportInitialCapexUSD, tolerance);
   addMoneyCheck(checks, 'sustaining_capex', sumFinite(phase1.sustainingCapexUSD), report.reportSustainingCapexUSD, tolerance);
   addMoneyCheck(checks, 'closure_total', sumFinite(phase1.reclamationUSD), report.reportClosureUSD, tolerance);
@@ -69,8 +73,7 @@ function reportTargetChecks(parsed: ReturnType<typeof parseProjectJsonV3>, repor
   if (report.reportWorkingCapitalUnwindUSD != null) {
     const period = report.reportWorkingCapitalUnwindPeriod;
     const delta = period == null ? null : phase1.workingCapitalDeltaUSD?.[period] ?? null;
-    const cashImpact = finite(delta) ? -delta : null;
-    addMoneyCheck(checks, 'working_capital_unwind', cashImpact, report.reportWorkingCapitalUnwindUSD, tolerance);
+    addMoneyCheck(checks, 'working_capital_unwind', finite(delta) ? -delta : null, report.reportWorkingCapitalUnwindUSD, tolerance);
   }
   if (report.reportWorkingCapitalUnwindPeriod != null) {
     const value = phase1.workingCapitalDeltaUSD?.[report.reportWorkingCapitalUnwindPeriod] ?? null;
@@ -141,8 +144,6 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   const tolerance = finite(report.toleranceRelative) ? report.toleranceRelative : 0.02;
   if (!(tolerance > 0 && tolerance <= 0.1)) throw new Error('verification.report.toleranceRelative must be within (0, 0.1].');
 
-  // Report reconciliation is calendar-independent and explicitly selects report-locked
-  // fiscal/tax legs. Normal runtime selects source-defined dynamic rules/proxies.
   const parsed = parseProjectJsonV3(raw, { requireRuntimePlacement: false, taxScenario: 'report', fiscalScenario: 'report' });
   const labelCount = raw.time.reportPeriodLabels?.length ?? null;
   const hardChecks: Check[] = [
