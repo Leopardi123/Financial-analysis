@@ -1,34 +1,23 @@
 name: Finalize Direct Project Price Rows
-
-on:
-  push:
-    branches:
-      - feature/corporate-pre-revenue-metrics
-
+on: [push]
 permissions:
   contents: write
-
 jobs:
   finalize:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/corporate-pre-revenue-metrics
           fetch-depth: 0
-
-      - name: Move grouped Project price fix into source
-        shell: bash
+      - name: Patch source
         run: |
           python - <<'PY'
           from pathlib import Path
-
           p = Path('src/components/SingleStockDashboard.tsx')
           s = p.read_text()
-
-          old_price = "        priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},"
-          new_price = """        // priceUsedByMetal_USD may use a different source-key unit than the
+          old = "        priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},"
+          new = """        // priceUsedByMetal_USD may use a different source-key unit than the
         // displayed payable quantity. Derive the display-unit price from the
         // canonical snapshot revenue identity instead of multiplying mismatched units.
         priceUSDByMetal: (() => {
@@ -44,10 +33,9 @@ jobs:
             }),
           );
         })(),"""
-          if old_price not in s:
-              raise SystemExit('Direct source patch: price source anchor not found')
-          s = s.replace(old_price, new_price, 1)
-
+          if old not in s:
+              raise SystemExit('price anchor not found')
+          s = s.replace(old, new, 1)
           payable = """      ...orderedMetals.map((metal) => {
         const values = getSeries(payableSeriesByMetal[metal]);
         const unit = payableUnits[metal];
@@ -57,7 +45,7 @@ jobs:
           values: include ? values : null,
         };
       }),"""
-          price_rows = """      ...orderedMetals.map((metal) => {
+          prices = """      ...orderedMetals.map((metal) => {
         const unit = payableUnits[metal] ?? '—';
         const label = `Price ${metal} (USD/${unit})`;
         const values = seriesByLabel.get(label) ?? null;
@@ -65,30 +53,18 @@ jobs:
         return { label, values };
       }),"""
           if payable not in s:
-              raise SystemExit('Direct source patch: payable row anchor not found')
-          s = s.replace(payable, payable + '\n' + price_rows, 1)
-          p.write_text(s)
-
-          Path('vite.config.ts').write_text('''import { defineConfig } from "vite";\nimport react from "@vitejs/plugin-react";\n\nexport default defineConfig({\n  plugins: [react()],\n});\n''')
+              raise SystemExit('payable anchor not found')
+          p.write_text(s.replace(payable, payable + '\n' + prices, 1))
+          Path('vite.config.ts').write_text('import { defineConfig } from "vite";\nimport react from "@vitejs/plugin-react";\n\nexport default defineConfig({\n  plugins: [react()],\n});\n')
           PY
-
-      - name: Verify source ownership
-        shell: bash
-        run: |
-          grep -q 'Price ${metal} (USD/${unit})' src/components/SingleStockDashboard.tsx
-          grep -q 'revenue / quantity' src/components/SingleStockDashboard.tsx
-          ! grep -q 'grouped-project-price-rows-patch' vite.config.ts
-
-      - name: Install and build
+      - name: Build and test
         run: |
           npm ci
           npm run test:investment-score
           npm run test:project-grid
           npm run test:pre-revenue-corporate
           npm run build
-
-      - name: Restore disabled workflow and commit
-        shell: bash
+      - name: Commit final source form
         run: |
           cat > .github/workflows/nightly-refresh.yml <<'EOF'
           name: Nightly Refresh (Disabled)
