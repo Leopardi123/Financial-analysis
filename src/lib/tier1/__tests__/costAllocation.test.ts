@@ -1,3 +1,4 @@
+import './costDefinitionContract.test.ts';
 import assert from 'node:assert/strict';
 import type { ProjectJsonV3CostComponent } from '../../project/jsonv3/schema.ts';
 import { allocateTier1CoProductCost } from '../costAllocation.ts';
