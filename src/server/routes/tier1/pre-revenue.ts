@@ -11,14 +11,18 @@ import { computeTier1CycleMultiplier, toMonthlyLast, type Tier1CycleMultiplierRe
 import {
   TIER1_COST_BENCHMARKS,
   TIER1_POLICY,
-  TIER1_PRODUCTION_THRESHOLDS,
   isTier1Metal,
+  tierBandFromScaleEquivalent,
   type Tier1CostMetric,
   type Tier1Metal,
 } from '../../../lib/tier1/config.ts';
 import {
+  bestSustainedTier1ScaleWindow,
+  normalizeDiscoveredScaleQuantity,
+  type Tier1ScaleWindow,
+} from '../../../lib/tier1/scale.ts';
+import {
   assessCapitalReturns,
-  assessCombinedScale,
   assessCost,
   assessCycle,
   assessLom,
@@ -28,12 +32,6 @@ import {
 } from '../../../lib/tier1/preRevenue.ts';
 
 const LB_PER_TONNE = 2204.6226218487757;
-const GRAMS_PER_TOZ = 31.1034768;
-const GRAMS_PER_KG = 1_000;
-const GRAMS_PER_LB = 453.59237;
-const GRAMS_PER_TONNE = 1_000_000;
-const GRAMS_PER_SHORT_TON = 907_184.74;
-const GRAMS_PER_LONG_TON = 1_016_046.9088;
 
 type ProjectPrepared = {
   projectId: string;
@@ -43,14 +41,6 @@ type ProjectPrepared = {
   basePriceByKey: Record<string, number>;
   baseInput: Awaited<ReturnType<typeof resolveProjectPricesToEngineInput>>;
   baseOutput: ReturnType<typeof computeProjectEngineFullProductionV1>;
-};
-
-type ScaleWindow = {
-  startYear: number | null;
-  endYear: number | null;
-  years: number | null;
-  averagesByMetal: Partial<Record<Tier1Metal, number>>;
-  combinedEquivalent: number | null;
 };
 
 function finite(value: unknown): value is number {
@@ -89,72 +79,6 @@ function addToNestedMap(target: Map<string, Map<number, number>>, key: string, y
   const byYear = target.get(key) ?? new Map<number, number>();
   byYear.set(year, (byYear.get(year) ?? 0) + value);
   target.set(key, byYear);
-}
-
-function payableQuantityInGrams(value: number, unit: string): number | null {
-  if (unit === 'g') return value;
-  if (unit === 'kg') return value * GRAMS_PER_KG;
-  if (unit === 'lb') return value * GRAMS_PER_LB;
-  if (unit === 'tonne') return value * GRAMS_PER_TONNE;
-  if (unit === 'short_ton') return value * GRAMS_PER_SHORT_TON;
-  if (unit === 'long_ton') return value * GRAMS_PER_LONG_TON;
-  if (unit === 'toz') return value * GRAMS_PER_TOZ;
-  return null;
-}
-
-function standardPayableQuantity(
-  metal: Tier1Metal,
-  quantityUnit: string | undefined,
-  value: number,
-): { value: number; unit: 'toz' | 'tonne' } | null {
-  if (!quantityUnit) return null;
-  const grams = payableQuantityInGrams(value, quantityUnit);
-  if (!finite(grams) || grams < 0) return null;
-  if (metal === 'Au' || metal === 'Ag' || metal === 'Pt' || metal === 'Pd') {
-    return { value: grams / GRAMS_PER_TOZ, unit: 'toz' };
-  }
-  return { value: grams / GRAMS_PER_TONNE, unit: 'tonne' };
-}
-
-function combinedScaleEquivalent(averages: Partial<Record<Tier1Metal, number>>): number {
-  let total = 0;
-  for (const [metal, value] of Object.entries(averages) as Array<[Tier1Metal, number | undefined]>) {
-    if (!isTier1Metal(metal) || !finite(value) || value < 0) continue;
-    total += value / TIER1_PRODUCTION_THRESHOLDS[metal].minimumAnnualPayable;
-  }
-  return total;
-}
-
-function bestSustainedScaleWindow(
-  quantityByMetalByYear: Map<string, Map<number, number>>,
-  productionYears: Set<number>,
-): ScaleWindow {
-  if (productionYears.size === 0) {
-    return { startYear: null, endYear: null, years: null, averagesByMetal: {}, combinedEquivalent: null };
-  }
-  const years = [...productionYears].sort((a, b) => a - b);
-  const minYear = years[0];
-  const maxYear = years[years.length - 1];
-  const span = maxYear - minYear + 1;
-  const windowYears = Math.min(TIER1_POLICY.sustainedScaleYears, span);
-  let best: ScaleWindow | null = null;
-
-  for (let start = minYear; start <= maxYear - windowYears + 1; start += 1) {
-    const end = start + windowYears - 1;
-    const averages: Partial<Record<Tier1Metal, number>> = {};
-    for (const [metalRaw, byYear] of quantityByMetalByYear.entries()) {
-      if (!isTier1Metal(metalRaw)) continue;
-      let sum = 0;
-      for (let year = start; year <= end; year += 1) sum += byYear.get(year) ?? 0;
-      averages[metalRaw] = sum / windowYears;
-    }
-    const equivalent = combinedScaleEquivalent(averages);
-    if (!best || equivalent > (best.combinedEquivalent ?? -Infinity)) {
-      best = { startYear: start, endYear: end, years: windowYears, averagesByMetal: averages, combinedEquivalent: equivalent };
-    }
-  }
-
-  return best ?? { startYear: null, endYear: null, years: null, averagesByMetal: {}, combinedEquivalent: null };
 }
 
 function aggregateFcffByYear(projects: Array<{ yearsByPeriod: number[]; fcff: Array<number | null> }>): {
@@ -297,11 +221,50 @@ function equivalentAiscForMetal(
   return equivalentQuantity > 0 ? sustainingCostUsd / equivalentQuantity : null;
 }
 
-function singlePhysicalMetal(quantityByMetalByYear: Map<string, Map<number, number>>): Tier1Metal | null {
-  const metals = [...quantityByMetalByYear.entries()]
-    .filter(([metal, byYear]) => isTier1Metal(metal) && [...byYear.values()].some((value) => finite(value) && value > 0))
-    .map(([metal]) => metal as Tier1Metal);
-  return metals.length === 1 ? metals[0] : null;
+function singlePhysicalProduct(quantityByProductByYear: Map<string, Map<number, number>>): string | null {
+  const products = [...quantityByProductByYear.entries()]
+    .filter(([, byYear]) => [...byYear.values()].some((value) => finite(value) && value > 0))
+    .map(([product]) => product);
+  return products.length === 1 ? products[0] : null;
+}
+
+function scaleGateFromWindow(scaleWindow: Tier1ScaleWindow, windowLabel?: string): Tier1Gate {
+  if (!finite(scaleWindow.combinedEquivalent)) {
+    return {
+      status: 'NOT_VERIFIED', tier: null, value: null, threshold: TIER1_POLICY.tier1ScaleEquivalent,
+      unit: 'scale-equivalent', reason: 'Ingen fysisk produkt med aktiverad Tier-scale-policy kunde verifieras.',
+    };
+  }
+  const combined = scaleWindow.combinedEquivalent;
+  const tier = tierBandFromScaleEquivalent(combined);
+  const parts = Object.values(scaleWindow.products)
+    .filter((row) => row.scored && finite(row.equivalent))
+    .sort((a, b) => (b.equivalent as number) - (a.equivalent as number))
+    .map((row) => `${row.product} ${(row.equivalent as number).toFixed(2)}x`);
+  const band = tier === 1 ? 'Tier 1' : tier === 2 ? 'Tier 2' : 'Tier 3';
+  const suffix = windowLabel ? ` · ${windowLabel}` : '';
+  return {
+    status: tier === 1 ? 'PASS' : 'FAIL',
+    tier,
+    value: combined,
+    threshold: TIER1_POLICY.tier1ScaleEquivalent,
+    unit: 'scale-equivalent',
+    reason: `${parts.join(' + ')} = ${combined.toFixed(2)}x · ${band}${suffix}. Tier 1 ≥1,00x; Tier 2 ≥0,40x; Tier 3 <0,40x.`,
+  };
+}
+
+function legacyScaleSupport(scaleWindow: Tier1ScaleWindow): {
+  averageAnnualPayableByMetal: Partial<Record<Tier1Metal, number>>;
+  scaleEquivalentByMetal: Partial<Record<Tier1Metal, number>>;
+} {
+  const averageAnnualPayableByMetal: Partial<Record<Tier1Metal, number>> = {};
+  const scaleEquivalentByMetal: Partial<Record<Tier1Metal, number>> = {};
+  for (const [product, row] of Object.entries(scaleWindow.products)) {
+    if (!isTier1Metal(product)) continue;
+    if (finite(row.normalizedQuantity)) averageAnnualPayableByMetal[product] = row.normalizedQuantity;
+    if (finite(row.equivalent)) scaleEquivalentByMetal[product] = row.equivalent;
+  }
+  return { averageAnnualPayableByMetal, scaleEquivalentByMetal };
 }
 
 export default async function handler(req: any, res: any): Promise<void> {
@@ -325,8 +288,8 @@ export default async function handler(req: any, res: any): Promise<void> {
     const diagnostics: string[] = [];
     const preparedProjects: ProjectPrepared[] = [];
     const revenueByMetalTotal: Record<string, number> = {};
-    const quantityByMetalByYear = new Map<string, Map<number, number>>();
-    const quantityUnitByMetal = new Map<string, 'toz' | 'tonne'>();
+    const quantityByProductByYear = new Map<string, Map<number, number>>();
+    const quantityUnitByProduct = new Map<string, string>();
     const productionYears = new Set<number>();
     const tierBasePriceAsOfUtc = new Date().toISOString();
     let initialCapexUsd = 0;
@@ -339,24 +302,27 @@ export default async function handler(req: any, res: any): Promise<void> {
       const physicalInput = parsed.engineInputWithoutPrices;
       const yearsByPeriod = physicalInput.yearsByPeriod;
 
-      for (const [metal, qtySeries] of Object.entries(physicalInput.payableQtyByMetal)) {
-        if (!isTier1Metal(metal)) continue;
-        const qtyUnit = physicalInput.payableQtyUnitByMetal[metal];
+      for (const [product, qtySeries] of Object.entries(physicalInput.payableQtyByMetal)) {
+        const qtyUnit = physicalInput.payableQtyUnitByMetal[product];
+        if (!qtyUnit) {
+          diagnostics.push(`${project.projectId}: payable-enhet saknas för fysisk produkt ${product}.`);
+          continue;
+        }
         for (let t = 0; t < qtySeries.length; t += 1) {
           const qty = qtySeries[t];
           if (!finite(qty) || qty <= 0) continue;
-          const standard = standardPayableQuantity(metal, qtyUnit, qty);
-          if (!standard) {
-            diagnostics.push(`${project.projectId}: payable-enheten ${qtyUnit ?? 'saknas'} kan inte konverteras för ${metal}.`);
+          const normalized = normalizeDiscoveredScaleQuantity({ product, value: qty, unit: qtyUnit });
+          if (!normalized) {
+            diagnostics.push(`${project.projectId}: payable-enheten ${qtyUnit} kan inte dimensionssäkert normaliseras för fysisk produkt ${product}.`);
             continue;
           }
-          const existingUnit = quantityUnitByMetal.get(metal);
-          if (existingUnit && existingUnit !== standard.unit) {
-            diagnostics.push(`${project.projectId}: inkonsekventa kanoniska payable-enheter för ${metal}.`);
+          const existingUnit = quantityUnitByProduct.get(product);
+          if (existingUnit && existingUnit !== normalized.unit) {
+            diagnostics.push(`${project.projectId}: inkonsekventa normaliserade payable-enheter för ${product}.`);
             continue;
           }
-          quantityUnitByMetal.set(metal, standard.unit);
-          addToNestedMap(quantityByMetalByYear, metal, yearsByPeriod[t], standard.value);
+          quantityUnitByProduct.set(product, normalized.unit);
+          addToNestedMap(quantityByProductByYear, product, yearsByPeriod[t], normalized.value);
           productionYears.add(yearsByPeriod[t]);
         }
       }
@@ -413,16 +379,22 @@ export default async function handler(req: any, res: any): Promise<void> {
     }
 
     const lomGate = assessLom(productionYears.size > 0 ? productionYears.size : null);
-    const scaleWindow = bestSustainedScaleWindow(quantityByMetalByYear, productionYears);
+    const scaleWindow = bestSustainedTier1ScaleWindow({
+      quantityByProductByYear,
+      unitByProduct: quantityUnitByProduct,
+      productionYears,
+      sustainedScaleYears: TIER1_POLICY.sustainedScaleYears,
+    });
     const windowLabel = scaleWindow.startYear !== null && scaleWindow.endYear !== null && scaleWindow.years !== null
       ? `${scaleWindow.years}-års fönster ${scaleWindow.startYear}–${scaleWindow.endYear}`
       : undefined;
-    const scaleAssessment = assessCombinedScale(scaleWindow.averagesByMetal, windowLabel);
-    const scaleGate = scaleAssessment.gate;
+    const scaleGate = scaleGateFromWindow(scaleWindow, windowLabel);
+    const legacyScale = legacyScaleSupport(scaleWindow);
+    const singleProduct = singlePhysicalProduct(quantityByProductByYear);
 
     if (!spotDeckComplete || preparedProjects.length !== loaded.length) {
       const priceReason = 'Gemensamt kanoniskt spot-deck saknas för minst ett projekt; prisberoende Tier-kriterier kan inte verifieras.';
-      const fallbackPrimary = singlePhysicalMetal(quantityByMetalByYear);
+      const fallbackPrimary = singleProduct && isTier1Metal(singleProduct) ? singleProduct : null;
       const gates = {
         lom: lomGate,
         scale: scaleGate,
@@ -431,29 +403,33 @@ export default async function handler(req: any, res: any): Promise<void> {
         capitalReturns: unavailableGate(priceReason),
       };
       const classification = classifyTier(gates);
+      const support = {
+        tierBasePriceMode: 'SPOT' as const,
+        tierBasePriceAsOfUtc,
+        tierBaseNpv10Usd: null,
+        tierBaseIrr: null,
+        tierBaseNpvOverInitialCapex: null,
+        cycleNpv10Usd: null,
+        cycleDurationProductionPeriods: TIER1_POLICY.cycleDurationProductionPeriods,
+        cycleMultipliersByMetal: {},
+        cycleMethod: null,
+        averageAnnualPayableByMetal: legacyScale.averageAnnualPayableByMetal,
+        scaleEquivalentByMetal: legacyScale.scaleEquivalentByMetal,
+        combinedScaleEquivalent: scaleWindow.combinedEquivalent,
+        scaleWindowStartYear: scaleWindow.startYear,
+        scaleWindowEndYear: scaleWindow.endYear,
+        scaleWindowYears: scaleWindow.years,
+        scaleProducts: scaleWindow.products,
+        primaryProduct: singleProduct,
+        primaryProductRevenueShare: singleProduct ? 1 : null,
+      };
       const assessment: Tier1PreRevenueAssessment = {
         status: classification.status,
         classificationReason: classification.reason,
         primaryMetal: fallbackPrimary,
         primaryMetalRevenueShare: fallbackPrimary ? 1 : null,
         gates,
-        support: {
-          tierBasePriceMode: 'SPOT',
-          tierBasePriceAsOfUtc,
-          tierBaseNpv10Usd: null,
-          tierBaseIrr: null,
-          tierBaseNpvOverInitialCapex: null,
-          cycleNpv10Usd: null,
-          cycleDurationProductionPeriods: TIER1_POLICY.cycleDurationProductionPeriods,
-          cycleMultipliersByMetal: {},
-          cycleMethod: null,
-          averageAnnualPayableByMetal: scaleWindow.averagesByMetal,
-          scaleEquivalentByMetal: scaleAssessment.equivalentByMetal,
-          combinedScaleEquivalent: scaleAssessment.combinedEquivalent,
-          scaleWindowStartYear: scaleWindow.startYear,
-          scaleWindowEndYear: scaleWindow.endYear,
-          scaleWindowYears: scaleWindow.years,
-        },
+        support,
         diagnostics,
       };
       res.status(200).json({ ok: true, symbol, assessment });
@@ -462,11 +438,12 @@ export default async function handler(req: any, res: any): Promise<void> {
 
     const totalRevenue = Object.values(revenueByMetalTotal).reduce<number>((sum, value) => sum + value, 0);
     const sortedRevenue = Object.entries(revenueByMetalTotal).filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
-    const primaryRaw = sortedRevenue[0]?.[0] ?? null;
-    const primaryMetal: Tier1Metal | null = primaryRaw && isTier1Metal(primaryRaw) ? primaryRaw : singlePhysicalMetal(quantityByMetalByYear);
-    const primaryMetalRevenueShare = primaryMetal && totalRevenue > 0
-      ? (revenueByMetalTotal[primaryMetal] ?? 0) / totalRevenue
-      : primaryMetal ? 1 : null;
+    const primaryProduct = sortedRevenue[0]?.[0] ?? singleProduct;
+    const primaryProductRevenueShare = primaryProduct && totalRevenue > 0
+      ? (revenueByMetalTotal[primaryProduct] ?? 0) / totalRevenue
+      : primaryProduct ? 1 : null;
+    const primaryMetal: Tier1Metal | null = primaryProduct && isTier1Metal(primaryProduct) ? primaryProduct : null;
+    const primaryMetalRevenueShare = primaryMetal ? primaryProductRevenueShare : null;
 
     const baseCorporate = aggregateFcffByYear(preparedProjects.map((project) => ({ yearsByPeriod: project.yearsByPeriod, fcff: project.baseOutput.phase1.fcffUSD })));
     const basePhase2 = baseCorporate
@@ -517,6 +494,9 @@ export default async function handler(req: any, res: any): Promise<void> {
     if (primaryMetal === 'Ag' && finite(agEqAisc) && (costGate.status === 'NOT_VERIFIED' || costGate.tier === null)) {
       diagnostics.push(`Kostnad Ag: engine-baserad AgEq AISC ${agEqAisc.toFixed(4)} USD/toz bevaras som cost evidence men jämförs inte med S&P:s co-product Ag AISC-kurva utan definitionskompatibel metric.`);
     }
+    if (primaryProduct && !primaryMetal) {
+      diagnostics.push(`Primär fysisk/economisk produkt ${primaryProduct} saknar definitionskompatibel Tier cost-policy; kostnads-Tier lämnas Ej verifierad.`);
+    }
 
     const cycleReason = missingCycle.length > 0
       ? `Saknar verifierbar lång historik för: ${missingCycle.map(([priceKey]) => priceKey).join(', ')}.`
@@ -536,33 +516,38 @@ export default async function handler(req: any, res: any): Promise<void> {
     const benchmark = primaryMetal ? TIER1_COST_BENCHMARKS[primaryMetal] : null;
     if (!selectedCostMetric) selectedCostMetric = benchmark && finite(costMetricValues[benchmark.metric]) ? benchmark.metric : null;
 
+    const support = {
+      tierBasePriceMode: 'SPOT' as const,
+      tierBasePriceAsOfUtc,
+      tierBaseNpv10Usd: basePhase2?.npvToday_USD ?? null,
+      tierBaseIrr: basePhase2?.irr ?? null,
+      tierBaseNpvOverInitialCapex: initialCapexUsd > 0 && finite(basePhase2?.npvToday_USD)
+        ? (basePhase2!.npvToday_USD as number) / initialCapexUsd
+        : null,
+      cycleNpv10Usd: stressPhase2?.npvToday_USD ?? null,
+      cycleDurationProductionPeriods: TIER1_POLICY.cycleDurationProductionPeriods,
+      cycleMultipliersByMetal,
+      cycleMethod: [...cycleByPriceKey.values()].find((result) => result.method)?.method ?? null,
+      averageAnnualPayableByMetal: legacyScale.averageAnnualPayableByMetal,
+      scaleEquivalentByMetal: legacyScale.scaleEquivalentByMetal,
+      combinedScaleEquivalent: scaleWindow.combinedEquivalent,
+      scaleWindowStartYear: scaleWindow.startYear,
+      scaleWindowEndYear: scaleWindow.endYear,
+      scaleWindowYears: scaleWindow.years,
+      scaleProducts: scaleWindow.products,
+      primaryProduct,
+      primaryProductRevenueShare,
+      costMetric: selectedCostMetric,
+      costMetricValue: selectedCostMetric ? costMetricValues[selectedCostMetric] ?? null : null,
+    };
+
     const assessment: Tier1PreRevenueAssessment = {
       status: classification.status,
       classificationReason: classification.reason,
       primaryMetal,
       primaryMetalRevenueShare,
       gates,
-      support: {
-        tierBasePriceMode: 'SPOT',
-        tierBasePriceAsOfUtc,
-        tierBaseNpv10Usd: basePhase2?.npvToday_USD ?? null,
-        tierBaseIrr: basePhase2?.irr ?? null,
-        tierBaseNpvOverInitialCapex: initialCapexUsd > 0 && finite(basePhase2?.npvToday_USD)
-          ? (basePhase2!.npvToday_USD as number) / initialCapexUsd
-          : null,
-        cycleNpv10Usd: stressPhase2?.npvToday_USD ?? null,
-        cycleDurationProductionPeriods: TIER1_POLICY.cycleDurationProductionPeriods,
-        cycleMultipliersByMetal,
-        cycleMethod: [...cycleByPriceKey.values()].find((result) => result.method)?.method ?? null,
-        averageAnnualPayableByMetal: scaleWindow.averagesByMetal,
-        scaleEquivalentByMetal: scaleAssessment.equivalentByMetal,
-        combinedScaleEquivalent: scaleAssessment.combinedEquivalent,
-        scaleWindowStartYear: scaleWindow.startYear,
-        scaleWindowEndYear: scaleWindow.endYear,
-        scaleWindowYears: scaleWindow.years,
-        costMetric: selectedCostMetric,
-        costMetricValue: selectedCostMetric ? costMetricValues[selectedCostMetric] ?? null : null,
-      },
+      support,
       diagnostics,
     };
 
