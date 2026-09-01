@@ -4,11 +4,12 @@ import Tier1StatusCell from './Tier1StatusCell.tsx';
 import InvestmentScoreCell from './investmentScore/InvestmentScoreCell.tsx';
 import { getCompanyProject, listCompanyProjects, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
 import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancingStateStore.ts';
-import type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';
+import {
+  deriveCorporatePreRevenueMetrics,
+  type CorporatePreRevenueMetrics,
+  type CorporateSnapshotWithValuationSeries,
+} from '../lib/corporate/preRevenueMetrics.ts';
 import { extraSharesStorageKey, parseExtraShares } from '../lib/market/extraShares.ts';
-import { getPriceKeyDefinition } from '../lib/prices/keys.ts';
-import { canonicalUnitForMetal } from '../lib/units/metalUnits.ts';
-import { convertPriceToCanonical } from '../lib/units/conversion.ts';
 import '../styles/compareStocks.css';
 
 type CompareTab = 'producer' | 'pre-revenue';
@@ -19,29 +20,22 @@ type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 type CompanyListResponse = { ok: boolean; companies?: Array<{ ticker: string; name: string }> };
 type ProfileResponse = { ok?: boolean; profile?: Record<string, unknown> | null };
 type CompanyResponse = { balance?: Record<string, Array<number | null>>; income?: Record<string, Array<number | null>> };
-type SnapshotWithValuationSeries = CorporateSnapshot & Record<string, unknown> & {
-  corporateValuationTimeSeries?: { rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }> };
-};
-type SnapshotResponse = { ok: boolean; snapshot?: SnapshotWithValuationSeries; diagnostics?: { errors?: string[]; warnings?: string[] } };
+type SnapshotResponse = { ok: boolean; snapshot?: CorporateSnapshotWithValuationSeries; diagnostics?: { errors?: string[]; warnings?: string[] } };
 
 type PreRevenueCompany = {
   ticker: string;
   name: string;
   projects: CompanyProjectSummary[];
   metals: string[];
-  snapshot: SnapshotWithValuationSeries | null;
+  snapshot: CorporateSnapshotWithValuationSeries | null;
+  metrics: CorporatePreRevenueMetrics | null;
   price: number | null;
   sharesCurrent: number | null;
   targetCurrency: string | null;
-  productionStartYear: number | null;
   manualExtraShares: number;
   metricError: string | null;
 };
 
-type EqProductionStats = { lomEq: number; tenYearEq: number; annualEq: number; productionYears: number; unit: 'oz' | 't' };
-type ValuationMarker = NonNullable<CorporateSnapshot['modeledValuationTimeline']>['markers'][number];
-
-const LB_PER_TONNE = 2204.6226218;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const readFinite = (value: unknown): number | null => finite(value) ? value : null;
 const clamp01 = (value: unknown, fallback: number): number => finite(value) ? Math.max(0, Math.min(1, value)) : fallback;
@@ -108,116 +102,31 @@ const formatPct = (value: number | null) => finite(value) ? `${(value * 100).toL
 const formatMultiple = (value: number | null) => finite(value) ? `${value.toLocaleString('sv-SE', { maximumFractionDigits: 2 })}x` : '—';
 const formatMoney = (value: number | null, currency: string | null) => finite(value) ? `${formatNumber(value)}${currency ? ` ${currency}` : ''}` : '—';
 
-function metalRecordValue<T>(record: Record<string, T> | undefined, metal: string): T | undefined {
-  if (!record) return undefined;
-  if (Object.prototype.hasOwnProperty.call(record, metal)) return record[metal];
-  const normalized = metal.trim().toLowerCase();
-  const key = Object.keys(record).find((candidate) => candidate.trim().toLowerCase() === normalized);
-  return key === undefined ? undefined : record[key];
-}
-
-function outputEqUnitAndDivisor(metal: string): { unit: 'oz' | 't'; divisor: number } {
-  const canonicalQtyUnit = canonicalUnitForMetal(metal);
-  if (canonicalQtyUnit === 'toz') return { unit: 'oz', divisor: 1 };
-  if (canonicalQtyUnit === 'lb') return { unit: 't', divisor: LB_PER_TONNE };
-  return { unit: 't', divisor: 1 };
-}
-
-function eqSeries(snapshot: SnapshotWithValuationSeries, metal: string): { values: Array<number | null>; unit: 'oz' | 't' } | null {
-  const revenue = snapshot.series?.totalRevenue_USD ?? snapshot.aggregation?.grossRevenueUSD_total;
-  if (!Array.isArray(revenue)) return null;
-
-  const display = outputEqUnitAndDivisor(metal);
-  const seriesPrices = metalRecordValue(snapshot.series?.priceUsedByMetal_USD, metal);
-  const unitAudit = metalRecordValue(snapshot.series?.unitAudit?.metals, metal);
-  if (Array.isArray(seriesPrices) && revenue.length === seriesPrices.length && unitAudit?.priceUnit) {
-    return {
-      unit: display.unit,
-      values: revenue.map((value, index) => {
-        const sourcePrice = seriesPrices[index];
-        if (!finite(value) || value < 0 || !finite(sourcePrice) || sourcePrice <= 0) return null;
-        const canonicalPrice = convertPriceToCanonical(metal, sourcePrice, unitAudit.priceUnit);
-        return finite(canonicalPrice) && canonicalPrice > 0 ? (value / canonicalPrice) / display.divisor : null;
-      }),
-    };
-  }
-
-  const priceKey = metalRecordValue(snapshot.aggregation?.priceKeyByMetal, metal);
-  const prices = metalRecordValue(snapshot.aggregation?.priceUSDByMetal, metal) ?? (metal.trim().toLowerCase() === 'au' ? snapshot.aggregation?.auPriceUSDPerOz : undefined);
-  if (!Array.isArray(prices) || revenue.length !== prices.length) return null;
-  let priceUnit: string | null = null;
-  try {
-    priceUnit = priceKey ? getPriceKeyDefinition(priceKey).canonicalUnit.replace('_per_', '_') : metal.trim().toLowerCase() === 'au' ? 'USD_toz' : null;
-  } catch { return null; }
-  if (!priceUnit) return null;
-  return {
-    unit: display.unit,
-    values: revenue.map((value, index) => {
-      const sourcePrice = prices[index];
-      if (!finite(value) || value < 0 || !finite(sourcePrice) || sourcePrice <= 0) return null;
-      const canonicalPrice = convertPriceToCanonical(metal, sourcePrice, priceUnit as string);
-      return finite(canonicalPrice) && canonicalPrice > 0 ? (value / canonicalPrice) / display.divisor : null;
-    }),
-  };
-}
-
-function computeEqProductionStats(snapshot: SnapshotWithValuationSeries, metal: string): EqProductionStats | null {
-  const eq = eqSeries(snapshot, metal); if (!eq || eq.values.length === 0) return null;
-  const firstPositive = eq.values.findIndex((value) => finite(value) && value > 0); let lastPositive = -1;
-  for (let i = eq.values.length - 1; i >= 0; i -= 1) if (finite(eq.values[i]) && (eq.values[i] as number) > 0) { lastPositive = i; break; }
-  if (firstPositive < 0 || lastPositive < firstPositive) return null;
-  const productionValues: number[] = [];
-  for (let i = firstPositive; i <= lastPositive; i += 1) { const value = eq.values[i]; if (!finite(value) || value < 0) return null; if (value > 0) productionValues.push(value); }
-  if (productionValues.length === 0) return null;
-  const lomEq = productionValues.reduce((sum, value) => sum + value, 0);
-  return { lomEq, tenYearEq: productionValues.slice(0, 10).reduce((sum, value) => sum + value, 0), annualEq: lomEq / productionValues.length, productionYears: productionValues.length, unit: eq.unit };
-}
-
-function canonicalProductionYears(snapshot: SnapshotWithValuationSeries): number | null {
-  const payable = snapshot.aggregation?.payableAuEqOz_total;
-  if (!Array.isArray(payable)) return null;
-  const count = payable.filter((value) => finite(value) && value > 0).length;
-  return count > 0 ? count : null;
-}
-
-function markerYear(marker: ValuationMarker | null | undefined): number | null { if (!marker) return null; const raw = marker.yearLabelUsed; if (finite(raw)) return raw; if (typeof raw === 'string' && raw.trim()) { const parsed = Number(raw); return Number.isFinite(parsed) ? parsed : null; } return null; }
-function validValuationMarkers(snapshot: SnapshotWithValuationSeries): ValuationMarker[] { const markers = snapshot.modeledValuationTimeline?.markers; return Array.isArray(markers) ? markers.filter((marker) => markerYear(marker) !== null && finite(marker.value_low) && finite(marker.value_high)) : []; }
-function nextRelevantProjectMarker(snapshot: SnapshotWithValuationSeries, currentYear = new Date().getUTCFullYear()): ValuationMarker | null { const markers = validValuationMarkers(snapshot).sort((a, b) => (markerYear(a) ?? Infinity) - (markerYear(b) ?? Infinity)); return markers.find((marker) => (markerYear(marker) ?? -Infinity) > currentYear) ?? null; }
-function canonicalMarkerTarget(marker: ValuationMarker | null): number | null { if (!marker) return null; if (finite(marker.value_mid_if_any)) return marker.value_mid_if_any; return finite(marker.value_low) && finite(marker.value_high) ? (marker.value_low + marker.value_high) / 2 : null; }
-function extraShareScale(snapshot: SnapshotWithValuationSeries, extraShares: number): number { if (!(extraShares > 0)) return 1; const sharesPostFinancing = snapshot.financing?.shares_post_financing; if (!finite(sharesPostFinancing) || sharesPostFinancing <= 0) return 1; return sharesPostFinancing / (sharesPostFinancing + extraShares); }
-function postFinancingShares(snapshot: SnapshotWithValuationSeries, extraShares: number): number | null { const modeledShares = snapshot.financing?.shares_post_financing; if (!finite(modeledShares) || modeledShares <= 0) return null; const manualShares = Number.isSafeInteger(extraShares) && extraShares >= 0 ? extraShares : 0; return modeledShares + manualShares; }
-function pNavPostFinancing(snapshot: SnapshotWithValuationSeries, price: number | null, extraShares: number): number | null { const sharesPf = postFinancingShares(snapshot, extraShares); const nav = snapshot.NAV_today_TargetCurrency; if (!finite(price) || price < 0 || !finite(sharesPf) || sharesPf <= 0 || !finite(nav) || nav <= 0) return null; return (price * sharesPf) / nav; }
-function peakSixTimesValuePerShare(snapshot: SnapshotWithValuationSeries, scale = 1): number | null { const rows = snapshot.corporateValuationTimeSeries?.rows; if (!Array.isArray(rows)) return null; let peak: number | null = null; for (const valuationRow of rows) if (finite(valuationRow.evEbitda6xPerShare)) { const adjusted = valuationRow.evEbitda6xPerShare * scale; peak = peak === null ? adjusted : Math.max(peak, adjusted); } return peak; }
-function targetCurrencyToUsd(snapshot: SnapshotWithValuationSeries, value: number | null): number | null { if (!finite(value)) return null; const fx = readFinite(snapshot.fx_USD_to_TargetCurrency); if (!finite(fx) || fx <= 0) return null; return value / fx; }
-
 function getMetric(row: PreRevenueCompany, key: MetricKey, referenceMetal: string): string {
-  const s = row.snapshot; if (!s) return '—';
-  const lista3 = s.corporate?.lista3Metrics; const eq = computeEqProductionStats(s, referenceMetal); const scale = extraShareScale(s, row.manualExtraShares);
-  const marker = nextRelevantProjectMarker(s); const rawTarget = canonicalMarkerTarget(marker); const target = finite(rawTarget) ? rawTarget * scale : null;
-  const targetYear = markerYear(marker) ?? row.productionStartYear; const currentYear = new Date().getUTCFullYear(); const yearsToProduction = finite(targetYear) && targetYear > currentYear ? targetYear - currentYear : null;
-  const annualReturn = finite(target) && finite(row.price) && row.price > 0 && finite(yearsToProduction) && yearsToProduction > 0 ? (target / row.price) ** (1 / yearsToProduction) - 1 : null;
-  const peak6xPerShare = peakSixTimesValuePerShare(s, scale); const peak6xVsPrice = finite(peak6xPerShare) && finite(row.price) && row.price > 0 ? peak6xPerShare / row.price : null;
-  const initialCapexUsd = targetCurrencyToUsd(s, marker?.lista2Metrics?.InitialCAPEX_incremental_TargetCurrency ?? null); const sharesPf = postFinancingShares(s, row.manualExtraShares);
-  const marketCapUsd = targetCurrencyToUsd(s, s.MarketCap_TargetCurrency); const evUsd = targetCurrencyToUsd(s, s.EV_TargetCurrency); const unit = eq?.unit ?? (referenceMetal === 'Au' ? 'oz' : 't');
+  const metrics = row.metrics;
+  if (!metrics) return '—';
+  const eq = metrics.equivalentByMetal[referenceMetal];
+  const reference = metrics.byReferenceMetal[referenceMetal];
+  const unit = eq?.unit ?? (referenceMetal === 'Au' ? 'oz' : 't');
   switch (key) {
     case 'investmentScore': return '—';
-    case 'pNav': return formatMultiple(pNavPostFinancing(s, row.price, row.manualExtraShares));
-    case 'evEbitdaPeak': return finite(peak6xPerShare) && finite(peak6xVsPrice) ? `${formatMoney(peak6xPerShare, row.targetCurrency)} · ${formatMultiple(peak6xVsPrice)}` : '—';
-    case 'targetPrice': return finite(target) && finite(row.price) && row.price > 0 ? `${formatMoney(target, row.targetCurrency)} · ${formatMultiple(target / row.price)}` : '—';
-    case 'annualReturn': return formatPct(annualReturn);
+    case 'pNav': return formatMultiple(metrics.pNavPostFinancing);
+    case 'evEbitdaPeak': return finite(metrics.peak6xValuePerShare) && finite(metrics.peak6xOverCurrentPrice) ? `${formatMoney(metrics.peak6xValuePerShare, row.targetCurrency)} · ${formatMultiple(metrics.peak6xOverCurrentPrice)}` : '—';
+    case 'targetPrice': return finite(metrics.targetPrice) && finite(metrics.targetOverCurrentPrice) ? `${formatMoney(metrics.targetPrice, row.targetCurrency)} · ${formatMultiple(metrics.targetOverCurrentPrice)}` : '—';
+    case 'annualReturn': return formatPct(metrics.annualizedReturnToTarget);
     case 'tier': return '—';
-    case 'irr': return formatPct(lista3?.IRR ?? s.project?.modeled?.npvSpotRange?.base?.irr ?? null);
-    case 'payback': return finite(s.Payback_real_years) ? `${formatNumber(s.Payback_real_years, 1)} år` : finite(s.Payback_approx_years) ? `${formatNumber(s.Payback_approx_years, 1)} år` : '—';
-    case 'lom': { const years = canonicalProductionYears(s); return finite(years) ? `${years} år` : '—'; }
-    case 'initialCapex': return formatMoney(initialCapexUsd, 'USD');
-    case 'capexAnnualAueq': return eq && finite(initialCapexUsd) && eq.annualEq > 0 ? `${formatNumber(initialCapexUsd / eq.annualEq)} USD/${unit}` : '—';
-    case 'annualAueq': return eq ? `${formatNumber(eq.annualEq)} ${unit}` : '—';
-    case 'aueq10y': return eq ? `${formatNumber(eq.tenYearEq)} ${unit}` : '—';
-    case 'aueqLom': return eq ? `${formatNumber(eq.lomEq)} ${unit}` : '—';
-    case 'aueqPerShare': return eq && finite(sharesPf) && sharesPf > 0 ? `${formatNumber(eq.lomEq / sharesPf, 4)} ${unit}/aktie` : '—';
-    case 'mcap10yAueq': return eq && finite(marketCapUsd) && eq.tenYearEq > 0 ? `${formatNumber(marketCapUsd / eq.tenYearEq)} USD/${unit}` : '—';
-    case 'mcapLomAueq': return eq && finite(marketCapUsd) && eq.lomEq > 0 ? `${formatNumber(marketCapUsd / eq.lomEq)} USD/${unit}` : '—';
-    case 'evLomAueq': return eq && finite(evUsd) && eq.lomEq > 0 ? `${formatNumber(evUsd / eq.lomEq)} USD/${unit}` : '—';
+    case 'irr': return formatPct(metrics.irr);
+    case 'payback': return finite(metrics.paybackYears) ? `${formatNumber(metrics.paybackYears, 1)} år` : '—';
+    case 'lom': return finite(metrics.lomYears) ? `${metrics.lomYears} år` : '—';
+    case 'initialCapex': return formatMoney(metrics.initialCapexUSD, 'USD');
+    case 'capexAnnualAueq': return reference && finite(reference.capexPerAnnualEqUSD) ? `${formatNumber(reference.capexPerAnnualEqUSD)} USD/${unit}` : '—';
+    case 'annualAueq': return eq?.status === 'OK' && finite(eq.annualEq) ? `${formatNumber(eq.annualEq)} ${unit}` : '—';
+    case 'aueq10y': return eq?.status === 'OK' && finite(eq.tenYearEq) ? `${formatNumber(eq.tenYearEq)} ${unit}` : '—';
+    case 'aueqLom': return eq?.status === 'OK' && finite(eq.lomEq) ? `${formatNumber(eq.lomEq)} ${unit}` : '—';
+    case 'aueqPerShare': return reference && finite(reference.lomEqPerShare) ? `${formatNumber(reference.lomEqPerShare, 4)} ${unit}/aktie` : '—';
+    case 'mcap10yAueq': return reference && finite(reference.marketCapPerTenYearEqUSD) ? `${formatNumber(reference.marketCapPerTenYearEqUSD)} USD/${unit}` : '—';
+    case 'mcapLomAueq': return reference && finite(reference.marketCapPerLomEqUSD) ? `${formatNumber(reference.marketCapPerLomEqUSD)} USD/${unit}` : '—';
+    case 'evLomAueq': return reference && finite(reference.evPerLomEqUSD) ? `${formatNumber(reference.evPerLomEqUSD)} USD/${unit}` : '—';
   }
 }
 
@@ -239,14 +148,17 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
     const profileBody = await profileRes.json() as ProfileResponse; const statements = await statementsRes.json() as CompanyResponse; const profile = profileBody.profile ?? null;
     const price = readFinite(profile?.price); const sharesCurrent = resolveShares(statements); const latestCash = resolveLatestCash(statements); const latestDebt = resolveLatestDebt(statements);
     const targetCurrency = typeof profile?.currency === 'string' && profile.currency.trim() ? profile.currency.trim().toUpperCase() : 'USD'; const manualExtraShares = persistedFinancing?.extraShares ?? localExtraShares; const metals = extractMetals(projectRecords.map((record) => record.raw_json));
-    if (!finite(price) || price <= 0 || !finite(sharesCurrent) || sharesCurrent <= 0) return { ...company, projects, metals, snapshot: null, price, sharesCurrent, targetCurrency, productionStartYear: null, manualExtraShares, metricError: 'Saknar kanoniskt marknadspris eller aktieantal.' };
+    if (!finite(price) || price <= 0 || !finite(sharesCurrent) || sharesCurrent <= 0) return { ...company, projects, metals, snapshot: null, metrics: null, price, sharesCurrent, targetCurrency, manualExtraShares, metricError: 'Saknar kanoniskt marknadspris eller aktieantal.' };
     const financingPlanByProject = Object.fromEntries(projects.map((project) => { const saved = persistedFinancing?.financingPlanByProject?.[project.project_id]; const equityFraction = clamp01(saved?.equity_fraction, 1); return [project.project_id, { equity_fraction: equityFraction, debt_fraction: 1 - equityFraction, equity_raise_price_TargetCurrency: price }]; }));
     const firstProjectId = projects[0]?.project_id ?? null; const firstProjectPlan = firstProjectId ? financingPlanByProject[firstProjectId] : null; const savedPlan = persistedFinancing?.financingPlan; const equityFraction = firstProjectPlan?.equity_fraction ?? clamp01(savedPlan?.equity_fraction, 1);
     const financingPlan = { equity_fraction: equityFraction, debt_fraction: 1 - equityFraction, use_cash_first: savedPlan?.use_cash_first === true, cash_use_percent: clamp01(savedPlan?.cash_use_percent, 1), minimum_cash_reserve_TargetCurrency: 0, equity_raise_price_TargetCurrency: price };
-    const response = await fetch('/api/snapshot/corporate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: company.ticker, valuationYear: new Date().getUTCFullYear(), targetCurrency, discountRate: 0.1, market: { shares_current: sharesCurrent, price_current_TargetCurrency: price }, balanceSheet: { cash_t0_TargetCurrency: latestCash, debt_t0_TargetCurrency: latestDebt }, financingPlan, financingPlanByProject, scenario: { mode: 'spot' }, fx: { source: targetCurrency === 'USD' ? 'manual' : 'auto', anchor: 'today', scenario: { mode: 'spot' }, manual_fx_USD_to_TargetCurrency: targetCurrency === 'USD' ? 1 : undefined } }) });
-    const body = await response.json() as SnapshotResponse; const snapshot = response.ok && body.ok && body.snapshot ? body.snapshot : null; const nextMarker = snapshot ? nextRelevantProjectMarker(snapshot) : null;
-    return { ...company, projects, metals, snapshot, price, sharesCurrent, targetCurrency, productionStartYear: markerYear(nextMarker), manualExtraShares, metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.') };
-  } catch (error) { return { ...company, projects, metals: [], snapshot: null, price: null, sharesCurrent: null, targetCurrency: null, productionStartYear: null, manualExtraShares: localExtraShares, metricError: (error as Error).message }; }
+    const valuationYear = new Date().getUTCFullYear();
+    const response = await fetch('/api/snapshot/corporate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: company.ticker, valuationYear, targetCurrency, discountRate: 0.1, market: { shares_current: sharesCurrent, price_current_TargetCurrency: price }, balanceSheet: { cash_t0_TargetCurrency: latestCash, debt_t0_TargetCurrency: latestDebt }, financingPlan, financingPlanByProject, scenario: { mode: 'spot' }, fx: { source: targetCurrency === 'USD' ? 'manual' : 'auto', anchor: 'today', scenario: { mode: 'spot' }, manual_fx_USD_to_TargetCurrency: targetCurrency === 'USD' ? 1 : undefined } }) });
+    const body = await response.json() as SnapshotResponse;
+    const snapshot = response.ok && body.ok && body.snapshot ? body.snapshot : null;
+    const metrics = snapshot ? deriveCorporatePreRevenueMetrics({ snapshot, currentPriceTargetCurrency: price, valuationYear, manualExtraShares, referenceMetals: metals }) : null;
+    return { ...company, projects, metals, snapshot, metrics, price, sharesCurrent, targetCurrency, manualExtraShares, metricError: snapshot ? null : (body.diagnostics?.errors?.join(' · ') || 'Corporate snapshot kunde inte beräknas.') };
+  } catch (error) { return { ...company, projects, metals: [], snapshot: null, metrics: null, price: null, sharesCurrent: null, targetCurrency: null, manualExtraShares: localExtraShares, metricError: (error as Error).message }; }
 }
 
 function PreRevenueCompareDashboard() {
