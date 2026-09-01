@@ -1,4 +1,9 @@
-import type { CorporateFinancingInput, CorporateFinancingOutput } from './types.ts';
+import type {
+  CorporateFinancingInput,
+  CorporateFinancingOutput,
+  CorporateFinancingProvenance,
+  CorporateFinancingProvenanceSource,
+} from './types.ts';
 
 const FRACTION_TOLERANCE = 1e-6;
 
@@ -16,6 +21,26 @@ function validateFraction(name: string, value: number | null | undefined): void 
   }
 }
 
+function explicitPlanSource(input: CorporateFinancingInput): CorporateFinancingProvenanceSource {
+  return input.financingPlan?.provenance_source ?? 'USER';
+}
+
+function buildFinancingProvenance(input: CorporateFinancingInput): CorporateFinancingProvenance {
+  const explicitSource = explicitPlanSource(input);
+  const debtFractionRaw = input.financingPlan?.debt_fraction;
+  const equityFractionRaw = input.financingPlan?.equity_fraction;
+  const useCashFirstRaw = input.financingPlan?.use_cash_first;
+  const cashUsePercentRaw = input.financingPlan?.cash_use_percent;
+
+  return {
+    debt_fraction: debtFractionRaw == null ? 'DEFAULT' : explicitSource,
+    equity_fraction: equityFractionRaw == null ? 'DEFAULT' : explicitSource,
+    use_cash_first: useCashFirstRaw == null ? 'DEFAULT' : explicitSource,
+    cash_use_percent: cashUsePercentRaw == null ? 'DEFAULT' : explicitSource,
+    canonical_default_split_applied: debtFractionRaw == null && equityFractionRaw == null,
+  };
+}
+
 export function computeCorporateFinancing(input: CorporateFinancingInput): CorporateFinancingOutput {
   if (!isFiniteNumber(input.fx_USD_to_TargetCurrency) || input.fx_USD_to_TargetCurrency <= 0) {
     throw new Error('fx_USD_to_TargetCurrency must be finite and > 0');
@@ -27,6 +52,7 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
 
   const debtFractionRaw = input.financingPlan?.debt_fraction;
   const equityFractionRaw = input.financingPlan?.equity_fraction;
+  const financing_provenance = buildFinancingProvenance(input);
 
   validateFraction('debt_fraction', debtFractionRaw);
   validateFraction('equity_fraction', equityFractionRaw);
@@ -37,6 +63,8 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
     }
   }
 
+  // Canonical default financing remains 100% equity / 0% debt. Provenance above
+  // records whether each resolved assumption came from that default or an explicit plan.
   const debt_fraction = debtFractionRaw ?? 0;
   const equity_fraction = equityFractionRaw ?? 1;
   const use_cash_first = input.financingPlan?.use_cash_first ?? true;
@@ -63,6 +91,7 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
         : null;
 
     return {
+      financing_provenance,
       latest_quarterly_cash_TargetCurrency: cashT0,
       cash_used_percent: cashUsedPercent,
       remaining_funding_need_TargetCurrency: null,
@@ -146,6 +175,7 @@ export function computeCorporateFinancing(input: CorporateFinancingInput): Corpo
     equity_now !== null && equity_now > 0 ? debt_t0_post_TargetCurrency / equity_now : null;
 
   return {
+    financing_provenance,
     latest_quarterly_cash_TargetCurrency: cash_available,
     cash_used_percent: cashUsedPercent,
     remaining_funding_need_TargetCurrency: remainingNeed,

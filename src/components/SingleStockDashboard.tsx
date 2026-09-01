@@ -3941,7 +3941,28 @@ Capital Available: ${availableLabel}`,
         payableQtyUnitByMetal: payableUnits,
       },
       economics: {
-        priceUSDByMetal: (projectSeriesRecord.priceUsedByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {},
+        // priceUsedByMetal_USD may use a different source-key unit than the
+        // displayed payable quantity. Derive the display-unit price from the
+        // canonical snapshot revenue identity instead of multiplying mismatched units.
+        priceUSDByMetal: (() => {
+          const revenueByMetal = (projectSeriesRecord.revenueByMetal_USD as Record<string, Array<number | null>> | undefined) ?? {};
+          return Object.fromEntries(
+            Object.entries(revenueByMetal).map(([metal, revenueSeries]) => {
+              const payableSeries = payableSeriesByMetal[metal] ?? [];
+              return [metal, revenueSeries.map((revenue, t) => {
+                const quantity = payableSeries[t];
+                if (
+                  typeof revenue !== 'number'
+                  || !Number.isFinite(revenue)
+                  || typeof quantity !== 'number'
+                  || !Number.isFinite(quantity)
+                  || quantity === 0
+                ) return null;
+                return revenue / quantity;
+              })];
+            }),
+          );
+        })(),
         operatingCostsUSD: getSeries(projectSeriesRecord.operatingCostsUSD) ?? undefined,
         royaltiesUSD: getSeries(projectSeriesRecord.royaltiesUSD) ?? undefined,
         ebitdaUSD: getSeries(projectSeriesRecord.ebitdaUSD) ?? undefined,
@@ -4007,6 +4028,13 @@ Capital Available: ${availableLabel}`,
           label: `Payable ${metal} (${unit ?? '—'})`,
           values: include ? values : null,
         };
+      }),
+      ...orderedMetals.map((metal) => {
+        const unit = payableUnits[metal] ?? '—';
+        const label = `Price ${metal} (USD/${unit})`;
+        const values = seriesByLabel.get(label) ?? null;
+        if (!rowHasDisplayValue(values)) return null;
+        return { label, values };
       }),
     ].filter((row) => row && row.values !== null) as Array<{ label: string; values: Array<number | null> }>;
 

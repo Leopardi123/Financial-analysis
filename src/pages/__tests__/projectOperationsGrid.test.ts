@@ -53,7 +53,7 @@ test('totals are strict and return em dash value when null appears in production
   assert.equal(totals.get('Total payable Au (t>=tp) (toz)'), null);
 });
 
-test('grade/recovery rows precede payable and derived revenue rows include EBITDA when depreciation exists', () => {
+test('grade/recovery rows precede payable and derived revenue rows include transparent prices and EBITDA when depreciation exists', () => {
   const model = buildOperationsGridModel({
     masterN: 1,
     productionStartPeriod: 0,
@@ -81,6 +81,8 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
   const labels = model.rows.map((row) => row.label);
   assert(labels.indexOf('Grade Au (gpt)') < labels.indexOf('Payable Au (toz)'));
   assert(labels.indexOf('Recovery Cu (%)') < labels.indexOf('Payable Cu (lb)'));
+  assert(labels.includes('Price Au (USD/toz)'));
+  assert(labels.includes('Price Cu (USD/lb)'));
   assert(labels.includes('Revenue Au (USD)'));
   assert(labels.includes('Gross revenue (USD)'));
   assert(labels.includes('Gross profit (USD)'));
@@ -89,10 +91,37 @@ test('grade/recovery rows precede payable and derived revenue rows include EBITD
 
   const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
   assert.deepEqual(byLabel.get('Recovery Au (%)'), [90, 88]);
+  assert.deepEqual(byLabel.get('Price Au (USD/toz)'), [2000, 2100]);
+  assert.deepEqual(byLabel.get('Price Cu (USD/lb)'), [4, 4.1]);
   assert.deepEqual(byLabel.get('Revenue Au (USD)'), [2000000, 1995000]);
   assert.deepEqual(byLabel.get('Gross revenue (USD)'), [2008000, 2003610]);
   assert.deepEqual(byLabel.get('Gross profit (USD)'), [1208000, 1193610]);
   assert.deepEqual(byLabel.get('EBITDA (USD)'), [1208000, 1193610]);
+});
+
+test('Mo payable lb, displayed USD/lb price and revenue preserve the direct table identity', () => {
+  const payableMoLb = 22_000_000;
+  const revenueMoUSD = 667_413_043.467;
+  const effectivePriceUsdPerLb = revenueMoUSD / payableMoLb;
+
+  const model = buildOperationsGridModel({
+    masterN: 0,
+    productionStartPeriod: 0,
+    yearsByPeriod: [2030],
+    operations: null,
+    metals: {
+      payableQtyByMetal: { Mo: [payableMoLb] },
+      payableQtyUnitByMetal: { Mo: 'lb' },
+    },
+    economics: {
+      priceUSDByMetal: { Mo: [effectivePriceUsdPerLb] },
+    },
+  });
+
+  const byLabel = new Map(model.rows.map((row) => [row.label, row.values]));
+  assert.deepEqual(byLabel.get('Payable Mo (lb)'), [payableMoLb]);
+  assert.ok(Math.abs(((byLabel.get('Price Mo (USD/lb)')?.[0] ?? 0) as number) - effectivePriceUsdPerLb) < 1e-12);
+  assert.ok(Math.abs(((byLabel.get('Revenue Mo (USD)')?.[0] ?? 0) as number) - revenueMoUSD) < 1e-6);
 });
 
 test('rows are shown only when at least one cell has a real value', () => {

@@ -16,6 +16,13 @@ function assertAlmostEqual(actual: number | null, expected: number, message: str
 
 function baseFinancing(): CorporateFinancingOutput {
   return {
+    financing_provenance: {
+      debt_fraction: 'DEFAULT',
+      equity_fraction: 'DEFAULT',
+      use_cash_first: 'DEFAULT',
+      cash_use_percent: 'DEFAULT',
+      canonical_default_split_applied: true,
+    },
     cash_used_for_build_TargetCurrency: 0,
     cash_t0_post_TargetCurrency: 200,
     new_debt_TargetCurrency: 0,
@@ -105,7 +112,6 @@ function baseAggregation(): CorporateAggregationOutput {
   assertEqual(nullPrice.EV_over_NAV, null, 'null EV gives null EV_over_NAV');
   assertEqual(nullPrice.P_over_NAV, null, 'null market cap gives null P_over_NAV');
 
-
   const negativeDenominators = computeMarketValue({
     market: {
       shares_current: 100,
@@ -156,6 +162,11 @@ function baseAggregation(): CorporateAggregationOutput {
   assertAlmostEqual(snapshot.EV_over_NPV, 2.2, 'snapshot exposes root-level EV over NPV');
   assertAlmostEqual(snapshot.EV_over_NAV, 2.75, 'snapshot exposes root-level EV over NAV');
   assertAlmostEqual(snapshot.P_over_NAV, 2.5, 'snapshot exposes root-level P over NAV');
+  assertEqual(
+    snapshot.financing.financing_provenance.canonical_default_split_applied,
+    true,
+    'snapshot preserves financing provenance',
+  );
 
   console.log('Corporate snapshot market value tests passed');
 })();

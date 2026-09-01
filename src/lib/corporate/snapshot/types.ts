@@ -22,6 +22,44 @@ export type MarketValueOutput = {
   EV_perShare_TargetCurrency: number | null; // EVPS = EV / shares_current
 };
 
+export type CorporateValuationTimeSeriesRow = {
+  period: number;
+  year: number;
+  dcfAbsolute: number | null;
+  navAbsolute: number | null;
+  npvAbsolute: number | null;
+  dcfPerShare: number | null;
+  dcfExCapexAbsolute: number | null;
+  dcfExCapexPerShare: number | null;
+  navPerShare: number | null;
+  npvPerShare: number | null;
+  sharesPf: number | null;
+  ebitdaTarget: number | null;
+  ev5xTarget: number | null;
+  ev6xTarget: number | null;
+  ev7xTarget: number | null;
+  evEbitda5xPerShare: number | null;
+  evEbitda6xPerShare: number | null;
+  evEbitda7xPerShare: number | null;
+};
+
+export type CorporateValuationProjectMarker = {
+  projectId: string;
+  projectName: string | null | undefined;
+  constructionStartPeriod: number | null;
+  constructionStartYear: number | null;
+  productionStartPeriod: number | null;
+  productionStartYear: number | null;
+  firstContributionPeriod: number | null;
+  lastContributionPeriod: number | null;
+};
+
+export type CorporateValuationTimeSeries = {
+  valuationYear: number;
+  internalCorporateYears: number[];
+  rows: CorporateValuationTimeSeriesRow[];
+  projectMarkers: CorporateValuationProjectMarker[];
+};
 
 export type CorporateSnapshotEconomicsBreakdownSeries = {
   cogs?: {
@@ -177,6 +215,7 @@ export type CorporateSnapshot = {
   BookValue_perShare_USD_shares_post_financing: number | null;
 
   series?: CorporateSnapshotSeries;
+  corporateValuationTimeSeries?: CorporateValuationTimeSeries;
 
   project?: {
     modeled?: {
