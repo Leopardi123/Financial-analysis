@@ -62,18 +62,28 @@ export type Tier1DefinitionReadiness = {
   blockers: string[];
 };
 
+export type Tier1CuC1DefinitionReadinessContext = {
+  /**
+   * False means the specific project has no stream/encumbrance affecting metal
+   * revenue, so an unresolved generic stream methodology cannot block that
+   * project. Omitted/true preserves the conservative global readiness guard.
+   */
+  hasStreams?: boolean;
+};
+
 /**
  * Gate external benchmark readiness only. This does not assess the project cost
  * value itself and does not modify canonical Project economics.
  */
 export function assessCuC1DefinitionReadiness(
   contract: Tier1CuC1DefinitionContract = S_AND_P_CO_PRODUCT_C1_CU_DEFINITION,
+  context: Tier1CuC1DefinitionReadinessContext = {},
 ): Tier1DefinitionReadiness {
   const blockers: string[] = [];
   if (contract.denominator.status !== 'VERIFIED') blockers.push('paid/payable Cu denominator');
   if (contract.allocation.methodStatus !== 'VERIFIED') blockers.push('co-product allocation method');
   if (contract.allocation.revenueVectorStatus !== 'VERIFIED') blockers.push('exact allocation revenue/price vector');
-  if (contract.allocation.streamTreatmentStatus !== 'VERIFIED') blockers.push('stream treatment');
+  if (contract.allocation.streamTreatmentStatus !== 'VERIFIED' && context.hasStreams !== false) blockers.push('stream treatment');
   if (contract.componentBoundaryStatus !== 'VERIFIED') blockers.push('full current C1 component boundary');
   if (contract.costVintageAlignmentStatus !== 'VERIFIED') blockers.push('project-to-benchmark cost-vintage alignment');
   return blockers.length === 0
