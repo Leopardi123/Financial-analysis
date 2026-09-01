@@ -69,7 +69,7 @@ function metricGroups(referenceMetal: string): readonly MetricGroup[] {
       ['annualAueq', `Annual ${eq}`, `LOM ${eq} dividerat med antal positiva produktionsår`],
       ['aueq10y', `10y ${eq}`, `Canonical spot-revenue uttryckt som ${eq} under de första upp till tio produktionsåren`],
       ['aueqLom', `LOM ${eq}`, `Canonical spot-revenue uttryckt som ${eq} över hela produktionsperioden`],
-      ['aueqPerShare', `${eq} / aktie`, `LOM ${eq} dividerat med canonical aktier efter modellerad finansiering och manuellt tillagda extra aktier`],
+      ['aueqPerShare', `10y ${eq} / aktie`, `10y ${eq} dividerat med canonical aktier efter modellerad finansiering och manuellt tillagda extra aktier`],
     ] },
     { label: 'RELATIV VÄRDERING', columns: [
       ['mcap10yAueq', `MCap / 10y ${eq}`, `Market cap i USD per canonical 10y ${eq}`],
@@ -123,7 +123,7 @@ function getMetric(row: PreRevenueCompany, key: MetricKey, referenceMetal: strin
     case 'annualAueq': return eq?.status === 'OK' && finite(eq.annualEq) ? `${formatNumber(eq.annualEq)} ${unit}` : '—';
     case 'aueq10y': return eq?.status === 'OK' && finite(eq.tenYearEq) ? `${formatNumber(eq.tenYearEq)} ${unit}` : '—';
     case 'aueqLom': return eq?.status === 'OK' && finite(eq.lomEq) ? `${formatNumber(eq.lomEq)} ${unit}` : '—';
-    case 'aueqPerShare': return reference && finite(reference.lomEqPerShare) ? `${formatNumber(reference.lomEqPerShare, 4)} ${unit}/aktie` : '—';
+    case 'aueqPerShare': return reference && finite(reference.tenYearEqPerShare) ? `${formatNumber(reference.tenYearEqPerShare, 4)} ${unit}/aktie` : '—';
     case 'mcap10yAueq': return reference && finite(reference.marketCapPerTenYearEqUSD) ? `${formatNumber(reference.marketCapPerTenYearEqUSD)} USD/${unit}` : '—';
     case 'mcapLomAueq': return reference && finite(reference.marketCapPerLomEqUSD) ? `${formatNumber(reference.marketCapPerLomEqUSD)} USD/${unit}` : '—';
     case 'evLomAueq': return 'n/a';
