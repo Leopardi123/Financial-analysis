@@ -26,6 +26,7 @@ import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 import { applyStressModifiers } from './applyStressModifiers.ts';
 import { buildValuationTimeline, selectCorporateProjectStartMilestones, selectTimelineChartSeries } from '../valuation/canonicalValuationTimeline.ts';
 import { computeCorporateQualityMultiples } from '../corporate/multipleContrast/engine.ts';
+import { buildCorporatePreRevenueValuationOutput } from '../corporate/preRevenueValuationOutput.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -3516,14 +3517,15 @@ export async function runCorporateSnapshotPipeline(args: {
         return { projectId: context.projectId, fcffUSD: localPeriod >= 0 ? context.economics.fcffUSD[localPeriod] ?? null : 0 };
       })),
     });
-    (snapshot as Record<string, unknown>).canonicalValuationTimeline = corporateCanonicalTimeline;
-    (snapshot as Record<string, unknown>).projectStartMilestones = selectCorporateProjectStartMilestones(
+    const projectStartMilestones = selectCorporateProjectStartMilestones(
       corporateCanonicalTimeline,
       projectsForBuildFunding.map((project) => ({
         projectId: project.projectId, projectName: project.projectName,
         productionStartYear: project.yearsByPeriod[project.productionStartPeriod] ?? null,
       })),
     );
+    snapshot.canonicalValuationTimeline = corporateCanonicalTimeline;
+    snapshot.projectStartMilestones = projectStartMilestones;
     const canonicalChartRows = selectTimelineChartSeries(corporateCanonicalTimeline);
     const chartFlows = {
       dcfProdstartPresentPerShareSeries: corporateCanonicalTimeline.periods.map((row) => row.dcfPresentValueTodayPerShareTarget),
@@ -3571,7 +3573,13 @@ export async function runCorporateSnapshotPipeline(args: {
         return { projectId: project.projectId, projectName: project.projectName, constructionStartPeriod: constructionYear === null ? null : valuationYears.indexOf(constructionYear), constructionStartYear: constructionYear, productionStartPeriod: productionCorporatePeriod !== null && productionCorporatePeriod >= 0 ? productionCorporatePeriod : null, productionStartYear: productionYear !== null && productionYear >= input.valuationYear ? productionYear : null, firstContributionPeriod: contributionPeriods[0] ?? null, lastContributionPeriod: contributionPeriods.length ? contributionPeriods[contributionPeriods.length - 1] : null };
       }),
     };
-    (snapshot as Record<string, unknown>).corporateValuationTimeSeries = corporateValuationTimeSeries;
+    snapshot.corporateValuationTimeSeries = corporateValuationTimeSeries;
+    snapshot.preRevenueValuation = buildCorporatePreRevenueValuationOutput({
+      valuationYear: input.valuationYear,
+      canonicalValuationTimeline: corporateCanonicalTimeline,
+      projectStartMilestones,
+      corporateValuationTimeSeries,
+    });
     // Phase A only: publish an isolated, read-only valuation overlay. The engine
     // consumes final calendar-aligned Corporate series and cannot feed economics,
     // financing, canonical valuation, or the existing static 5x/6x/7x rows.

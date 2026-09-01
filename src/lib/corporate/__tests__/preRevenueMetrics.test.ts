@@ -31,6 +31,25 @@ const snapshot = {
       },
     },
   },
+  preRevenueValuation: {
+    sourcePath: 'snapshot.preRevenueValuation',
+    valuationYear: 2026,
+    target: {
+      sourcePath: 'canonicalValuationTimeline.projectStartMilestone',
+      calendarYear: 2030,
+      periodIndex: 4,
+      lowNavPerShareTargetCurrency: 12,
+      highDcfPerShareTargetCurrency: 18,
+      targetPriceTargetCurrency: 15,
+    },
+    peak6x: {
+      sourcePath: 'corporateValuationTimeSeries.canonicalPeriodRows',
+      calendarYear: 2031,
+      periodIndex: 5,
+      valuePerShareTargetCurrency: 20,
+    },
+    diagnostics: [],
+  },
   modeledValuationTimeline: {
     markers: [{
       tp: 1,
@@ -78,6 +97,9 @@ assert.ok(Math.abs((result.targetPrice ?? 0) - 12.5) < 1e-12);
 assert.ok(Math.abs((result.targetOverCurrentPrice ?? 0) - 6.25) < 1e-12);
 assert.ok(Math.abs((result.peak6xValuePerShare ?? 0) - (20 * 100 / 120)) < 1e-12);
 assert.ok(Math.abs((result.peak6xOverCurrentPrice ?? 0) - (20 * 100 / 120 / 2)) < 1e-12);
+assert.equal(result.valuationSourcePath, 'snapshot.preRevenueValuation');
+assert.equal(result.targetSourcePath, 'canonicalValuationTimeline.projectStartMilestone');
+assert.equal(result.peak6xSourcePath, 'corporateValuationTimeSeries.canonicalPeriodRows');
 
 assert.equal(result.equivalentByMetal.Au.status, 'OK');
 assert.equal(result.equivalentByMetal.Au.unit, 'oz');
