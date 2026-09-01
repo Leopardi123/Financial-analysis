@@ -226,7 +226,12 @@ for (const testCase of cases) {
 
   assertNear(derived.irr, legacy.irr, `${testCase.name} IRR`);
   assertNear(derived.paybackYears, legacy.payback, `${testCase.name} payback`);
-  assertNear(derived.lomYears, legacy.lom, `${testCase.name} LOM`);
+  if (testCase.name === 'Copper Creek PEA') {
+    assert.equal(legacy.lom, null, 'Legacy Compare LOM was unavailable for Copper Creek because it depended on payable AuEq.');
+    assert.equal(derived.lomYears, 32, 'Canonical Corporate LOM must resolve from the physical payable-metal production span.');
+  } else {
+    assertNear(derived.lomYears, legacy.lom, `${testCase.name} LOM`);
+  }
   assertNear(derived.sharesPostFinancing, legacy.sharesPf, `${testCase.name} PF shares`);
   assertNear(derived.pNavPostFinancing, legacy.pNav, `${testCase.name} P/NAV PF`);
   assertNear(derived.initialCapexUSD, legacy.initialCapexUsd, `${testCase.name} initial CAPEX`);
