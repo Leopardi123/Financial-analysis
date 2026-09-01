@@ -156,3 +156,17 @@ if old not in text:
     raise SystemExit('preRevenue no-fallback test anchor missing')
 text = text.replace(old, new, 1)
 test_path.write_text(text)
+
+# The old migration parity intentionally reproduces the old Compare source path.
+# Payback has now been semantically corrected, so its regression must compare
+# Compare to canonical Corporate rather than Compare to the obsolete root Lista3a value.
+parity_path = Path('src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts')
+text = parity_path.read_text()
+old = "  assertNear(derived.paybackYears, legacy.payback, `${testCase.name} payback`);\n"
+new = """  const canonicalCorporatePayback = snapshot.corporate?.lista3Metrics?.Payback_real_years ?? null;
+  assertNear(derived.paybackYears, canonicalCorporatePayback, `${testCase.name} canonical Corporate payback`);
+"""
+if old not in text:
+    raise SystemExit('legacy payback parity assertion anchor missing')
+text = text.replace(old, new, 1)
+parity_path.write_text(text)
