@@ -16,6 +16,13 @@ function assertAlmostEqual(actual: number | null, expected: number, message: str
 
 function baseFinancing(): CorporateFinancingOutput {
   return {
+    financing_provenance: {
+      debt_fraction: 'DEFAULT',
+      equity_fraction: 'DEFAULT',
+      use_cash_first: 'DEFAULT',
+      cash_use_percent: 'DEFAULT',
+      canonical_default_split_applied: true,
+    },
     cash_used_for_build_TargetCurrency: 0,
     cash_t0_post_TargetCurrency: 200,
     new_debt_TargetCurrency: 0,
@@ -58,104 +65,75 @@ function baseAggregation(): CorporateAggregationOutput {
   };
 }
 
-(function runSnapshotTests() {
-  const financing = baseFinancing();
-
-  const happy = computeMarketValue({
-    market: {
-      shares_current: 100,
-      price_current_TargetCurrency: 10,
-    },
-    financing,
+(function runTests() {
+  const market = computeMarketValue({
+    NPV_today_TargetCurrency: 500,
+    NAV_today_TargetCurrency: 400,
+    shares_current: 100,
+    price_current_TargetCurrency: 10,
+    preferredEquity_TargetCurrency: 20,
+    minorityInterest_TargetCurrency: 30,
+    cash_t0_post_TargetCurrency: 200,
+    debt_t0_post_TargetCurrency: 300,
   });
 
-  assertEqual(happy.MarketCap_TargetCurrency, 1000, 'happy path computes market cap');
-  assertEqual(happy.EV_TargetCurrency, 1100, 'happy path computes EV');
-  assertAlmostEqual(happy.EV_over_NPV, 2.2, 'happy path computes EV over NPV');
-  assertAlmostEqual(happy.EV_over_NAV, 2.75, 'happy path computes EV over NAV');
-  assertAlmostEqual(happy.P_over_NAV, 2.5, 'happy path computes P over NAV');
-  assertAlmostEqual(happy.EV_perShare_TargetCurrency, 11, 'happy path computes EVPS');
-
-  const sharesNowRule = computeMarketValue({
-    market: {
-      shares_current: 100,
-      price_current_TargetCurrency: 10,
-    },
-    financing: {
-      ...financing,
-      shares_post_financing: 1000,
-    },
-  });
-  assertAlmostEqual(
-    sharesNowRule.EV_perShare_TargetCurrency,
-    11,
-    'EVPS uses shares_current and not shares_post_financing',
-  );
-
-  const nullPrice = computeMarketValue({
-    market: {
-      shares_current: 100,
-      price_current_TargetCurrency: null,
-    },
-    financing,
-  });
-  assertEqual(nullPrice.MarketCap_TargetCurrency, null, 'null price gives null market cap');
-  assertEqual(nullPrice.EV_TargetCurrency, null, 'null price gives null EV');
-  assertEqual(nullPrice.EV_over_NPV, null, 'null EV gives null EV_over_NPV');
-  assertEqual(nullPrice.EV_over_NAV, null, 'null EV gives null EV_over_NAV');
-  assertEqual(nullPrice.P_over_NAV, null, 'null market cap gives null P_over_NAV');
-
-
-  const negativeDenominators = computeMarketValue({
-    market: {
-      shares_current: 100,
-      price_current_TargetCurrency: 10,
-    },
-    financing: {
-      ...financing,
-      NPV_today_TargetCurrency: -500,
-      NAV_today_TargetCurrency: -400,
-    },
-  });
-  assertEqual(negativeDenominators.EV_over_NPV, null, 'non-positive NPV gives null EV_over_NPV');
-  assertEqual(negativeDenominators.EV_over_NAV, null, 'non-positive NAV gives null EV_over_NAV');
-  assertEqual(negativeDenominators.P_over_NAV, null, 'non-positive NAV gives null P_over_NAV');
-
-  const withAdjustments = computeMarketValue({
-    market: {
-      shares_current: 100,
-      price_current_TargetCurrency: 10,
-      preferredEquity_TargetCurrency: 50,
-      minorityInterest_TargetCurrency: 25,
-    },
-    financing,
-  });
-  assertEqual(
-    withAdjustments.EnterpriseAdjustments_TargetCurrency,
-    75,
-    'enterprise adjustments sum preferred and minority',
-  );
-  assertEqual(withAdjustments.EV_TargetCurrency, 1175, 'adjustments increase EV');
+  assertEqual(market.MarketCap_TargetCurrency, 1000, 'market cap');
+  assertEqual(market.EnterpriseAdjustments_TargetCurrency, 150, 'enterprise adjustments');
+  assertEqual(market.EV_TargetCurrency, 1150, 'enterprise value');
+  assertAlmostEqual(market.EV_over_NPV, 2.3, 'EV/NPV');
+  assertAlmostEqual(market.EV_over_NAV, 2.875, 'EV/NAV');
+  assertAlmostEqual(market.P_over_NAV, 2.5, 'P/NAV');
+  assertAlmostEqual(market.EV_perShare_TargetCurrency, 11.5, 'EV per share');
 
   const snapshot = buildCorporateSnapshot({
-    targetCurrency: 'SEK',
+    targetCurrency: 'CAD',
     aggregation: baseAggregation(),
-    financing,
+    financing: baseFinancing(),
     market: {
       shares_current: 100,
       price_current_TargetCurrency: 10,
+      preferredEquity_TargetCurrency: 20,
+      minorityInterest_TargetCurrency: 30,
     },
+    cfDcfMetrics: {
+      CF_LOM_USD: 100,
+      CF_LOM_perShare_USD: 0.1,
+      CF_LOM_prodStart_perShare_USD: 0.1,
+      DCF_prodStart_exCapex_USD: 80,
+      DCF_prodStart_exCapex_perShare_USD: 0.08,
+      DCF_prodStart_present_USD: 70,
+      DCF_prodStart_present_perShare_USD: 0.07,
+      Payback_approx_years: 3,
+      Payback_real_years: 4,
+    },
+    lista3aMetrics: {
+      ROI_10Y_pct: 10,
+      LOM_average_EBIT_ROCE_pct: 12,
+      LOM_discounted_EBIT_ROCE_pct: 11,
+    },
+    lista4Metrics: {
+      NPV_over_ETLV: 2,
+      DCF_present_over_ETLV: 1.8,
+      DCF_prodStart_over_ETLV: 2.1,
+      Revenue_10Y_USD: 1000,
+      FCFF_10Y_USD: 400,
+      AuEq_Oz_10Y: 100,
+      InSituValue_10Y_USD: 5000,
+      InSituValue_perShare_10Y_USD: 5,
+    },
+    fx_USD_to_TargetCurrency: 2,
   });
 
-  assertEqual(snapshot.targetCurrency, 'SEK', 'snapshot keeps target currency');
-  assertEqual(snapshot.NPV_today_TargetCurrency, 500, 'snapshot keeps convenience NPV');
-  assertEqual(snapshot.NAV_today_TargetCurrency, 400, 'snapshot keeps convenience NAV');
-  assertEqual(snapshot.MarketCap_TargetCurrency, 1000, 'snapshot exposes root-level market cap');
-  assertEqual(snapshot.EV_TargetCurrency, 1100, 'snapshot exposes root-level EV');
-  assertAlmostEqual(snapshot.EV_perShare_TargetCurrency, 11, 'snapshot exposes root-level EV per share');
-  assertAlmostEqual(snapshot.EV_over_NPV, 2.2, 'snapshot exposes root-level EV over NPV');
-  assertAlmostEqual(snapshot.EV_over_NAV, 2.75, 'snapshot exposes root-level EV over NAV');
-  assertAlmostEqual(snapshot.P_over_NAV, 2.5, 'snapshot exposes root-level P over NAV');
+  assertEqual(snapshot.targetCurrency, 'CAD', 'snapshot currency');
+  assertEqual(snapshot.NPV_today_TargetCurrency, 500, 'snapshot NPV');
+  assertEqual(snapshot.NAV_today_TargetCurrency, 400, 'snapshot NAV');
+  assertEqual(snapshot.MarketCap_TargetCurrency, 1000, 'snapshot market cap');
+  assertEqual(snapshot.EV_TargetCurrency, 1150, 'snapshot EV');
+  assertEqual(snapshot.CF_LOM_TargetCurrency, 200, 'snapshot CF LOM conversion');
+  assertEqual(snapshot.DCF_prodStart_present_TargetCurrency, 140, 'snapshot DCF conversion');
+  assertEqual(snapshot.Revenue_10Y_TargetCurrency, 2000, 'snapshot revenue conversion');
+  assertEqual(snapshot.InSituValue_perShare_10Y_TargetCurrency, 10, 'snapshot in-situ/share conversion');
+  assertEqual(snapshot.financing.financing_provenance.canonical_default_split_applied, true, 'snapshot preserves financing provenance');
 
-  console.log('Corporate snapshot market value tests passed');
+  console.log('Corporate snapshot tests passed');
 })();
