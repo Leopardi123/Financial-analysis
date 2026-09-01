@@ -69,13 +69,6 @@ export type Tier1CuC1DefinitionReadinessContext = {
    * project. Omitted/true preserves the conservative global readiness guard.
    */
   hasStreams?: boolean;
-  /**
-   * True means the project source itself exposes the exact product-level net
-   * revenue vector needed by the allocator. This is project evidence only; it
-   * does not change the global S&P contract or authorize a guessed vector for
-   * another project.
-   */
-  hasExactAllocationRevenueVector?: boolean;
 };
 
 /**
@@ -89,9 +82,7 @@ export function assessCuC1DefinitionReadiness(
   const blockers: string[] = [];
   if (contract.denominator.status !== 'VERIFIED') blockers.push('paid/payable Cu denominator');
   if (contract.allocation.methodStatus !== 'VERIFIED') blockers.push('co-product allocation method');
-  if (contract.allocation.revenueVectorStatus !== 'VERIFIED' && context.hasExactAllocationRevenueVector !== true) {
-    blockers.push('exact allocation revenue/price vector');
-  }
+  if (contract.allocation.revenueVectorStatus !== 'VERIFIED') blockers.push('exact allocation revenue/price vector');
   if (contract.allocation.streamTreatmentStatus !== 'VERIFIED' && context.hasStreams !== false) blockers.push('stream treatment');
   if (contract.componentBoundaryStatus !== 'VERIFIED') blockers.push('full current C1 component boundary');
   if (contract.costVintageAlignmentStatus !== 'VERIFIED') blockers.push('project-to-benchmark cost-vintage alignment');
