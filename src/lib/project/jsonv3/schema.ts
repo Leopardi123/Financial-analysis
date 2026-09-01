@@ -1,5 +1,6 @@
 import type { FiscalTakeRule } from '../fiscal/types.ts';
 import type { QtyUnit } from '../jsonv1/schema.ts';
+import type { StreamMVIConfig } from '../streams/types.ts';
 
 export type ProjectJsonV3CostComponentCategory =
   | 'mining'
@@ -125,7 +126,10 @@ export type ProjectJsonV3ReportVerification = {
   periodsPageOrTable?: string | null;
   discountRate: number;
   discountConvention: 'period_end' | 'mid_year';
+  /** Scalar report price for keys whose report deck is constant through the relative model. */
   priceDeckByKey: Record<string, number>;
+  /** Exact report-relative price series for keys whose report deck changes by period. */
+  priceDeckSeriesByKey?: Record<string, Array<number | null>> | null;
   reportNPVPostTaxUSD: number;
   reportIRRPostTax: number;
   reportNPVPreTaxUSD?: number | null;
@@ -171,7 +175,7 @@ export type ProjectJsonV3 = {
     priceKeyByMetal: Record<string, string>;
     auPriceKey: string | null;
   };
-  streamsByMetal?: Record<string, unknown> | null;
+  streamsByMetal?: Record<string, StreamMVIConfig> | null;
   economics: {
     costModel: ProjectJsonV3CostModel;
     sellingModel: ProjectJsonV3SellingModel;

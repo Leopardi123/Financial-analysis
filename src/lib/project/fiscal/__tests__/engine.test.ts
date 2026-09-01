@@ -1,5 +1,6 @@
 import '../../jsonv3/__tests__/vizcachitasPfs.test.ts';
 import '../../jsonv3/__tests__/bergPfs.test.ts';
+import '../../jsonv3/__tests__/warintzaPfs.test.ts';
 import { computeFiscalTake } from '../engine.ts';
 import type { FiscalTakeRule } from '../types.ts';
 

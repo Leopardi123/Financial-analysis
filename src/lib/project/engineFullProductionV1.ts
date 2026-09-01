@@ -42,9 +42,7 @@ function deriveRevenueQtyByMetal(
       const q = payable[t]; const f = factor[t];
       if (!finite(q) || !finite(f)) return null;
       if (q < 0 || f < 0 || f > 1 + 1e-9) throw new Error(`Invalid payable/payability input for ${metal} at t=${t}.`);
-      if (f === 0) {
-        throw new Error(`Cannot reconstruct gross commercial quantity from zero payability factor for ${metal} at t=${t}; preserve a representable source-backed commercial basis or leave unverified.`);
-      }
+      if (f === 0) throw new Error(`Cannot reconstruct gross commercial quantity from zero payability factor for ${metal} at t=${t}; preserve a representable source-backed commercial basis or leave unverified.`);
       return q / Math.min(1, f);
     });
   }
@@ -80,8 +78,16 @@ function payabilityDeductions(grossByMetalUSD: Record<string, Array<number | nul
   }
   return out;
 }
-function buildFiscalLedger(args: { input: ProjectEngineFullProductionV1Input; grossMetalValueUSD: Array<number | null>; revenueAfterStreamUSD: Array<number | null>; payabilityDeductionUSD: Array<number | null>; baseSellingCostsUSD: Array<number | null>; streamTakeUSD: Array<number | null> }): Partial<Record<FiscalLedgerLine, Array<number | null>>> {
-  const { input, grossMetalValueUSD, revenueAfterStreamUSD, payabilityDeductionUSD, baseSellingCostsUSD, streamTakeUSD } = args;
+function buildFiscalLedger(args: {
+  input: ProjectEngineFullProductionV1Input;
+  grossMetalValueUSD: Array<number | null>;
+  revenueAfterStreamUSD: Array<number | null>;
+  payabilityDeductionUSD: Array<number | null>;
+  baseSellingCostsUSD: Array<number | null>;
+  streamTakeUSD: Array<number | null>;
+  streamPurchaseRevenueUSD: Array<number | null>;
+}): Partial<Record<FiscalLedgerLine, Array<number | null>>> {
+  const { input, grossMetalValueUSD, revenueAfterStreamUSD, payabilityDeductionUSD, baseSellingCostsUSD, streamTakeUSD, streamPurchaseRevenueUSD } = args;
   const length = input.masterN + 1; const supplied = input.phase1.fiscalLedgerUSD ?? {};
   const op = input.phase1.operatingCostsUSD; const ga = input.phase1.siteGandA_USD; const sustaining = input.phase1.sustainingCapexUSD; const reclamation = input.phase1.reclamationUSD;
   const dep = input.phase1.depreciationUSD ?? zeroSeries(length); const bp = input.phase1.byproductCreditsUSD ?? zeroSeries(length);
@@ -103,6 +109,7 @@ function buildFiscalLedger(args: { input: ProjectEngineFullProductionV1Input; gr
     PAYABILITY_DEDUCTION: payabilityDeductionUSD,
     REVENUE_AFTER_PAYABILITY: revenueAfterPayability,
     STREAM_TAKE: streamTakeUSD,
+    STREAM_PURCHASE_REVENUE: streamPurchaseRevenueUSD,
     OFFSITE_TOTAL: baseSellingCostsUSD,
     NET_SMELTER_RETURN: netSmelterReturn,
     SITE_OPEX_TOTAL: op,
@@ -126,7 +133,10 @@ export function computeProjectEngineFullProductionV1(input: ProjectEngineFullPro
   if (hasStreams && hasNonPayableRevenueBasis) throw new Error('Streams with non-payable revenue basis are ambiguous and must fail closed.');
 
   const streamsOut = hasStreams ? applyStreamsByMetal({ masterN: input.masterN, payableQtyByMetal: input.payableQtyByMetal, spotPriceUSDByMetal: input.spotPriceUSDByMetal, streamsByMetal: input.streamsByMetal ?? {} }) : null;
-  const grossPreStreamByMetal = grossRevenueByMetal(revenueQtyByMetal, input.spotPriceUSDByMetal, input.masterN);
+  // For source-backed POST_STREAM payable disclosures, the stream engine reconstructs the
+  // pre-stream commercial quantity solely for gross-value / stream-take accounting.
+  const grossQtyByMetal = streamsOut?.preStreamPayableQtyByMetal ?? revenueQtyByMetal;
+  const grossPreStreamByMetal = grossRevenueByMetal(grossQtyByMetal, input.spotPriceUSDByMetal, input.masterN);
   const grossPreStreamUSD = sumSeriesStrict(Object.values(grossPreStreamByMetal), length);
   const payabilityDeductionUSDByMetal = payabilityDeductions(grossPreStreamByMetal, input.phase1.payabilityFactorByMetal, length);
   const payabilityDeductionUSDTotal = sumSeriesStrict(Object.values(payabilityDeductionUSDByMetal), length);
@@ -135,11 +145,20 @@ export function computeProjectEngineFullProductionV1(input: ProjectEngineFullPro
   const baseSellingCostsUSD = input.phase1.sellingCostsUSD ?? zeroSeries(length);
   const sellingAfterPayability = addSeries(baseSellingCostsUSD, payabilityDeductionUSDTotal, length);
   const streamTakeUSD = subtractSeries(grossPreStreamUSD, revenueOut.grossRevenueUSD, length);
+  const streamPurchaseRevenueUSD = streamsOut?.streamPurchaseRevenueUSD_total ?? zeroSeries(length);
   const fiscalRules = input.phase1.fiscalTakeRules ?? [];
   const fiscalTake = fiscalRules.length > 0 ? computeFiscalTake({
     masterN: input.masterN,
     rules: fiscalRules,
-    ledgerUSD: buildFiscalLedger({ input, grossMetalValueUSD: grossPreStreamUSD, revenueAfterStreamUSD: revenueOut.grossRevenueUSD, payabilityDeductionUSD: payabilityDeductionUSDTotal, baseSellingCostsUSD, streamTakeUSD }),
+    ledgerUSD: buildFiscalLedger({
+      input,
+      grossMetalValueUSD: grossPreStreamUSD,
+      revenueAfterStreamUSD: revenueOut.grossRevenueUSD,
+      payabilityDeductionUSD: payabilityDeductionUSDTotal,
+      baseSellingCostsUSD,
+      streamTakeUSD,
+      streamPurchaseRevenueUSD,
+    }),
     priceSeriesByKey: input.priceSeriesByKey ?? null,
   }) : null;
 

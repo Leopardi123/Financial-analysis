@@ -44,7 +44,7 @@ function within(actual: number | null, expected: number, tolerance: number): boo
 }
 function npv(fcff: Array<number | null>, rate: number, convention: 'period_end' | 'mid_year'): number | null {
   if (!fcff.every(finite)) return null;
-  const shift = convention === 'mid_year' ? 0.5 : 0;
+  const shift = convention === 'mid_year' ? 0.5 : 1;
   return (fcff as number[]).reduce((sum, value, t) => sum + value / ((1 + rate) ** (t + shift)), 0);
 }
 function addMoneyCheck(checks: Check[], check: string, actual: number | null, expected: number | null | undefined, tolerance: number): void {
@@ -83,6 +83,54 @@ function reportTargetChecks(parsed: ReturnType<typeof parseProjectJsonV3>, repor
   return checks;
 }
 
+function reportPriceDeckCheck(raw: ProjectJsonV3, report: ProjectJsonV3ReportVerification): Check {
+  const requiredKeys = [...new Set(Object.values(raw.metals.priceKeyByMetal))].sort();
+  const scalar = report.priceDeckByKey ?? {};
+  const series = report.priceDeckSeriesByKey ?? {};
+  const scalarKeys = Object.keys(scalar).sort();
+  const seriesKeys = Object.keys(series).sort();
+  const suppliedUnion = [...new Set([...scalarKeys, ...seriesKeys])].sort();
+  const overlaps = scalarKeys.filter((key) => seriesKeys.includes(key));
+  const missing = requiredKeys.filter((key) => !scalarKeys.includes(key) && !seriesKeys.includes(key));
+  const extra = suppliedUnion.filter((key) => !requiredKeys.includes(key));
+  const invalidScalar = scalarKeys.filter((key) => !finite(scalar[key]) || scalar[key] <= 0);
+  const invalidSeries = seriesKeys.filter((key) => {
+    const values = series[key];
+    return !Array.isArray(values) || values.length !== raw.time.masterN + 1 || values.some((value) => !finite(value) || value <= 0);
+  });
+  const pass = overlaps.length === 0 && missing.length === 0 && extra.length === 0 && invalidScalar.length === 0 && invalidSeries.length === 0;
+  return {
+    check: 'report_price_deck_keys',
+    status: pass ? 'PASS' : 'FAIL',
+    detail: `required=[${requiredKeys.join(',')}]; scalar=[${scalarKeys.join(',')}]; series=[${seriesKeys.join(',')}]; missing=[${missing.join(',')}]; extra=[${extra.join(',')}]; overlaps=[${overlaps.join(',')}]; invalidScalar=[${invalidScalar.join(',')}]; invalidSeries=[${invalidSeries.join(',')}]`,
+  };
+}
+
+async function runReportDeckEngine(raw: ProjectJsonV3, parsed: ReturnType<typeof parseProjectJsonV3>, report: ProjectJsonV3ReportVerification) {
+  const fixedSeed: Record<string, number> = { ...(report.priceDeckByKey ?? {}) };
+  for (const [key, values] of Object.entries(report.priceDeckSeriesByKey ?? {})) {
+    const first = values.find(finite);
+    if (first !== undefined && !(key in fixedSeed)) fixedSeed[key] = first;
+  }
+  const input = await resolveProjectPricesToEngineInput({
+    parsed,
+    scenario: { mode: 'fixed', fixedPriceByKey: fixedSeed },
+    allowRefresh: false,
+    projectId: raw.meta?.projectId ?? 'project-v3-report-check',
+  });
+  for (const [key, valuesRaw] of Object.entries(report.priceDeckSeriesByKey ?? {})) {
+    const values = [...valuesRaw];
+    input.priceSeriesByKey = input.priceSeriesByKey ?? {};
+    input.priceSeriesByKey[key] = values;
+    for (const [metal, priceKey] of Object.entries(raw.metals.priceKeyByMetal)) {
+      if (priceKey === key) input.spotPriceUSDByMetal[metal] = [...values];
+    }
+    if (raw.metals.auPriceKey === key) input.aisc.auPriceUSDPerOz = [...values];
+  }
+  input.phase2.discountRate = report.discountRate;
+  return { input, output: computeProjectEngineFullProductionV1(input) };
+}
+
 export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promise<ProjectV3ReconciliationResult> {
   const report = raw.verification?.report;
   if (!report) throw new Error('project_json_v3 verification.report is required for report reconciliation.');
@@ -96,10 +144,6 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   // Report reconciliation is calendar-independent and explicitly selects report-locked
   // fiscal/tax legs. Normal runtime selects source-defined dynamic rules/proxies.
   const parsed = parseProjectJsonV3(raw, { requireRuntimePlacement: false, taxScenario: 'report', fiscalScenario: 'report' });
-  const requiredKeys = [...new Set(Object.values(raw.metals.priceKeyByMetal))].sort();
-  const suppliedKeys = Object.keys(report.priceDeckByKey).sort();
-  const missing = requiredKeys.filter((key) => !finite(report.priceDeckByKey[key]) || report.priceDeckByKey[key] <= 0);
-  const extra = suppliedKeys.filter((key) => !requiredKeys.includes(key));
   const labelCount = raw.time.reportPeriodLabels?.length ?? null;
   const hardChecks: Check[] = [
     {
@@ -107,11 +151,7 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
       status: raw.time.phaseByPeriod.length === raw.time.masterN + 1 && (labelCount === null || labelCount === raw.time.masterN + 1) ? 'PASS' : 'FAIL',
       detail: `periods=${raw.time.masterN + 1}; productionStartPeriod=${raw.time.productionStartPeriod}; nameplateCapacityPeriod=${raw.time.nameplateCapacityPeriod ?? 'not_disclosed'}; reportLabels=${labelCount ?? 'not_disclosed'}; runtimePlacement=ignored_for_report_reconciliation`,
     },
-    {
-      check: 'report_price_deck_keys',
-      status: missing.length === 0 && extra.length === 0 ? 'PASS' : 'FAIL',
-      detail: `required=[${requiredKeys.join(',')}]; supplied=[${suppliedKeys.join(',')}]; missing=[${missing.join(',')}]; extra=[${extra.join(',')}]`,
-    },
+    reportPriceDeckCheck(raw, report),
   ];
   hardChecks.push(...reportTargetChecks(parsed, report, tolerance));
 
@@ -119,15 +159,10 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   let output: ReturnType<typeof computeProjectEngineFullProductionV1> | null = null;
   if (hardChecks.every((check) => check.status === 'PASS')) {
     try {
-      const input = await resolveProjectPricesToEngineInput({
-        parsed,
-        scenario: { mode: 'fixed', fixedPriceByKey: report.priceDeckByKey },
-        allowRefresh: false,
-        projectId: raw.meta?.projectId ?? 'project-v3-report-check',
-      });
-      input.phase2.discountRate = report.discountRate;
-      output = computeProjectEngineFullProductionV1(input);
-      diagnostics.push(...(input.diagnostics?.warnings ?? []));
+      const run = await runReportDeckEngine(raw, parsed, report);
+      output = run.output;
+      diagnostics.push(...(run.input.diagnostics?.warnings ?? []));
+      if (Object.keys(report.priceDeckSeriesByKey ?? {}).length > 0) diagnostics.push(`Applied report-relative price series exactly for keys=[${Object.keys(report.priceDeckSeriesByKey ?? {}).sort().join(',')}].`);
     } catch (error) {
       diagnostics.push(`Report-deck engine run failed: ${error instanceof Error ? error.message : String(error)}`);
     }
