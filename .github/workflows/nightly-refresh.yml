@@ -48,15 +48,34 @@ jobs:
               raise SystemExit('InvestmentScoreCell alias anchor not found')
           s = s.replace(alias, '', 1).replace('SnapshotWithValuationSeries', 'CorporateSnapshot')
           p.write_text(s)
+
+          # Test fixtures may stay partial, but use the canonical CorporateSnapshot type
+          # as their cast target instead of importing a production compatibility alias.
+          for filename in [
+            'src/lib/corporate/__tests__/preRevenueMetrics.test.ts',
+            'src/lib/corporate/__tests__/preRevenueMetricsMetals.test.ts',
+            'src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts',
+          ]:
+            p = Path(filename)
+            s = p.read_text()
+            old = """import {\n  deriveCorporatePreRevenueMetrics,\n  type CorporateSnapshotWithValuationSeries,\n} from '../preRevenueMetrics.ts';\n"""
+            new = """import { deriveCorporatePreRevenueMetrics } from '../preRevenueMetrics.ts';\nimport type { CorporateSnapshot } from '../snapshot/types.ts';\n"""
+            if old not in s:
+              raise SystemExit(f'{filename}: legacy test import anchor not found')
+            s = s.replace(old, new, 1).replace('CorporateSnapshotWithValuationSeries', 'CorporateSnapshot')
+            p.write_text(s)
           PY
 
-      - name: Verify no compatibility aliases remain in migrated consumers
+      - name: Verify no compatibility aliases remain
         shell: bash
         run: |
           if grep -R "CorporateSnapshotWithValuationSeries\|SnapshotWithValuationSeries" \
             src/lib/corporate/preRevenueMetrics.ts \
             src/components/CompareStocksDashboard.tsx \
-            src/components/investmentScore/InvestmentScoreCell.tsx; then
+            src/components/investmentScore/InvestmentScoreCell.tsx \
+            src/lib/corporate/__tests__/preRevenueMetrics.test.ts \
+            src/lib/corporate/__tests__/preRevenueMetricsMetals.test.ts \
+            src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts; then
             echo "Compatibility alias remains"
             exit 1
           fi
@@ -84,6 +103,13 @@ jobs:
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/corporate/preRevenueMetrics.ts src/components/CompareStocksDashboard.tsx src/components/investmentScore/InvestmentScoreCell.tsx .github/workflows/nightly-refresh.yml
+          git add \
+            src/lib/corporate/preRevenueMetrics.ts \
+            src/components/CompareStocksDashboard.tsx \
+            src/components/investmentScore/InvestmentScoreCell.tsx \
+            src/lib/corporate/__tests__/preRevenueMetrics.test.ts \
+            src/lib/corporate/__tests__/preRevenueMetricsMetals.test.ts \
+            src/lib/corporate/__tests__/preRevenueMetricsParity.test.ts \
+            .github/workflows/nightly-refresh.yml
           git commit -m "Use Corporate snapshot contract in pre-revenue consumers"
           git push origin HEAD:feature/corporate-pre-revenue-metrics
