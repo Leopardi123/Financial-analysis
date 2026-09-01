@@ -3,6 +3,7 @@ import {
   computePreRevenuePNavPostFinancing,
   computePreRevenuePeakSixTimesVsPrice,
 } from '../corporate/preRevenueValuation.ts';
+import { deriveCorporateProductionLife } from '../corporate/preRevenueProductionLife.ts';
 import { assessValuationConvergence } from './valuationConvergence.ts';
 import type {
   InvestmentScoreInputs,
@@ -16,7 +17,10 @@ type CorporateSnapshotForInvestmentScore = {
     shares_post_financing?: number | null;
   } | null;
   aggregation?: {
-    payableAuEqOz_total?: Array<number | null> | null;
+    corporateYearsByPeriod?: number[] | null;
+  } | null;
+  series?: {
+    payableQtyByMetal?: Record<string, Array<number | null>> | null;
   } | null;
   corporateValuationTimeSeries?: {
     rows?: Array<{
@@ -42,7 +46,7 @@ export type CanonicalPreRevenueAdapterResult = {
     pNav: 'COMPARE_STOCKS_PNAV_PF' | 'UNAVAILABLE';
     peak6xVsPrice: 'COMPARE_STOCKS_PEAK_6X_VS_PRICE' | 'UNAVAILABLE';
     valuationConvergence: 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE' | 'UNAVAILABLE';
-    lomYears: 'COMPARE_STOCKS_CANONICAL_PAYABLE_AUEQ_PRODUCTION_YEARS' | 'UNAVAILABLE';
+    lomYears: 'CORPORATE_CANONICAL_PHYSICAL_PAYABLE_PRODUCTION_SPAN' | 'UNAVAILABLE';
     tier: 'TIER1_PRE_REVENUE_ASSESSMENT' | 'UNAVAILABLE';
     cycleResistanceTier1Pass: 'TIER1_PRE_REVENUE_CYCLE_GATE' | 'UNAVAILABLE';
     downsideRobustnessPass: 'TIER1_PRE_REVENUE_CYCLE_GATE_V0_CALIBRATION' | 'UNAVAILABLE';
@@ -51,29 +55,6 @@ export type CanonicalPreRevenueAdapterResult = {
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
-}
-
-function canonicalPayableAuEqProductionYears(
-  values: Array<number | null> | null | undefined,
-): number | null {
-  if (!Array.isArray(values) || values.length === 0) return null;
-  const firstPositive = values.findIndex((value) => finite(value) && value > 0);
-  let lastPositive = -1;
-  for (let i = values.length - 1; i >= 0; i -= 1) {
-    if (finite(values[i]) && (values[i] as number) > 0) {
-      lastPositive = i;
-      break;
-    }
-  }
-  if (firstPositive < 0 || lastPositive < firstPositive) return null;
-
-  let years = 0;
-  for (let i = firstPositive; i <= lastPositive; i += 1) {
-    const value = values[i];
-    if (!finite(value) || value < 0) return null;
-    if (value > 0) years += 1;
-  }
-  return years > 0 ? years : null;
 }
 
 function tierFromAssessment(assessment: Tier1PreRevenueAssessment | null): 1 | 2 | 3 | null {
@@ -106,7 +87,10 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
     : null;
   const convergence = assessValuationConvergence({ pNav, peak6xVsPrice });
   const lomYears = snapshot
-    ? canonicalPayableAuEqProductionYears(snapshot.aggregation?.payableAuEqOz_total)
+    ? deriveCorporateProductionLife({
+        payableQtyByMetal: snapshot.series?.payableQtyByMetal,
+        corporateYearsByPeriod: snapshot.aggregation?.corporateYearsByPeriod,
+      }).lomYears
     : null;
   const tier = tierFromAssessment(args.tierAssessment);
   const cycleResistance = cycleResistanceTier1Pass(args.tierAssessment);
@@ -114,7 +98,7 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
   if (pNav === null) diagnostics.push('P/NAV PF: Ej verifierad från canonical Corporate snapshot + current price.');
   if (peak6xVsPrice === null) diagnostics.push('Peak 6x / pris: Ej verifierad från canonical Corporate valuation time series + current price.');
   diagnostics.push(`Valuation convergence: ${convergence.reason}`);
-  if (lomYears === null) diagnostics.push('LOM: Ej verifierad från canonical payable AuEq production series.');
+  if (lomYears === null) diagnostics.push('LOM: Ej verifierad från canonical physical payable-by-metal production span.');
   if (tier === null) diagnostics.push('Tier: Ej verifierad från Tier1 pre-revenue assessment.');
   if (cycleResistance === null) diagnostics.push('Cykelresistens: Ej verifierad från Tier1 cycle gate.');
 
@@ -144,7 +128,7 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
       pNav: pNav === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_PNAV_PF',
       peak6xVsPrice: peak6xVsPrice === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_PEAK_6X_VS_PRICE',
       valuationConvergence: convergence.classification === 'NOT_VERIFIED' ? 'UNAVAILABLE' : 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE',
-      lomYears: lomYears === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_CANONICAL_PAYABLE_AUEQ_PRODUCTION_YEARS',
+      lomYears: lomYears === null ? 'UNAVAILABLE' : 'CORPORATE_CANONICAL_PHYSICAL_PAYABLE_PRODUCTION_SPAN',
       tier: tier === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_ASSESSMENT',
       cycleResistanceTier1Pass: cycleResistance === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_CYCLE_GATE',
       downsideRobustnessPass: cycleResistance === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_CYCLE_GATE_V0_CALIBRATION',
