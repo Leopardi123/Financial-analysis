@@ -2159,6 +2159,14 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const financing = fxRate === null
       ? {
+          financing_provenance: {
+            debt_fraction: input.financingPlan?.debt_fraction == null ? 'DEFAULT' as const : 'USER' as const,
+            equity_fraction: input.financingPlan?.equity_fraction == null ? 'DEFAULT' as const : 'USER' as const,
+            use_cash_first: input.financingPlan?.use_cash_first == null ? 'DEFAULT' as const : 'USER' as const,
+            cash_use_percent: input.financingPlan?.cash_use_percent == null ? 'DEFAULT' as const : 'USER' as const,
+            canonical_default_split_applied: input.financingPlan?.debt_fraction == null && input.financingPlan?.equity_fraction == null,
+          },
+          remaining_funding_need_TargetCurrency: null,
           cash_used_for_build_TargetCurrency: null,
           cash_t0_post_TargetCurrency: null,
           new_debt_TargetCurrency: null,
