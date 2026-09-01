@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { UNIT_CONSTANTS } from '../../prices/units/types.ts';
 import {
   deriveCorporatePreRevenueMetrics,
   type CorporateSnapshotWithValuationSeries,
@@ -90,7 +91,7 @@ assert.equal(result.byReferenceMetal.Au.lomEqPerShare, 0.25);
 
 assert.equal(result.equivalentByMetal.Cu.status, 'OK');
 assert.equal(result.equivalentByMetal.Cu.unit, 't');
-const expectedCuLomTonnes = ((1000 / 2) + (2000 / 2)) / 2204.6226218;
+const expectedCuLomTonnes = ((1000 / 2) + (2000 / 2)) / UNIT_CONSTANTS.LB_PER_TONNE;
 assert.ok(Math.abs((result.equivalentByMetal.Cu.lomEq ?? 0) - expectedCuLomTonnes) < 1e-12);
 assert.ok(Math.abs((result.equivalentByMetal.Cu.annualEq ?? 0) - expectedCuLomTonnes / 2) < 1e-12);
 
