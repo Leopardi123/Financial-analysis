@@ -13,6 +13,12 @@ import {
   preRevenuePostFinancingShares,
 } from './preRevenueValuation.ts';
 
+export type CorporateSnapshotWithValuationSeries = CorporateSnapshot & {
+  corporateValuationTimeSeries?: {
+    rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }>;
+  };
+};
+
 export type EquivalentMetalMetrics = {
   metal: string;
   unit: 'oz' | 't';
