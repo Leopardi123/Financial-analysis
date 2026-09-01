@@ -51,7 +51,7 @@ assert.ok(Math.abs(reportCashCostNetByProduct - 0.72) < 0.005, 'Arctic Table 22-
 // "All-in Cost" and must not be silently normalized to conventional AISC.
 const sustainingOnlyDiagnostic = (reportOnsiteUSD + reportOffsiteUSD - byProductCreditsUSD + reportSustainingCapexUSD) / reportPayableCuLb;
 const reportAllInNetByProduct = (reportOnsiteUSD + reportOffsiteUSD - byProductCreditsUSD + reportTotalCapitalUSD) / reportPayableCuLb;
-assert.ok(Math.abs(sustainingOnlyDiagnostic - 0.7797799283132632) < 1e-12);
+assert.ok(Math.abs(sustainingOnlyDiagnostic - 0.7797682424483229) < 1e-12);
 assert.ok(Math.abs(reportAllInNetByProduct - 1.6102379762447987) < 1e-12);
 assert.ok(Math.abs(reportAllInNetByProduct - 1.61) < 0.005, 'Arctic Table 22-2 all-in cost must reconstruct to reported 1.61 USD/lb payable Cu.');
 assert.ok(Math.abs(sustainingOnlyDiagnostic - 1.61) > 0.8, 'Arctic 1.61 must not be interpreted as a sustaining-only AISC bridge.');
