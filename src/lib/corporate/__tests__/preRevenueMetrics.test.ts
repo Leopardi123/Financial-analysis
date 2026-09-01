@@ -56,9 +56,9 @@ const snapshot = {
       yearLabelUsed: '2030',
       corporateTpIndexUsed: 1,
       fcfTailSumUSD: 0,
-      value_low: 12,
-      value_high: 18,
-      value_mid_if_any: 15,
+      value_low: 1200,
+      value_high: 1800,
+      value_mid_if_any: 1500,
       nullReasonIfAny: null,
       lista2Metrics: {
         DCF_prodStart_exCapex_TargetCurrency: null,
@@ -73,7 +73,7 @@ const snapshot = {
       },
     }],
   },
-  corporateValuationTimeSeries: { rows: [{ year: 2029, evEbitda6xPerShare: 10 }, { year: 2030, evEbitda6xPerShare: 20 }] },
+  corporateValuationTimeSeries: { rows: [{ year: 2029, evEbitda6xPerShare: 1000 }, { year: 2030, evEbitda6xPerShare: 2000 }] },
 } as unknown as CorporateSnapshot;
 
 const result = deriveCorporatePreRevenueMetrics({

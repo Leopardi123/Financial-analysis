@@ -242,6 +242,19 @@ for (const testCase of cases) {
   assertNear(derived.annualizedReturnToTarget, legacy.annualReturn, `${testCase.name} annual return`);
   assertNear(derived.peak6xValuePerShare, legacy.peak, `${testCase.name} peak 6x/share`);
   assertNear(derived.peak6xOverCurrentPrice, legacy.peakOverPrice, `${testCase.name} peak 6x/current`);
+  assert.equal(derived.valuationSourcePath, 'snapshot.preRevenueValuation', `${testCase.name} valuation source path`);
+  assert.equal(derived.targetSourcePath, 'canonicalValuationTimeline.projectStartMilestone', `${testCase.name} target source path`);
+  assert.equal(derived.peak6xSourcePath, 'corporateValuationTimeSeries.canonicalPeriodRows', `${testCase.name} Peak 6x source path`);
+  const canonicalTarget = snapshot.preRevenueValuation?.target ?? null;
+  assert.ok(canonicalTarget, `${testCase.name} canonical Target must be materialized`);
+  const targetPeriod = canonicalTarget ? snapshot.canonicalValuationTimeline?.periods[canonicalTarget.periodIndex] ?? null : null;
+  assert.equal(targetPeriod?.calendarYear ?? null, canonicalTarget?.calendarYear ?? null, `${testCase.name} Target canonical year`);
+  assertNear(targetPeriod?.navPerShareTarget ?? null, canonicalTarget?.lowNavPerShareTargetCurrency ?? null, `${testCase.name} Target canonical NAV`);
+  assertNear(targetPeriod?.dcfPerShareTarget ?? null, canonicalTarget?.highDcfPerShareTargetCurrency ?? null, `${testCase.name} Target canonical DCF`);
+  const canonicalPeak = snapshot.preRevenueValuation?.peak6x ?? null;
+  assert.ok(canonicalPeak, `${testCase.name} canonical Peak 6x must be materialized`);
+  const peakRow = canonicalPeak ? snapshot.corporateValuationTimeSeries?.rows.find((row) => row.period === canonicalPeak.periodIndex && row.year === canonicalPeak.calendarYear) ?? null : null;
+  assertNear(peakRow?.evEbitda6xPerShare ?? null, canonicalPeak?.valuePerShareTargetCurrency ?? null, `${testCase.name} Peak 6x canonical row`);
 
   for (const metal of metals) {
     const oldEq = legacy.eqByMetal[metal];
