@@ -90,13 +90,13 @@ That is about **3.34 cents/lb higher** than the reconstructed produced-Cu metric
 
 ### LOM
 
-The Table 22.7 total Mining Opex includes mining activity in the two pre-production periods, so the C1 bridge must use only periods with positive Cu production. Canonical producing-period mining + processing divided by contained/produced Cu reconstructs:
+The Table 22.7 total Mining Opex includes mining activity in pre-production periods and the total Processing Opex also contains a small post-production/closure-period amount. The C1 bridge must therefore use only periods with positive Cu production. Canonical producing-period mining + processing divided by contained/produced Cu reconstructs:
 
-- **1.241243 USD/lb produced Cu**
+- **1.241129 USD/lb produced Cu**
 - report Table 21.11: **1.25 USD/lb**
-- difference: **-0.008757 USD/lb**, within one cent.
+- difference: **-0.008871 USD/lb**, within one cent.
 
-This strongly verifies that the canonical Project cost rows preserve the PFS report C1 basis while also preventing pre-production mining cost from being silently placed in the operating C1 numerator.
+This strongly verifies that the canonical Project cost rows preserve the PFS report C1 basis while also preventing non-producing-period cost from being silently placed in the operating C1 numerator.
 
 ## 5. Why this is not yet the S&P co-product C1 metric
 
@@ -142,7 +142,7 @@ Current canonical V3 components can be classified against the **Vizcachitas repo
 | Canonical component | Viz report C1 | S&P current C1 allocation status |
 |---|---|---|
 | `mining_opex` | included in producing periods | allocation metadata not yet authorized |
-| `processing_opex` | included | allocation metadata not yet authorized |
+| `processing_opex` | included in producing periods | allocation metadata not yet authorized |
 | `stockpile_rehandling` | separate Table 22.7 line; not silently folded into report mining+processing C1 | Ej verifierad |
 | `surface_infrastructure` | outside Viz report C1; enters C3 | current S&P universal treatment Ej verifierad |
 | `site_ga` | outside Viz report C1 | Santa Cruz supports G&A in its 1.32 bridge, but current S&P universal boundary remains Ej verifierad |
