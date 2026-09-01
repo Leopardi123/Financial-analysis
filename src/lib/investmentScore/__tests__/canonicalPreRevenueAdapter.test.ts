@@ -46,7 +46,8 @@ function tierAssessment(args: {
     snapshot: {
       NAV_today_TargetCurrency: 1_000,
       financing: { shares_post_financing: 100 },
-      aggregation: { payableAuEqOz_total: [0, 10, 20, 0, 30, 0] },
+      aggregation: { corporateYearsByPeriod: [2029, 2030, 2031, 2032, 2033, 2034] },
+      series: { payableQtyByMetal: { Au: [0, 10, 20, 0, 30, 0] } },
       corporateValuationTimeSeries: {
         rows: [
           { evEbitda6xPerShare: 6 },
@@ -67,7 +68,8 @@ function tierAssessment(args: {
   assert.equal(result.inputs.peak6xVsPrice, 4);
   assert.equal(result.inputs.valuationConvergence, 'VERY_STRONG');
   assert.equal(result.sources.valuationConvergence, 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE');
-  assert.equal(result.inputs.lomYears, 3);
+  assert.equal(result.inputs.lomYears, 4, 'LOM is first-to-last physical payable production span, including an idle year inside the span');
+  assert.equal(result.sources.lomYears, 'CORPORATE_CANONICAL_PHYSICAL_PAYABLE_PRODUCTION_SPAN');
   assert.equal(result.inputs.tier, 1);
   assert.equal(result.inputs.cycleResistanceTier1Pass, true);
   assert.equal(result.inputs.downsideRobustnessPass, true, 'Score-3 downside robustness reuses the canonical Tier cycle gate during v0 calibration');
@@ -82,7 +84,8 @@ function tierAssessment(args: {
     snapshot: {
       NAV_today_TargetCurrency: null,
       financing: { shares_post_financing: 100 },
-      aggregation: { payableAuEqOz_total: [0, 1, null, 2] },
+      aggregation: { corporateYearsByPeriod: [2030, 2031, 2032, 2033] },
+      series: { payableQtyByMetal: { Au: [0, 1, null, 2] } },
       corporateValuationTimeSeries: { rows: [] },
     },
     tierAssessment: tierAssessment({ status: 'NOT_VERIFIED', cycleStatus: 'NOT_VERIFIED', cycleTier: null }),
