@@ -14,10 +14,26 @@ type CyclePriceDisplayRow = {
   projectIds: string[];
 };
 
+type ScaleProductDisplayRow = {
+  product: string;
+  averageAnnualQuantity: number;
+  inputUnit: string;
+  normalizedQuantity: number | null;
+  normalizedUnit: 'toz' | 'lb' | 'tonne' | null;
+  threshold: number | null;
+  thresholdUnit: 'toz' | 'lb' | 'tonne' | null;
+  equivalent: number | null;
+  scored: boolean;
+  reason: string;
+};
+
 type ExtendedTierSupport = Tier1PreRevenueAssessment['support'] & {
   cyclePrices?: CyclePriceDisplayRow[];
   costMethod?: string;
   costProjectDetails?: string[];
+  scaleProducts?: Record<string, ScaleProductDisplayRow>;
+  primaryProduct?: string | null;
+  primaryProductRevenueShare?: number | null;
 };
 
 function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | null> {
@@ -84,6 +100,29 @@ function formatCyclePrice(value: number, unit: CyclePriceDisplayRow['unit']): st
   return `${value.toLocaleString('sv-SE', { maximumFractionDigits: digits })} ${unit}`;
 }
 
+function formatScaleQuantity(row: ScaleProductDisplayRow): string {
+  const value = typeof row.normalizedQuantity === 'number' && Number.isFinite(row.normalizedQuantity)
+    ? row.normalizedQuantity
+    : row.averageAnnualQuantity;
+  const unit = row.normalizedUnit ?? row.inputUnit;
+  if (!Number.isFinite(value)) return '—';
+  if (unit === 'toz') {
+    if (Math.abs(value) >= 1_000_000) return `${formatNumber(value / 1_000_000, 2)} Moz/år`;
+    if (Math.abs(value) >= 1_000) return `${formatNumber(value / 1_000, 1)} koz/år`;
+    return `${formatNumber(value, 0)} oz/år`;
+  }
+  if (unit === 'tonne') {
+    if (Math.abs(value) >= 1_000_000) return `${formatNumber(value / 1_000_000, 2)} Mt/år`;
+    if (Math.abs(value) >= 1_000) return `${formatNumber(value / 1_000, 1)} kt/år`;
+    return `${formatNumber(value, 0)} t/år`;
+  }
+  if (unit === 'lb') {
+    if (Math.abs(value) >= 1_000_000) return `${formatNumber(value / 1_000_000, 2)} Mlb/år`;
+    return `${formatNumber(value, 0)} lb/år`;
+  }
+  return `${formatNumber(value)} ${unit}/år`;
+}
+
 function extendedSupport(assessment: Tier1PreRevenueAssessment | null): ExtendedTierSupport | null {
   return assessment ? assessment.support as ExtendedTierSupport : null;
 }
@@ -92,6 +131,35 @@ function cyclePriceRows(assessment: Tier1PreRevenueAssessment | null): CyclePric
   const support = extendedSupport(assessment);
   return Array.isArray(support?.cyclePrices)
     ? support.cyclePrices.filter((row) => row && typeof row.metal === 'string' && Number.isFinite(row.spotPrice) && Number.isFinite(row.bearPrice) && Number.isFinite(row.multiplier))
+    : [];
+}
+
+function scaleProductRows(assessment: Tier1PreRevenueAssessment | null): ScaleProductDisplayRow[] {
+  const support = extendedSupport(assessment);
+  if (support?.scaleProducts && typeof support.scaleProducts === 'object') {
+    return Object.values(support.scaleProducts)
+      .filter((row) => row && typeof row.product === 'string' && Number.isFinite(row.averageAnnualQuantity))
+      .sort((a, b) => {
+        if (a.scored !== b.scored) return a.scored ? -1 : 1;
+        if (a.scored && b.scored) return (b.equivalent ?? -Infinity) - (a.equivalent ?? -Infinity);
+        return a.product.localeCompare(b.product);
+      });
+  }
+  return assessment?.support.scaleEquivalentByMetal
+    ? Object.entries(assessment.support.scaleEquivalentByMetal)
+        .filter(([, equivalent]) => typeof equivalent === 'number' && Number.isFinite(equivalent))
+        .map(([product, equivalent]) => ({
+          product,
+          averageAnnualQuantity: assessment.support.averageAnnualPayableByMetal?.[product as keyof typeof assessment.support.averageAnnualPayableByMetal] ?? Number.NaN,
+          inputUnit: '',
+          normalizedQuantity: null,
+          normalizedUnit: null,
+          threshold: null,
+          thresholdUnit: null,
+          equivalent: equivalent as number,
+          scored: true,
+          reason: '',
+        }))
     : [];
 }
 
@@ -145,18 +213,19 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
   }, [assessment]);
   if (!loaded) return <span title="Tier-bedömning beräknas…">…</span>;
 
+  const support = extendedSupport(assessment);
+  const primaryProduct = support?.primaryProduct ?? assessment?.primaryMetal ?? null;
+  const primaryProductRevenueShare = support?.primaryProductRevenueShare ?? assessment?.primaryMetalRevenueShare ?? null;
   const benchmark = assessment?.primaryMetal ? TIER1_COST_BENCHMARKS[assessment.primaryMetal] : null;
-  const scaleEntries = assessment?.support.scaleEquivalentByMetal
-    ? Object.entries(assessment.support.scaleEquivalentByMetal)
-        .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
-        .sort((a, b) => (b[1] as number) - (a[1] as number))
-    : [];
+  const scaleEntries = scaleProductRows(assessment);
   const scaleWindow = assessment?.support.scaleWindowStartYear && assessment.support.scaleWindowEndYear
     ? `${assessment.support.scaleWindowStartYear}–${assessment.support.scaleWindowEndYear}`
     : '—';
   const diagnostics = assessment ? displayDiagnostics(assessment.diagnostics) : [];
   const cyclePrices = cyclePriceRows(assessment);
-  const support = extendedSupport(assessment);
+  const costBasisLabel = primaryProduct && !assessment?.primaryMetal
+    ? 'Ej verifierad'
+    : support?.costMethod === 'REPORTED_COST_BEST_AVAILABLE' ? 'Rapporterad cost' : 'Ekonomisk modell';
 
   return <>
     <button
@@ -185,13 +254,13 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           <div className="tier1-modal__classification">{assessment.classificationReason}</div>
 
           <div className="tier1-modal__summary">
-            <div><span>Primär metall</span><strong>{assessment.primaryMetal ?? 'Ej verifierad'}</strong></div>
-            <div><span>Revenue-andel · spot</span><strong>{typeof assessment.primaryMetalRevenueShare === 'number' ? `${(assessment.primaryMetalRevenueShare * 100).toFixed(1)} %` : '—'}</strong></div>
+            <div><span>Primär produkt</span><strong>{primaryProduct ?? 'Ej verifierad'}</strong></div>
+            <div><span>Revenue-andel · spot</span><strong>{typeof primaryProductRevenueShare === 'number' ? `${(primaryProductRevenueShare * 100).toFixed(1)} %` : '—'}</strong></div>
             <div><span>Uthållig combined scale</span><strong>{typeof assessment.support.combinedScaleEquivalent === 'number' ? `${assessment.support.combinedScaleEquivalent.toFixed(2)}x` : '—'}</strong></div>
             <div><span>Skalfönster</span><strong>{scaleWindow}</strong></div>
             <div><span>Tier-IRR · spot</span><strong>{typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : '—'}</strong></div>
             <div><span>Kostnads-Tier</span><strong>{gateText(assessment.gates.cost)}</strong></div>
-            <div><span>Cost-underlag</span><strong>{support?.costMethod === 'REPORTED_COST_BEST_AVAILABLE' ? 'Rapporterad cost' : 'Ekonomisk modell'}</strong></div>
+            <div><span>Cost-underlag</span><strong>{costBasisLabel}</strong></div>
             <div><span>Spotdatum</span><strong>{formatDate(assessment.support.tierBasePriceAsOfUtc)}</strong></div>
           </div>
 
@@ -204,11 +273,13 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           </div>
 
           {scaleEntries.length > 0 && <div className="tier1-modal__section">
-            <h4>Skala · metall för metall</h4>
+            <h4>Skala · produkt för produkt</h4>
             <div className="tier1-modal__chips">
-              {scaleEntries.map(([metal, equivalent]) => <span key={metal}><strong>{metal}</strong> {formatNumber(equivalent as number)}x</span>)}
+              {scaleEntries.map((row) => <span key={row.product} title={row.reason || undefined}>
+                <strong>{row.product}</strong> {formatScaleQuantity(row)} · {row.scored && typeof row.equivalent === 'number' ? `${formatNumber(row.equivalent)}x` : 'ej poängsatt'}
+              </span>)}
             </div>
-            <p>Skalan använder bästa sammanhängande 10-årsfönster när minst tio produktionsår finns; kortare projekt använder hela den tillgängliga produktionsperioden. 1,00x motsvarar respektive metals fysiska Tier-1-gräns. Polymetalliska bidrag summeras utan metallpris eller AuEq.</p>
+            <p>Skalan använder bästa sammanhängande 10-årsfönster när minst tio produktionsår finns; kortare projekt använder hela den tillgängliga produktionsperioden. Alla verifierade fysiska produkter visas. Endast exakta produkter med aktiverad Tier-scale-gräns bidrar till combined scale; ingen metallpris- eller AuEq-konvertering används.</p>
           </div>}
 
           <div className="tier1-modal__section">
