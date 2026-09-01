@@ -1,3 +1,13 @@
+export type CorporateFinancingProvenanceSource = 'DEFAULT' | 'USER' | 'COMPANY' | 'REPORT';
+
+export type CorporateFinancingProvenance = {
+  debt_fraction: CorporateFinancingProvenanceSource;
+  equity_fraction: CorporateFinancingProvenanceSource;
+  use_cash_first: CorporateFinancingProvenanceSource;
+  cash_use_percent: CorporateFinancingProvenanceSource;
+  canonical_default_split_applied: boolean;
+};
+
 export type CorporateFinancingInput = {
   // Preferred Lista 5 naming
   NPV_today_USD: number | null;
@@ -16,6 +26,8 @@ export type CorporateFinancingInput = {
     minimum_cash_reserve_TargetCurrency?: number | null;
     cash_use_cap_TargetCurrency?: number | null;
     equity_raise_price_TargetCurrency?: number | null;
+    /** Explicit evidence provenance when the plan comes from a known source. */
+    provenance_source?: Exclude<CorporateFinancingProvenanceSource, 'DEFAULT'> | null;
   } | null;
   buildFundingNeed_USD?: number | null;
 
@@ -27,6 +39,8 @@ export type CorporateFinancingInput = {
 };
 
 export type CorporateFinancingOutput = {
+  /** Source of the resolved financing assumptions. Does not change financing math. */
+  financing_provenance: CorporateFinancingProvenance;
   latest_quarterly_cash_TargetCurrency?: number;
   cash_used_percent?: number;
   remaining_funding_need_TargetCurrency?: number | null;
