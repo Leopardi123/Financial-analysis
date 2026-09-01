@@ -1,3 +1,4 @@
+import './reportedCostReportFixtures.test.ts';
 import assert from 'node:assert/strict';
 import { TIER1_COST_BENCHMARKS } from '../config.ts';
 import { assessCostAgainstBenchmark } from '../costBenchmarkAssessment.ts';
