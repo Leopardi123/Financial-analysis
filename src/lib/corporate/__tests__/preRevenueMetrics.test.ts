@@ -85,13 +85,44 @@ assert.equal(result.equivalentByMetal.Au.lomEq, 30);
 assert.equal(result.equivalentByMetal.Au.annualEq, 15);
 assert.equal(result.equivalentByMetal.Au.tenYearEq, 30);
 assert.equal(result.byReferenceMetal.Au.capexPerAnnualEqUSD, 4);
-assert.equal(result.byReferenceMetal.Au.lomEqPerShare, 0.25);
+assert.equal(result.byReferenceMetal.Au.tenYearEqPerShare, 0.25);
 
 assert.equal(result.equivalentByMetal.Cu.status, 'OK');
 assert.equal(result.equivalentByMetal.Cu.unit, 't');
 const expectedCuLomTonnes = ((1000 / 2) + (2000 / 2)) / UNIT_CONSTANTS.LB_PER_TONNE;
 assert.ok(Math.abs((result.equivalentByMetal.Cu.lomEq ?? 0) - expectedCuLomTonnes) < 1e-12);
 assert.ok(Math.abs((result.equivalentByMetal.Cu.annualEq ?? 0) - expectedCuLomTonnes / 2) < 1e-12);
+
+// Eq/share is explicitly 10y Eq/share, not LOM Eq/share. Use 12 production years
+// so the two denominators cannot accidentally produce the same regression value.
+const twelveYearSnapshot = {
+  targetCurrency: 'USD',
+  fx_USD_to_TargetCurrency: 1,
+  financing: { shares_post_financing: 100 },
+  corporate: { lista3Metrics: { IRR: 0.2, Payback_real_years: 2 } },
+  aggregation: {
+    corporateYearsByPeriod: Array.from({ length: 12 }, (_, index) => 2030 + index),
+    grossRevenueUSD_total: new Array(12).fill(100),
+    priceKeyByMetal: { Au: 'XAU_USD_TOZ' },
+    priceUSDByMetal: { Au: new Array(12).fill(10) },
+    auPriceUSDPerOz: new Array(12).fill(10),
+  },
+  series: {
+    totalRevenue_USD: new Array(12).fill(100),
+    payableQtyByMetal: { Au: new Array(12).fill(10) },
+    priceUsedByMetal_USD: { Au: new Array(12).fill(10) },
+    unitAudit: { metals: { Au: { qtyUnit: 'toz', canonicalQtyUnit: 'toz', priceUnit: 'USD_toz', canonicalPriceUnit: 'toz', warnings: [] } } },
+  },
+} as unknown as CorporateSnapshot;
+const twelveYearResult = deriveCorporatePreRevenueMetrics({
+  snapshot: twelveYearSnapshot,
+  currentPriceTargetCurrency: 1,
+  valuationYear: 2026,
+  referenceMetals: ['Au'],
+});
+assert.equal(twelveYearResult.equivalentByMetal.Au.tenYearEq, 100);
+assert.equal(twelveYearResult.equivalentByMetal.Au.lomEq, 120);
+assert.equal(twelveYearResult.byReferenceMetal.Au.tenYearEqPerShare, 1);
 
 const noCorporateIrr = {
   ...snapshot,
