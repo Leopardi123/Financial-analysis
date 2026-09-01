@@ -104,7 +104,7 @@ Four blockers therefore remain active for Warintza:
 1. **Exact allocation revenue/price vector.** The PFS report deck and its aggregate deduction rows cannot be assumed to equal the S&P 2024 allocation basis.
 2. **Stream treatment.** The Royal Gold gold stream is material and project-applicable; the public S&P methodology evidence does not establish how streamed metal is treated in the co-product revenue vector.
 3. **Full current C1 component boundary.** Warintza includes TCRCs, royalties and streaming in its reported C1; the exact universal boundary of the current S&P curve remains unverified.
-4. **Cost-vintage alignment.** The S&P benchmark is 2024 actual. Warintza explicitly states a Q1 2025 base date for processing operating costs, while an exact common base date for every component of the reported C1 is not source-locked. No inflation/index bridge may be invented.
+4. **Cost-vintage alignment.** The S&P benchmark is 2024 actual. Warintza explicitly states a Q1 2025 base date for **processing operating costs**; the report does not source-lock one common base date for every component of the reported C1. No inflation/index bridge may be invented.
 
 Therefore the Warintza report C1 **must remain evidence/checkpoint only** for S&P Tier purposes.
 
