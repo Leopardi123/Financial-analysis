@@ -4,20 +4,19 @@ import { S_AND_P_CO_PRODUCT_C1_CU_DEFINITION, assessCuC1DefinitionReadiness } fr
 
 const M = 1_000_000;
 const raw = COPPER_CREEK_PEA_V3;
+const costModel = raw.economics.costModel;
+const sellingModel = raw.economics.sellingModel;
+const fiscalModel = raw.economics.fiscalTakeModel;
 
 function sumNumeric(values: Array<number | null | undefined>): number {
   return values.reduce<number>((total, value) => total + (typeof value === 'number' ? value : 0), 0);
 }
 
 assert.equal(raw.streamsByMetal, null, 'Copper Creek has no metal stream, so generic stream-treatment uncertainty is not project-applicable.');
-assert.equal(raw.economics.costModel.mode, 'COMPONENTS');
-assert.equal(raw.economics.sellingModel.mode, 'COMPONENTS');
-assert.equal(raw.economics.fiscalTakeModel.mode, 'RULES');
-if (
-  raw.economics.costModel.mode !== 'COMPONENTS'
-  || raw.economics.sellingModel.mode !== 'COMPONENTS'
-  || raw.economics.fiscalTakeModel.mode !== 'RULES'
-) {
+assert.equal(costModel.mode, 'COMPONENTS');
+assert.equal(sellingModel.mode, 'COMPONENTS');
+assert.equal(fiscalModel.mode, 'RULES');
+if (costModel.mode !== 'COMPONENTS' || sellingModel.mode !== 'COMPONENTS' || fiscalModel.mode !== 'RULES') {
   throw new Error('Copper Creek component cost, selling and fiscal models are required.');
 }
 
@@ -59,22 +58,28 @@ const reportDeck = raw.verification?.report?.priceDeckByKey;
 assert.ok(reportDeck);
 if (!reportDeck) throw new Error('Copper Creek report price deck is required.');
 const agPrice = reportDeck.XAG_USD_TOZ;
-const moPricePerLb = reportDeck.MO_USD_TONNE / COPPER_CREEK_LB_PER_TONNE;
+const moPricePerTonne = reportDeck.MO_USD_TONNE;
+assert.equal(typeof agPrice, 'number');
+assert.equal(typeof moPricePerTonne, 'number');
+if (typeof agPrice !== 'number' || typeof moPricePerTonne !== 'number') {
+  throw new Error('Copper Creek Ag and Mo report prices must be numeric.');
+}
+const moPricePerLb = moPricePerTonne / COPPER_CREEK_LB_PER_TONNE;
 assert.equal(agPrice, 20);
 assert.ok(Math.abs(moPricePerLb - 13) < 1e-12);
 
-const year1OperatingUSD = raw.economics.costModel.components.reduce(
+const year1OperatingUSD = costModel.components.reduce(
   (total, component) => total + (typeof component.seriesUSD[t] === 'number' ? component.seriesUSD[t] : 0),
   0,
 );
-const year1OffsiteUSD = raw.economics.sellingModel.components.reduce(
+const year1OffsiteUSD = sellingModel.components.reduce(
   (total, component) => total + (typeof component.seriesUSD[t] === 'number' ? component.seriesUSD[t] : 0),
   0,
 );
 const year1PayableCuLb = raw.metals.payableQtyByMetal.Cu[t] ?? 0;
 const year1AgRevenueUSD = (raw.metals.payableQtyByMetal.Ag[t] ?? 0) * agPrice;
 const year1MoRevenueUSD = (raw.metals.payableQtyByMetal.Mo[t] ?? 0) * moPricePerLb;
-const reportLockedRoyalty = raw.economics.fiscalTakeModel.reportLockedItems?.find((item) => item.id === 'combined_south32_franco_royalties');
+const reportLockedRoyalty = fiscalModel.reportLockedItems?.find((item) => item.id === 'combined_south32_franco_royalties');
 assert.ok(reportLockedRoyalty);
 if (!reportLockedRoyalty) throw new Error('Copper Creek report-locked royalty series is required.');
 const year1RoyaltyUSD = reportLockedRoyalty.reportFiscalTakeUSD[t] ?? 0;
@@ -89,8 +94,8 @@ assert.ok(Math.abs(year1Aisc - 2.44) < 0.01);
 
 // Rounded canonical annual rows remain close to the authoritative report totals
 // without hidden balancing entries.
-const canonicalOperatingUSD = raw.economics.costModel.components.reduce((total, component) => total + sumNumeric(component.seriesUSD), 0);
-const canonicalOffsiteUSD = raw.economics.sellingModel.components.reduce((total, component) => total + sumNumeric(component.seriesUSD), 0);
+const canonicalOperatingUSD = costModel.components.reduce((total, component) => total + sumNumeric(component.seriesUSD), 0);
+const canonicalOffsiteUSD = sellingModel.components.reduce((total, component) => total + sumNumeric(component.seriesUSD), 0);
 const canonicalRoyaltyUSD = sumNumeric(reportLockedRoyalty.reportFiscalTakeUSD);
 const canonicalPayableCuLb = sumNumeric(raw.metals.payableQtyByMetal.Cu);
 const canonicalAgRevenueUSD = sumNumeric(raw.metals.payableQtyByMetal.Ag) * agPrice;

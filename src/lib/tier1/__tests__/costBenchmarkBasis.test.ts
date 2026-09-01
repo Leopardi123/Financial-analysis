@@ -4,6 +4,7 @@ import './costDefinitionContract.test.ts';
 import './vizcachitasCostBridge.test.ts';
 import './bergCostBridge.test.ts';
 import './arcticCostBridge.test.ts';
+import './copperCreekCostBridge.test.ts';
 import assert from 'node:assert/strict';
 import {
   TIER1_COST_BENCHMARKS,
