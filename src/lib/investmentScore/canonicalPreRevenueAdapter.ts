@@ -43,8 +43,8 @@ export type CanonicalPreRevenueAdapterResult = {
   inputs: InvestmentScoreInputs;
   diagnostics: string[];
   sources: {
-    pNav: 'COMPARE_STOCKS_PNAV_PF' | 'UNAVAILABLE';
-    peak6xVsPrice: 'COMPARE_STOCKS_PEAK_6X_VS_PRICE' | 'UNAVAILABLE';
+    pNav: 'CORPORATE_PNAV_POST_FINANCING' | 'UNAVAILABLE';
+    peak6xVsPrice: 'CORPORATE_PEAK_6X_VS_CURRENT_PRICE' | 'UNAVAILABLE';
     valuationConvergence: 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE' | 'UNAVAILABLE';
     lomYears: 'CORPORATE_CANONICAL_PHYSICAL_PAYABLE_PRODUCTION_SPAN' | 'UNAVAILABLE';
     tier: 'TIER1_PRE_REVENUE_ASSESSMENT' | 'UNAVAILABLE';
@@ -121,8 +121,8 @@ export function adaptCanonicalPreRevenueToInvestmentScore(
     },
     diagnostics,
     sources: {
-      pNav: pNav === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_PNAV_PF',
-      peak6xVsPrice: peak6xVsPrice === null ? 'UNAVAILABLE' : 'COMPARE_STOCKS_PEAK_6X_VS_PRICE',
+      pNav: pNav === null ? 'UNAVAILABLE' : 'CORPORATE_PNAV_POST_FINANCING',
+      peak6xVsPrice: peak6xVsPrice === null ? 'UNAVAILABLE' : 'CORPORATE_PEAK_6X_VS_CURRENT_PRICE',
       valuationConvergence: convergence.classification === 'NOT_VERIFIED' ? 'UNAVAILABLE' : 'INVESTMENT_SCORE_CANONICAL_CONVERGENCE',
       lomYears: lomYears === null ? 'UNAVAILABLE' : 'CORPORATE_CANONICAL_PHYSICAL_PAYABLE_PRODUCTION_SPAN',
       tier: tier === null ? 'UNAVAILABLE' : 'TIER1_PRE_REVENUE_ASSESSMENT',
