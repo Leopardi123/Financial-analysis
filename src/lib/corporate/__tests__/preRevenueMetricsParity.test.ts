@@ -223,7 +223,8 @@ for (const testCase of cases) {
   });
 
   assertNear(derived.irr, legacy.irr, `${testCase.name} IRR`);
-  assertNear(derived.paybackYears, legacy.payback, `${testCase.name} payback`);
+  const canonicalCorporatePayback = snapshot.corporate?.lista3Metrics?.Payback_real_years ?? null;
+  assertNear(derived.paybackYears, canonicalCorporatePayback, `${testCase.name} canonical Corporate payback`);
   if (testCase.name === 'Copper Creek PEA') {
     assert.equal(legacy.lom, null, 'Legacy Compare LOM was unavailable for Copper Creek because it depended on payable AuEq.');
     assert.equal(derived.lomYears, 32, 'Canonical Corporate LOM must resolve from the physical payable-metal production span.');
@@ -241,6 +242,19 @@ for (const testCase of cases) {
   assertNear(derived.annualizedReturnToTarget, legacy.annualReturn, `${testCase.name} annual return`);
   assertNear(derived.peak6xValuePerShare, legacy.peak, `${testCase.name} peak 6x/share`);
   assertNear(derived.peak6xOverCurrentPrice, legacy.peakOverPrice, `${testCase.name} peak 6x/current`);
+  assert.equal(derived.valuationSourcePath, 'snapshot.preRevenueValuation', `${testCase.name} valuation source path`);
+  assert.equal(derived.targetSourcePath, 'canonicalValuationTimeline.projectStartMilestone', `${testCase.name} target source path`);
+  assert.equal(derived.peak6xSourcePath, 'corporateValuationTimeSeries.canonicalPeriodRows', `${testCase.name} Peak 6x source path`);
+  const canonicalTarget = snapshot.preRevenueValuation?.target ?? null;
+  assert.ok(canonicalTarget, `${testCase.name} canonical Target must be materialized`);
+  const targetPeriod = canonicalTarget ? snapshot.canonicalValuationTimeline?.periods[canonicalTarget.periodIndex] ?? null : null;
+  assert.equal(targetPeriod?.calendarYear ?? null, canonicalTarget?.calendarYear ?? null, `${testCase.name} Target canonical year`);
+  assertNear(targetPeriod?.navPerShareTarget ?? null, canonicalTarget?.lowNavPerShareTargetCurrency ?? null, `${testCase.name} Target canonical NAV`);
+  assertNear(targetPeriod?.dcfPerShareTarget ?? null, canonicalTarget?.highDcfPerShareTargetCurrency ?? null, `${testCase.name} Target canonical DCF`);
+  const canonicalPeak = snapshot.preRevenueValuation?.peak6x ?? null;
+  assert.ok(canonicalPeak, `${testCase.name} canonical Peak 6x must be materialized`);
+  const peakRow = canonicalPeak ? snapshot.corporateValuationTimeSeries?.rows.find((row) => row.period === canonicalPeak.periodIndex && row.year === canonicalPeak.calendarYear) ?? null : null;
+  assertNear(peakRow?.evEbitda6xPerShare ?? null, canonicalPeak?.valuePerShareTargetCurrency ?? null, `${testCase.name} Peak 6x canonical row`);
 
   for (const metal of metals) {
     const oldEq = legacy.eqByMetal[metal];
@@ -256,7 +270,7 @@ for (const testCase of cases) {
 
     const ref = derived.byReferenceMetal[metal];
     assertNear(ref.capexPerAnnualEqUSD, oldEq && finite(legacy.initialCapexUsd) ? legacy.initialCapexUsd / oldEq.annualEq : null, `${testCase.name} ${metal} CAPEX/annual Eq`, 1e-9);
-    assertNear(ref.lomEqPerShare, oldEq && finite(legacy.sharesPf) ? oldEq.lomEq / legacy.sharesPf : null, `${testCase.name} ${metal} LOM Eq/share`, 1e-9);
+    assertNear(ref.tenYearEqPerShare, oldEq && finite(legacy.sharesPf) ? oldEq.tenYearEq / legacy.sharesPf : null, `${testCase.name} ${metal} 10y Eq/share`, 1e-9);
     assertNear(ref.marketCapPerTenYearEqUSD, oldEq && finite(legacy.marketCapUsd) ? legacy.marketCapUsd / oldEq.tenYearEq : null, `${testCase.name} ${metal} MCap/10y Eq`, 1e-9);
     assertNear(ref.marketCapPerLomEqUSD, oldEq && finite(legacy.marketCapUsd) ? legacy.marketCapUsd / oldEq.lomEq : null, `${testCase.name} ${metal} MCap/LOM Eq`, 1e-9);
     assertNear(ref.evPerLomEqUSD, oldEq && finite(legacy.evUsd) ? legacy.evUsd / oldEq.lomEq : null, `${testCase.name} ${metal} EV/LOM Eq`, 1e-9);

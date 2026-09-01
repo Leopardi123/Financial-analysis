@@ -1,5 +1,6 @@
 import type { Lista3Metrics } from '../../metrics/lista3.ts';
 import type { Lista3DebugPayload } from '../../metrics/lista3.ts';
+import type { CorporatePreRevenueValuationOutput } from '../preRevenueValuationOutput.ts';
 export type MarketValueInput = {
   // Market-now equity inputs
   shares_current: number | null;
@@ -216,6 +217,9 @@ export type CorporateSnapshot = {
 
   series?: CorporateSnapshotSeries;
   corporateValuationTimeSeries?: CorporateValuationTimeSeries;
+  canonicalValuationTimeline?: import('../../valuation/canonicalValuationTimeline.ts').ValuationTimeline;
+  projectStartMilestones?: import('../../valuation/canonicalValuationTimeline.ts').CorporateProjectStartMilestone[];
+  preRevenueValuation?: CorporatePreRevenueValuationOutput;
 
   project?: {
     modeled?: {

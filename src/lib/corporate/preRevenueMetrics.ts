@@ -7,7 +7,6 @@ import { deriveCorporateProductionLife } from './preRevenueProductionLife.ts';
 import { deriveNextInitialCapexMilestone } from './preRevenueInitialCapex.ts';
 import {
   computePreRevenuePNavPostFinancing,
-  computePreRevenuePeakSixTimesValuePerShare,
   normalizeManualExtraShares,
   preRevenueExtraShareScale,
   preRevenuePostFinancingShares,
@@ -31,7 +30,7 @@ export type CorporatePreRevenueReferenceMetalMetrics = {
   metal: string;
   unit: 'oz' | 't';
   capexPerAnnualEqUSD: number | null;
-  lomEqPerShare: number | null;
+  tenYearEqPerShare: number | null;
   marketCapPerTenYearEqUSD: number | null;
   marketCapPerLomEqUSD: number | null;
   evPerLomEqUSD: number | null;
@@ -54,12 +53,13 @@ export type CorporatePreRevenueMetrics = {
   targetPrice: number | null;
   targetOverCurrentPrice: number | null;
   annualizedReturnToTarget: number | null;
+  valuationSourcePath: 'snapshot.preRevenueValuation' | null;
+  targetSourcePath: 'canonicalValuationTimeline.projectStartMilestone' | null;
+  peak6xSourcePath: 'corporateValuationTimeSeries.canonicalPeriodRows' | null;
   equivalentByMetal: Record<string, EquivalentMetalMetrics>;
   byReferenceMetal: Record<string, CorporatePreRevenueReferenceMetalMetrics>;
   diagnostics: string[];
 };
-
-type ValuationMarker = NonNullable<CorporateSnapshot['modeledValuationTimeline']>['markers'][number];
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const readFinite = (value: unknown): number | null => finite(value) ? value : null;
@@ -77,36 +77,6 @@ function outputEqUnitAndDivisor(metal: string): { unit: 'oz' | 't'; divisor: num
   if (canonicalQtyUnit === 'toz') return { unit: 'oz', divisor: 1 };
   if (canonicalQtyUnit === 'lb') return { unit: 't', divisor: UNIT_CONSTANTS.LB_PER_TONNE };
   return { unit: 't', divisor: 1 };
-}
-
-function markerYear(marker: ValuationMarker | null | undefined): number | null {
-  if (!marker) return null;
-  const raw = marker.yearLabelUsed;
-  if (finite(raw)) return raw;
-  if (typeof raw === 'string' && raw.trim()) {
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function validValuationMarkers(snapshot: CorporateSnapshot): ValuationMarker[] {
-  const markers = snapshot.modeledValuationTimeline?.markers;
-  return Array.isArray(markers)
-    ? markers.filter((marker) => markerYear(marker) !== null && finite(marker.value_low) && finite(marker.value_high))
-    : [];
-}
-
-function nextRelevantProjectMarker(snapshot: CorporateSnapshot, valuationYear: number): ValuationMarker | null {
-  return validValuationMarkers(snapshot)
-    .sort((a, b) => (markerYear(a) ?? Infinity) - (markerYear(b) ?? Infinity))
-    .find((marker) => (markerYear(marker) ?? -Infinity) > valuationYear) ?? null;
-}
-
-function canonicalMarkerTarget(marker: ValuationMarker | null): number | null {
-  if (!marker) return null;
-  if (finite(marker.value_mid_if_any)) return marker.value_mid_if_any;
-  return finite(marker.value_low) && finite(marker.value_high) ? (marker.value_low + marker.value_high) / 2 : null;
 }
 
 function targetCurrencyToUsd(snapshot: CorporateSnapshot, value: number | null): number | null {
@@ -231,15 +201,16 @@ export function deriveCorporatePreRevenueMetrics(args: {
   const extraShares = normalizeManualExtraShares(args.manualExtraShares ?? 0);
   const price = readFinite(args.currentPriceTargetCurrency);
   const scale = preRevenueExtraShareScale(snapshot, extraShares);
-  const marker = nextRelevantProjectMarker(snapshot, args.valuationYear);
-  const rawTarget = canonicalMarkerTarget(marker);
+  const valuationOutput = snapshot.preRevenueValuation ?? null;
+  const rawTarget = readFinite(valuationOutput?.target?.targetPriceTargetCurrency);
   const targetPrice = finite(rawTarget) ? rawTarget * scale : null;
-  const targetYear = markerYear(marker);
+  const targetYear = readFinite(valuationOutput?.target?.calendarYear);
   const yearsToProduction = finite(targetYear) && targetYear > args.valuationYear ? targetYear - args.valuationYear : null;
   const annualizedReturnToTarget = finite(targetPrice) && finite(price) && price > 0 && finite(yearsToProduction) && yearsToProduction > 0
     ? (targetPrice / price) ** (1 / yearsToProduction) - 1
     : null;
-  const peak6xValuePerShare = computePreRevenuePeakSixTimesValuePerShare(snapshot, extraShares);
+  const rawPeak6xValuePerShare = readFinite(valuationOutput?.peak6x?.valuePerShareTargetCurrency);
+  const peak6xValuePerShare = finite(rawPeak6xValuePerShare) ? rawPeak6xValuePerShare * scale : null;
   const sharesPostFinancing = preRevenuePostFinancingShares(snapshot, extraShares);
   const capexMilestone = deriveNextInitialCapexMilestone(snapshot, args.valuationYear);
   const initialCapexUSD = targetCurrencyToUsd(snapshot, capexMilestone.initialCapexTargetCurrency);
@@ -251,6 +222,8 @@ export function deriveCorporatePreRevenueMetrics(args: {
   const equivalentByMetal: Record<string, EquivalentMetalMetrics> = {};
   const byReferenceMetal: Record<string, CorporatePreRevenueReferenceMetalMetrics> = {};
   const diagnostics: string[] = [];
+  if (valuationOutput?.diagnostics?.length) diagnostics.push(...valuationOutput.diagnostics.map((message) => `Valuation: ${message}`));
+  if (!valuationOutput) diagnostics.push('Canonical Corporate pre-revenue valuation output is unavailable; no modeledValuationTimeline/corporateValuationTimeSeries fallback is used.');
   if (productionLife.diagnostic) diagnostics.push(`LOM: ${productionLife.diagnostic}`);
   if (capexMilestone.diagnostic) diagnostics.push(`Initial CAPEX: ${capexMilestone.diagnostic}`);
   for (const metal of candidateMetals(snapshot, args.referenceMetals)) {
@@ -261,7 +234,7 @@ export function deriveCorporatePreRevenueMetrics(args: {
       metal,
       unit: eq.unit,
       capexPerAnnualEqUSD: eq.status === 'OK' && finite(initialCapexUSD) && finite(eq.annualEq) && eq.annualEq > 0 ? initialCapexUSD / eq.annualEq : null,
-      lomEqPerShare: eq.status === 'OK' && finite(sharesPostFinancing) && sharesPostFinancing > 0 && finite(eq.lomEq) ? eq.lomEq / sharesPostFinancing : null,
+      tenYearEqPerShare: eq.status === 'OK' && finite(sharesPostFinancing) && sharesPostFinancing > 0 && finite(eq.tenYearEq) ? eq.tenYearEq / sharesPostFinancing : null,
       marketCapPerTenYearEqUSD: eq.status === 'OK' && finite(marketCapUSD) && finite(eq.tenYearEq) && eq.tenYearEq > 0 ? marketCapUSD / eq.tenYearEq : null,
       marketCapPerLomEqUSD: eq.status === 'OK' && finite(marketCapUSD) && finite(eq.lomEq) && eq.lomEq > 0 ? marketCapUSD / eq.lomEq : null,
       evPerLomEqUSD: eq.status === 'OK' && finite(enterpriseValueUSD) && finite(eq.lomEq) && eq.lomEq > 0 ? enterpriseValueUSD / eq.lomEq : null,
@@ -270,10 +243,11 @@ export function deriveCorporatePreRevenueMetrics(args: {
 
   const irr = readFinite(snapshot.corporate?.lista3Metrics?.IRR);
   if (irr === null) diagnostics.push('Corporate IRR is unavailable; no Project-engine fallback is used.');
+  if (readFinite(snapshot.corporate?.lista3Metrics?.Payback_real_years) === null) diagnostics.push('Canonical Corporate real payback is unavailable; no root Lista3a/Project/JSON fallback is used.');
 
   return {
     irr,
-    paybackYears: readFinite(snapshot.Payback_real_years) ?? readFinite(snapshot.Payback_approx_years),
+    paybackYears: readFinite(snapshot.corporate?.lista3Metrics?.Payback_real_years),
     lomYears: productionLife.lomYears,
     initialCapexUSD,
     initialCapexMarkerYear: capexMilestone.markerYear,
@@ -288,6 +262,9 @@ export function deriveCorporatePreRevenueMetrics(args: {
     targetPrice,
     targetOverCurrentPrice: finite(targetPrice) && finite(price) && price > 0 ? targetPrice / price : null,
     annualizedReturnToTarget,
+    valuationSourcePath: valuationOutput?.sourcePath ?? null,
+    targetSourcePath: valuationOutput?.target?.sourcePath ?? null,
+    peak6xSourcePath: valuationOutput?.peak6x?.sourcePath ?? null,
     equivalentByMetal,
     byReferenceMetal,
     diagnostics,

@@ -20,6 +20,7 @@ import { postCorporateSnapshot } from "../lib/client/snapshotClient.ts";
 import { useCorporateMetalPriceSensitivity, type CorporateResolvedSpotAudit } from "../hooks/useCorporateMetalPriceSensitivity.ts";
 import { useCorporateSurvivability } from "../hooks/useCorporateSurvivability.ts";
 import type { CorporateSnapshot } from "../lib/corporate/snapshot/types.ts";
+import { resolveCanonicalCorporateSnapshotInputs } from "../lib/corporate/snapshotInputResolver.ts";
 import { CORPORATE_METAL_PRICE_MULTIPLIERS } from "../lib/corporate/sensitivity.ts";
 import { resolveCommonSharesCurrent } from "../lib/market/resolveSharesCurrent.ts";
 import { EXTRA_SHARES_HELP, extraSharesStorageKey, formatExtraSharesInput, parseExtraShares } from "../lib/market/extraShares.ts";
@@ -182,13 +183,6 @@ function isDebugEnabledInClient(): boolean {
 function isDebugEnabledByQueryParam(): boolean {
   if (typeof window === "undefined") return false;
   return new URLSearchParams(window.location.search).get("debug") === "1";
-}
-
-function withDebugQueryPath(path: string, debugEnabled: boolean): string {
-  if (!debugEnabled || typeof window === "undefined") return path;
-  const asUrl = new URL(path, window.location.origin);
-  asUrl.searchParams.set("debug", "1");
-  return `${asUrl.pathname}${asUrl.search}`;
 }
 
 function normalizeClientErrorMessage(message: string | null | undefined, fallback: string): string {
@@ -1923,47 +1917,47 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     };
   }, [selectedProjectId, selectedProjectRawJson, stressOptions, riskAdjustedDiscountRatePctInput, data?.balance, data?.income, profile, lockedTargetCurrency, fxSource, manualFxInput, manualMetalPrices, projectUseQuarterlyCash, projectCashUsedPct, projectEquityPct, projectDebtPct]);
 
-  const corporateFinancingPlan = useMemo(() => {
+  const corporateFinancingPlanByProject = useMemo<SnapshotRequest["financingPlanByProject"]>(() => {
     if (companyProjects.length === 0) return undefined;
-    const equityValues = companyProjects.map((project) => corporateProjectEquityPct[project.project_id] ?? 100);
-    const avgEquityPct = equityValues.reduce((sum, value) => sum + value, 0) / equityValues.length;
-    const equityFraction = Math.min(1, Math.max(0, avgEquityPct / 100));
-    const financingPlanByProject = Object.fromEntries(
+    return Object.fromEntries(
       companyProjects.map((project) => {
         const equityPct = corporateProjectEquityPct[project.project_id] ?? 100;
-        const projectEquityFraction = Math.min(1, Math.max(0, equityPct / 100));
-        return [project.project_id, {
-          equity_fraction: projectEquityFraction,
-          debt_fraction: 1 - projectEquityFraction,
-        }];
+        const equityFraction = Math.min(1, Math.max(0, equityPct / 100));
+        return [project.project_id, { equity_fraction: equityFraction, debt_fraction: 1 - equityFraction }];
       }),
     );
-    return {
-      equity_fraction: equityFraction,
-      debt_fraction: 1 - equityFraction,
-      use_cash_first: corporateUseQuarterlyCash,
-      cash_use_percent: corporateCashUsedPct / 100,
-      financingPlanByProject,
-    };
-  }, [companyProjects, corporateProjectEquityPct, corporateUseQuarterlyCash, corporateCashUsedPct]);
+  }, [companyProjects, corporateProjectEquityPct]);
 
-  const corporateSnapshotRequest = useMemo<SnapshotRequest | null>(() => {
+  const corporateFinancingPlan = useMemo<SnapshotRequest["financingPlan"]>(() => ({
+    use_cash_first: corporateUseQuarterlyCash,
+    cash_use_percent: corporateCashUsedPct / 100,
+  }), [corporateUseQuarterlyCash, corporateCashUsedPct]);
+
+  const corporateSnapshotInputResolution = useMemo(() => {
     if (!ticker || companyProjects.length === 0) return null;
     const discountRatePct = toInputNumber(riskAdjustedDiscountRatePctInput);
-    const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct) ? discountRatePct / 100 : 0.1;
-    const statementShares = resolveCommonSharesCurrent({ balance: data?.balance as Record<string, Array<number | null>> | undefined, income: data?.income as Record<string, Array<number | null>> | undefined });
-    const profileShares = typeof profile?.sharesOutstanding === "number" && Number.isFinite(profile.sharesOutstanding) && profile.sharesOutstanding > 0 ? profile.sharesOutstanding : undefined;
-    const quarterlyCash = [...getFieldSeries(data, "balance", "cashAndCashEquivalents")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
-    const quarterlyDebt = [...getFieldSeries(data, "balance", "totalDebt")].reverse().find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
-    const currentPrice = typeof profile?.price === "number" && Number.isFinite(profile.price) && profile.price > 0 ? profile.price : 1;
-    return {
-      symbol: ticker, valuationYear: new Date().getUTCFullYear(), targetCurrency: lockedTargetCurrency, discountRate,
-      market: { shares_current: statementShares ?? profileShares ?? 1, price_current_TargetCurrency: currentPrice },
-      balanceSheet: { cash_t0_TargetCurrency: quarterlyCash, debt_t0_TargetCurrency: quarterlyDebt },
-      financingPlan: corporateFinancingPlan, financingPlanByProject: corporateFinancingPlan?.financingPlanByProject,
-      scenario: { mode: "spot" }, fx: { source: "auto", anchor: "today", scenario: { mode: "spot" } }, manualMetalPrices,
-    } as unknown as SnapshotRequest;
-  }, [corporateFinancingPlan, companyProjects.length, data, lockedTargetCurrency, manualMetalPrices, profile?.price, profile?.sharesOutstanding, riskAdjustedDiscountRatePctInput, ticker]);
+    const discountRate = typeof discountRatePct === "number" && Number.isFinite(discountRatePct)
+      ? discountRatePct / 100
+      : null;
+    return resolveCanonicalCorporateSnapshotInputs({
+      symbol: ticker,
+      profile,
+      statements: {
+        balance: data?.balance as Record<string, Array<number | null>> | undefined,
+        income: data?.income as Record<string, Array<number | null>> | undefined,
+      },
+      projectIds: companyProjects.map((project) => project.project_id),
+      financingPlan: corporateFinancingPlan,
+      financingPlanByProject: corporateFinancingPlanByProject,
+      manualExtraShares: parseExtraShares(corporateExtraSharesInput),
+      manualMetalPrices,
+      discountRate,
+      valuationYear: new Date().getUTCFullYear(),
+      scenario: { mode: "spot" },
+    });
+  }, [companyProjects, corporateExtraSharesInput, corporateFinancingPlan, corporateFinancingPlanByProject, data?.balance, data?.income, manualMetalPrices, profile, riskAdjustedDiscountRatePctInput, ticker]);
+
+  const corporateSnapshotRequest = corporateSnapshotInputResolution?.request ?? null;
 
   const [corporateSensitivityEnabled, setCorporateSensitivityEnabled] = useState(false);
   const resolvedCorporateFx = typeof corporateSnapshotData?.fx_USD_to_TargetCurrency === "number" && Number.isFinite(corporateSnapshotData.fx_USD_to_TargetCurrency)
@@ -1991,21 +1985,28 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
         setCorporateSnapshotError(null);
         return;
       }
+      if (!corporateSnapshotRequest) {
+        const inputErrors = corporateSnapshotInputResolution?.diagnostics ?? ["Canonical Corporate snapshot inputs are unavailable."];
+        setCorporateSnapshotData(null);
+        setCorporateDiagnostics({
+          errors: inputErrors,
+          canonicalInputSourceAudit: corporateSnapshotInputResolution?.sourceAudit ?? null,
+        });
+        setCorporateSnapshotError(`Canonical Corporate snapshot inputs unavailable.${inputErrors.length > 0 ? `\n${inputErrors.join("\n")}` : ""}`);
+        return;
+      }
       setCorporateSnapshotLoading(true);
       setCorporateSnapshotError(null);
       try {
-        const response = await fetch(withDebugQueryPath("/api/snapshot/corporate", debugEnabled), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(corporateSnapshotRequest),
+        const result = await postCorporateSnapshot(corporateSnapshotRequest, {
+          refresh: corporateSnapshotInputResolution?.targetCurrency !== "USD",
         });
-        const result = await response.json() as {
-          ok?: boolean;
-          snapshot?: Record<string, unknown>;
-          diagnostics?: { errors?: string[] } & Record<string, unknown>;
-        };
         if (!isMounted) return;
-        setCorporateDiagnostics((result.diagnostics ?? null) as Record<string, unknown> | null);
+        setCorporateDiagnostics({
+          ...(result.diagnostics ?? {}),
+          canonicalInputDiagnostics: corporateSnapshotInputResolution?.diagnostics ?? [],
+          canonicalInputSourceAudit: corporateSnapshotInputResolution?.sourceAudit ?? null,
+        });
         if (!result.ok || !result.snapshot) {
           setCorporateSnapshotData(null);
           const diagnosticsErrors = Array.isArray(result.diagnostics?.errors)
@@ -2033,7 +2034,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     return () => {
       isMounted = false;
     };
-  }, [companyProjects.length, corporateSnapshotRequest, debugEnabled, primaryView, ticker]);
+  }, [companyProjects.length, corporateSnapshotInputResolution, corporateSnapshotRequest, primaryView, ticker]);
 
   const revenueData = buildSeriesData(
     buildSeries(data, [{ label: "Revenue", statement: "income", field: "revenue" }]),
