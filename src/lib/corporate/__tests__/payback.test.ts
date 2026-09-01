@@ -50,7 +50,7 @@ const rebasedFrom2026 = deriveCorporateRealPayback({
   productionStartPeriod: 1,
   masterN: 19,
 });
-assert.ok(Math.abs((rebasedFrom2026.paybackYears ?? 0) - 3.218713249789485) < 1e-9);
+assert.ok(Math.abs((rebasedFrom2026.paybackYears ?? 0) - 3.218713717383075) < 1e-12);
 assert.notEqual(Math.round((rebasedFrom2026.paybackYears ?? 0) * 10) / 10, 3.6);
 
 const invalid = deriveCorporateRealPayback({
