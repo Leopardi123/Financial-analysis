@@ -177,3 +177,18 @@ Three blockers remain:
 - exact remaining blockers.
 
 The next implementation step is **not** to tag Vizcachitas costs speculatively. It is to close either the exact net-revenue vector from source evidence or the remaining external S&P component/vintage contract. Until then the cost gate must remain fail-closed.
+
+## 10. Reconciliation hard-check summary
+
+Because no Vizcachitas Project economic input was modified in this work block, the mandatory report reconciliation remains the existing verified V3 reconciliation rather than a new economic calibration:
+
+- report periods: Section 22.1.1 p.350 and Tables 22.6-22.7 pp.357-362;
+- report prices: Table 22.1 p.351, Cu 3.68 USD/lb, Mo 12.90 USD/lb, Ag 21.79 USD/oz;
+- report NPV/IRR: Table 22.8 p.363;
+- discount rate: 8%;
+- NPV8 post-tax: report 2,776.000 MUSD vs V3 2,775.728 MUSD, difference -0.272 MUSD (-0.0098%);
+- IRR post-tax: report 24.200% vs V3 24.2241%, difference +0.0241 percentage points (+0.0994% relative);
+- NPV8 pre-tax: report 3,999.000 MUSD vs V3 3,998.498 MUSD, difference -0.502 MUSD (-0.0125%);
+- IRR pre-tax: report 28.500% vs V3 28.5263%, difference +0.0263 percentage points (+0.0921% relative).
+
+All remain inside the existing 1% reconciliation tolerance. The unresolved status applies only to **external S&P-compatible co-product C1 classification**, not to the Project report reconciliation.
