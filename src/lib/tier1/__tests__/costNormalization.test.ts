@@ -1,3 +1,4 @@
+import './costNormalizationRecipe.test.ts';
 import assert from 'node:assert/strict';
 import {
   assessNormalizedCuC1BenchmarkReadiness,
