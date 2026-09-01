@@ -16,14 +16,8 @@ function normalizeSeriesLength(
   expectedLength: number,
   fieldName: string,
 ): (number | null)[] {
-  if (series == null) {
-    return new Array(expectedLength).fill(null);
-  }
-
-  if (series.length !== expectedLength) {
-    throw new Error(`${fieldName} length must equal masterN+1`);
-  }
-
+  if (series == null) return new Array(expectedLength).fill(null);
+  if (series.length !== expectedLength) throw new Error(`${fieldName} length must equal masterN+1`);
   return series.map((value) => toNumberOrNull(value));
 }
 
@@ -33,28 +27,19 @@ function safeValue(series: (number | null)[], index: number): number {
 
 export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Output {
   const length = input.masterN + 1;
-
-  if (!Number.isInteger(input.productionStartPeriod)) {
-    throw new Error('productionStartPeriod must be an integer');
-  }
+  if (!Number.isInteger(input.productionStartPeriod)) throw new Error('productionStartPeriod must be an integer');
 
   const taxRate = input.taxRate ?? null;
-  if (taxRate !== null && !isFiniteNumber(taxRate)) {
-    throw new Error('taxRate must be finite');
-  }
-  if (taxRate !== null && (taxRate < 0 || taxRate > 0.6)) {
-    throw new Error('taxRate must be between 0 and 0.6');
-  }
+  if (taxRate !== null && !isFiniteNumber(taxRate)) throw new Error('taxRate must be finite');
+  if (taxRate !== null && (taxRate < 0 || taxRate > 0.6)) throw new Error('taxRate must be between 0 and 0.6');
 
   const hasExplicitTaxCashFlow = input.taxCashFlowUSD !== undefined && input.taxCashFlowUSD !== null;
-  if (hasExplicitTaxCashFlow && taxRate !== null) {
-    throw new Error(TAX_MODE_CONFLICT_ERROR);
-  }
-
+  if (hasExplicitTaxCashFlow && taxRate !== null) throw new Error(TAX_MODE_CONFLICT_ERROR);
   const hasTerminalProceeds = input.terminalProceedsUSD !== undefined && input.terminalProceedsUSD !== null;
 
   const revenueUSD = normalizeSeriesLength(input.revenueUSD, length, 'revenueUSD');
   const operatingCostsUSD = normalizeSeriesLength(input.operatingCostsUSD, length, 'operatingCostsUSD');
+  const sellingCostsUSD = normalizeSeriesLength(input.sellingCostsUSD, length, 'sellingCostsUSD');
   const sustainingCapexUSD = normalizeSeriesLength(input.sustainingCapexUSD, length, 'sustainingCapexUSD');
   const siteGandA_USD = normalizeSeriesLength(input.siteGandA_USD, length, 'siteGandA_USD');
   const royaltiesUSD = normalizeSeriesLength(input.royaltiesUSD, length, 'royaltiesUSD');
@@ -63,6 +48,8 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const byproductCreditsUSD = normalizeSeriesLength(input.byproductCreditsUSD, length, 'byproductCreditsUSD');
   const depreciationUSD = normalizeSeriesLength(input.depreciationUSD, length, 'depreciationUSD');
   const workingCapitalDeltaUSD = normalizeSeriesLength(input.workingCapitalDeltaUSD, length, 'workingCapitalDeltaUSD');
+  const preTaxChargesUSD = normalizeSeriesLength(input.preTaxChargesUSD, length, 'preTaxChargesUSD');
+  const postTaxChargesUSD = normalizeSeriesLength(input.postTaxChargesUSD, length, 'postTaxChargesUSD');
   const taxCashFlowUSD = hasExplicitTaxCashFlow
     ? normalizeSeriesLength(input.taxCashFlowUSD, length, 'taxCashFlowUSD')
     : null;
@@ -81,11 +68,17 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
   const nopatUSD: (number | null)[] = new Array(length).fill(null);
   const fcffUSD: (number | null)[] = new Array(length).fill(null);
   const workingCapitalDeltaUSD_effective: (number | null)[] = new Array(length).fill(0);
+  const sellingCostsUSD_effective: (number | null)[] = new Array(length).fill(0);
+  const preTaxChargesUSD_effective: (number | null)[] = new Array(length).fill(0);
+  const postTaxChargesUSD_effective: (number | null)[] = new Array(length).fill(0);
+  const taxLossCarryforwardUSD_effective: (number | null)[] = new Array(length).fill(0);
   const terminalProceedsUSD_effective: (number | null)[] = new Array(length).fill(0);
+  let taxLossCarryforward = 0;
 
   for (let t = 0; t < length; t += 1) {
     const r = safeValue(revenueUSD, t);
     const op = safeValue(operatingCostsUSD, t);
+    const sell = safeValue(sellingCostsUSD, t);
     const sc = safeValue(sustainingCapexUSD, t);
     const ga = safeValue(siteGandA_USD, t);
     const roy = safeValue(royaltiesUSD, t);
@@ -93,22 +86,21 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     const bp = safeValue(byproductCreditsUSD, t);
     const dep = safeValue(depreciationUSD, t);
     const dWC = safeValue(workingCapitalDeltaUSD, t);
+    const preTaxCharge = safeValue(preTaxChargesUSD, t);
+    const postTaxCharge = safeValue(postTaxChargesUSD, t);
     const terminal = hasTerminalProceeds ? terminalProceedsUSD?.[t] ?? null : 0;
     const cx = capexUSD[t];
-    if (cx !== null && cx < 0) {
-      throw new Error(CAPEX_NEGATIVE_ERROR);
-    }
+    if (cx !== null && cx < 0) throw new Error(CAPEX_NEGATIVE_ERROR);
+
     workingCapitalDeltaUSD_effective[t] = dWC;
+    sellingCostsUSD_effective[t] = sell;
+    preTaxChargesUSD_effective[t] = preTaxCharge;
+    postTaxChargesUSD_effective[t] = postTaxCharge;
+    terminalProceedsUSD_effective[t] = isFiniteNumber(terminal) ? terminal : null;
 
-    if (!isFiniteNumber(terminal)) {
-      terminalProceedsUSD_effective[t] = null;
-    } else {
-      terminalProceedsUSD_effective[t] = terminal;
-    }
-
-    const sustainingValue = op + sc + ga + roy + rec - bp;
-    const sustainingAdjustedOperatingEarningsValue = r - op - sc - ga - roy - rec + bp;
-    const ebitdaValue = r - op - ga - roy - rec + bp;
+    const sustainingValue = op + sell + sc + ga + roy + rec - bp;
+    const sustainingAdjustedOperatingEarningsValue = r - op - sell - sc - ga - roy - rec + bp;
+    const ebitdaValue = r - op - sell - ga - roy - rec + bp;
     const ebitValue = sustainingAdjustedOperatingEarningsValue - dep;
 
     sustainingCostUSD[t] = Number.isFinite(sustainingValue) ? sustainingValue : null;
@@ -124,12 +116,26 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
       taxUSD[t] = null;
       nopatUSD[t] = null;
       fcffUSD[t] = null;
+      taxLossCarryforwardUSD_effective[t] = null;
       continue;
     }
 
     const ebitAtT = ebitUSD[t] as number;
-    const taxableIncomeAtT = Math.max(0, ebitAtT);
+    const incomeBeforeCorporateTax = ebitAtT - preTaxCharge;
+    let taxableIncomeAtT = Math.max(0, incomeBeforeCorporateTax);
+
+    if (!hasExplicitTaxCashFlow && input.taxLossCarryforward === true) {
+      if (incomeBeforeCorporateTax < 0) {
+        taxLossCarryforward += -incomeBeforeCorporateTax;
+        taxableIncomeAtT = 0;
+      } else {
+        const offset = Math.min(taxLossCarryforward, incomeBeforeCorporateTax);
+        taxLossCarryforward -= offset;
+        taxableIncomeAtT = incomeBeforeCorporateTax - offset;
+      }
+    }
     taxableIncomeUSD[t] = Number.isFinite(taxableIncomeAtT) ? taxableIncomeAtT : null;
+    taxLossCarryforwardUSD_effective[t] = Number.isFinite(taxLossCarryforward) ? taxLossCarryforward : null;
 
     if (hasExplicitTaxCashFlow) {
       const explicitTaxCashFlowAtT = taxCashFlowUSD?.[t] ?? null;
@@ -142,7 +148,9 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
       }
       const taxValue = -explicitTaxCashFlowAtT;
       taxUSD[t] = Number.isFinite(taxValue) ? taxValue : null;
-      effectiveTaxRate[t] = ebitAtT > 0 && taxUSD[t] !== null ? (taxUSD[t] as number) / ebitAtT : null;
+      effectiveTaxRate[t] = incomeBeforeCorporateTax > 0 && taxUSD[t] !== null
+        ? (taxUSD[t] as number) / incomeBeforeCorporateTax
+        : null;
     } else {
       if (taxRate === null || taxableIncomeUSD[t] === null) {
         effectiveTaxRate[t] = null;
@@ -151,10 +159,11 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
         fcffUSD[t] = null;
         continue;
       }
-
       const taxValue = (taxableIncomeUSD[t] as number) * taxRate;
       taxUSD[t] = Number.isFinite(taxValue) ? taxValue : null;
-      effectiveTaxRate[t] = ebitAtT > 0 && taxUSD[t] !== null ? (taxUSD[t] as number) / ebitAtT : null;
+      effectiveTaxRate[t] = incomeBeforeCorporateTax > 0 && taxUSD[t] !== null
+        ? (taxUSD[t] as number) / incomeBeforeCorporateTax
+        : null;
     }
 
     if (taxUSD[t] == null) {
@@ -164,7 +173,7 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     }
 
     const taxAtT = taxUSD[t] as number;
-    const nopatValue = ebitAtT - taxAtT;
+    const nopatValue = incomeBeforeCorporateTax - taxAtT;
     nopatUSD[t] = Number.isFinite(nopatValue) ? nopatValue : null;
 
     if (nopatUSD[t] == null) {
@@ -172,7 +181,6 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
       fcffUSD[t] = null;
       continue;
     }
-
     if (cx == null) {
       totalCapexUSD[t] = null;
       fcffUSD[t] = null;
@@ -187,10 +195,11 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     }
 
     const nopatAtT = nopatUSD[t] as number;
-    // Reclamation and sustaining CAPEX are already included in operating earnings.
-    // Terminal proceeds are deliberately added only here so salvage/other disposal
-    // cash flows cannot distort revenue, EBITDA, EBIT or the tax base.
-    const fcffValue = nopatAtT + dep - cx - dWC + (terminalProceedsUSD_effective[t] as number);
+    // Selling costs, reclamation and sustaining CAPEX are already included in operating earnings.
+    // Pre-tax fiscal charges reduce taxable income/NOPAT; post-tax charges reduce only FCFF.
+    // Terminal proceeds are deliberately added only here so salvage/other disposal cash flows
+    // cannot distort revenue, EBITDA, EBIT or the tax base.
+    const fcffValue = nopatAtT + dep - cx - dWC + (terminalProceedsUSD_effective[t] as number) - postTaxCharge;
     fcffUSD[t] = Number.isFinite(fcffValue) ? fcffValue : null;
   }
 
@@ -207,6 +216,10 @@ export function computeProjectPhase1(input: ProjectPhase1Input): ProjectPhase1Ou
     nopatUSD,
     fcffUSD,
     workingCapitalDeltaUSD_effective,
+    sellingCostsUSD_effective,
+    preTaxChargesUSD_effective,
+    postTaxChargesUSD_effective,
+    taxLossCarryforwardUSD_effective,
     terminalProceedsUSD_effective,
   };
 }

@@ -9,8 +9,10 @@ export type StreamComputeInputs = {
 };
 
 export type StreamComputeOutputs = {
+  preStreamPayableQtyByMetal: Record<string, Array<number | null>>;
   effectivePayableQtyByMetal: Record<string, Array<number | null>>;
   deliveredQtyByMetal: Record<string, Array<number | null>>;
+  streamPurchaseRevenueUSDByMetal: Record<string, Array<number | null>>;
   streamValueUSDByMetal: Record<string, Array<number | null>>;
 };
 
@@ -23,45 +25,33 @@ export function computeStreamsByMetal(input: StreamComputeInputs): StreamCompute
   const payableMetals = Object.keys(input.payableQtyByMetal);
   const streamsByMetal = normalizeStreamsByMetal(input.streamsByMetal);
 
-  if (payableMetals.length < 1) {
-    throw new Error('payableQtyByMetal must include at least one metal');
-  }
+  if (payableMetals.length < 1) throw new Error('payableQtyByMetal must include at least one metal');
 
   for (const metal of payableMetals) {
     const payableSeries = input.payableQtyByMetal[metal];
-    if (payableSeries.length !== expectedLength) {
-      throw new Error(`payableQtyByMetal[${metal}] length must equal masterN+1`);
-    }
-
+    if (payableSeries.length !== expectedLength) throw new Error(`payableQtyByMetal[${metal}] length must equal masterN+1`);
     const spotSeries = input.spotPriceUSDByMetal[metal];
-    if (!spotSeries) {
-      throw new Error(`spotPriceUSDByMetal missing required metal ${metal}`);
-    }
-
-    if (spotSeries.length !== expectedLength) {
-      throw new Error(`spotPriceUSDByMetal[${metal}] length must equal masterN+1`);
-    }
+    if (!spotSeries) throw new Error(`spotPriceUSDByMetal missing required metal ${metal}`);
+    if (spotSeries.length !== expectedLength) throw new Error(`spotPriceUSDByMetal[${metal}] length must equal masterN+1`);
   }
-
   for (const metal of Object.keys(streamsByMetal)) {
-    if (!(metal in input.payableQtyByMetal)) {
-      throw new Error(`streamsByMetal references unknown payable metal ${metal}`);
-    }
-
-    if (!(metal in input.spotPriceUSDByMetal)) {
-      throw new Error(`streamsByMetal references unknown spot metal ${metal}`);
-    }
+    if (!(metal in input.payableQtyByMetal)) throw new Error(`streamsByMetal references unknown payable metal ${metal}`);
+    if (!(metal in input.spotPriceUSDByMetal)) throw new Error(`streamsByMetal references unknown spot metal ${metal}`);
   }
 
+  const preStreamPayableQtyByMetal: Record<string, Array<number | null>> = {};
   const effectivePayableQtyByMetal: Record<string, Array<number | null>> = {};
   const deliveredQtyByMetal: Record<string, Array<number | null>> = {};
+  const streamPurchaseRevenueUSDByMetal: Record<string, Array<number | null>> = {};
   const streamValueUSDByMetal: Record<string, Array<number | null>> = {};
 
   for (const metal of payableMetals) {
     const cfg = streamsByMetal[metal];
     if (!cfg) {
+      preStreamPayableQtyByMetal[metal] = [...input.payableQtyByMetal[metal]];
       effectivePayableQtyByMetal[metal] = [...input.payableQtyByMetal[metal]];
       deliveredQtyByMetal[metal] = new Array(expectedLength).fill(0);
+      streamPurchaseRevenueUSDByMetal[metal] = new Array(expectedLength).fill(0);
       streamValueUSDByMetal[metal] = new Array(expectedLength).fill(0);
       continue;
     }
@@ -73,14 +63,18 @@ export function computeStreamsByMetal(input: StreamComputeInputs): StreamCompute
       config: cfg,
     });
 
+    preStreamPayableQtyByMetal[metal] = streamOutput.preStreamPayableQty;
     effectivePayableQtyByMetal[metal] = streamOutput.effectivePayableQty;
     deliveredQtyByMetal[metal] = streamOutput.deliveredQty;
+    streamPurchaseRevenueUSDByMetal[metal] = streamOutput.streamPurchaseRevenueUSD;
     streamValueUSDByMetal[metal] = streamOutput.streamTakeUSD;
   }
 
   return {
+    preStreamPayableQtyByMetal,
     effectivePayableQtyByMetal,
     deliveredQtyByMetal,
+    streamPurchaseRevenueUSDByMetal,
     streamValueUSDByMetal,
   };
 }

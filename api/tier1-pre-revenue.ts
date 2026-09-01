@@ -4,17 +4,10 @@ import { parseProjectJsonV1 } from '../src/lib/project/jsonv1/parse.ts';
 import { resolveProjectPricesToEngineInput } from '../src/lib/project/jsonv1/resolvePrices.ts';
 import { computeProjectEngineFullProductionV1 } from '../src/lib/project/engineFullProductionV1.ts';
 import { computeIrr } from '../src/lib/metrics/lista3.ts';
-import {
-  TIER1_COST_BENCHMARKS,
-  type Tier1Metal,
-} from '../src/lib/tier1/config.ts';
+import { TIER1_COST_BENCHMARKS, type Tier1Metal } from '../src/lib/tier1/config.ts';
 import { assessCapitalReturns, classifyTier } from '../src/lib/tier1/preRevenue.ts';
-import { assessCostAgainstBenchmark } from '../src/lib/tier1/costBenchmarkAssessment.ts';
 import { selectConservativeProjectIrr, type ProjectIrrObservation } from '../src/lib/tier1/projectIrr.ts';
-import {
-  extractReportedCostEvidence,
-  reportedCostWeightInBenchmarkUnits,
-} from '../src/lib/tier1/reportedCost.ts';
+import { extractReportedCostEvidenceCandidates } from '../src/lib/tier1/reportedCost.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
 function finite(value: unknown): value is number {
@@ -64,98 +57,69 @@ async function computeProjectIrrObservations(symbol: string): Promise<ProjectIrr
   return observations;
 }
 
-type ReportedCompanyCost = {
-  value: number;
-  unit: 'USD/lb' | 'USD/toz';
-  projectDetails: string[];
+type CostEvidenceDetail = {
+  projectId: string;
+  metric: string;
+  value: number | null;
+  unit: string | null;
+  period: unknown;
+  sourceId: string | null;
+  pageOrTable: string | null;
+  role: 'REPORT_CHECKPOINT_ONLY';
+  reason: string;
 };
 
-/**
- * Reported cost is an optional best-available override. It is used only when
- * every project contributing payable primary-metal production has a usable
- * reported metric in the benchmark unit. Otherwise the Tier route keeps the
- * cost result already derived from the existing project engine in
- * src/server/routes/tier1/pre-revenue.ts. Missing evidence never turns an
- * otherwise computable model result into NOT_VERIFIED.
- */
-async function computeReportedCompanyCost(
-  symbol: string,
-  primaryMetal: Tier1Metal,
-): Promise<{ cost: ReportedCompanyCost | null; diagnostics: string[] }> {
-  const loaded = await loadProjectsForSymbol(symbol);
-  const benchmark = TIER1_COST_BENCHMARKS[primaryMetal];
-  const diagnostics: string[] = [];
-  let numerator = 0;
-  let denominator = 0;
-  const projectDetails: string[] = [];
-  let contributingProjects = 0;
-
-  for (const project of loaded) {
-    const parsed = parseProjectJsonV1(project.rawJson);
-    const payable = parsed.engineInputWithoutPrices.payableQtyByMetal[primaryMetal] ?? [];
-    if (!payable.some((value) => finite(value) && value > 0)) continue;
-    contributingProjects += 1;
-
-    const reported = extractReportedCostEvidence(project.rawJson, benchmark.metric);
-    if (reported.status !== 'AVAILABLE' || !finite(reported.value) || !reported.unit) {
-      diagnostics.push(`${project.projectId}: ${reported.reason} Befintlig engine-baserad cost används i stället.`);
-      return { cost: null, diagnostics };
-    }
-    if (reported.unit !== benchmark.unit) {
-      diagnostics.push(`${project.projectId}: rapporterad ${reported.unit} kan inte jämföras direkt med ${benchmark.unit}; befintlig engine-baserad cost används.`);
-      return { cost: null, diagnostics };
-    }
-
-    const payableUnit = parsed.engineInputWithoutPrices.payableQtyUnitByMetal[primaryMetal];
-    const weight = reportedCostWeightInBenchmarkUnits({
-      payableSeries: payable,
-      payableUnit,
-      benchmarkUnit: benchmark.unit,
-    });
-    if (!finite(weight) || weight <= 0) {
-      diagnostics.push(`${project.projectId}: payable-vikt kan inte räknas i ${benchmark.unit}; befintlig engine-baserad cost används.`);
-      return { cost: null, diagnostics };
-    }
-
-    numerator += reported.value * weight;
-    denominator += weight;
-    const provenance = [reported.sourceId, reported.pageOrTable].filter(Boolean).join(', ');
-    projectDetails.push(`${project.projectId}: ${reported.value.toFixed(4)} ${reported.unit}${provenance ? ` · ${provenance}` : ''}`);
-  }
-
-  if (contributingProjects === 0 || !(denominator > 0)) return { cost: null, diagnostics };
-  return {
-    cost: { value: numerator / denominator, unit: benchmark.unit, projectDetails },
-    diagnostics,
-  };
+function readV3ReportedCostCheckpoints(rawJson: Record<string, unknown>, expectedMetric: string, projectId: string): CostEvidenceDetail[] {
+  if (rawJson.version !== 'project_json_v3') return [];
+  const verification = typeof rawJson.verification === 'object' && rawJson.verification !== null && !Array.isArray(rawJson.verification)
+    ? rawJson.verification as Record<string, unknown>
+    : {};
+  const checkpoints = verification.reportedCostCheckpoints;
+  if (!Array.isArray(checkpoints)) return [];
+  return checkpoints.flatMap((raw) => {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [];
+    const row = raw as Record<string, unknown>;
+    if (row.metric !== expectedMetric) return [];
+    return [{
+      projectId,
+      metric: expectedMetric,
+      value: finite(row.value) ? row.value : null,
+      unit: typeof row.unit === 'string' ? row.unit : null,
+      period: row.period ?? null,
+      sourceId: typeof row.sourceId === 'string' ? row.sourceId : null,
+      pageOrTable: typeof row.pageOrTable === 'string' ? row.pageOrTable : null,
+      role: 'REPORT_CHECKPOINT_ONLY' as const,
+      reason: 'project_json_v3 report checkpoint: evidence/oracle only; it never overrides the canonical Project-engine cost calculation.',
+    }];
+  });
 }
 
-function applyReportedCostOverride(assessment: any, reported: ReportedCompanyCost): void {
-  const primaryMetal = assessment.primaryMetal as Tier1Metal | null;
-  if (!primaryMetal) return;
-  const benchmark = TIER1_COST_BENCHMARKS[primaryMetal];
-  const diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics as string[] : [];
-  assessment.diagnostics = diagnostics;
+async function collectReportedCostEvidence(symbol: string, primaryMetal: Tier1Metal): Promise<CostEvidenceDetail[]> {
+  const loaded = await loadProjectsForSymbol(symbol);
+  const expectedMetric = TIER1_COST_BENCHMARKS[primaryMetal].metric;
+  const details: CostEvidenceDetail[] = [];
 
-  assessment.support.costMetric = benchmark.metric;
-  assessment.support.costMetricValue = reported.value;
-  assessment.support.costMethod = 'REPORTED_COST_BEST_AVAILABLE';
-  assessment.support.costProjectDetails = reported.projectDetails;
-  assessment.support.costBenchmarkBasisId = benchmark.basisId;
-  assessment.support.costBenchmarkDataPeriod = benchmark.dataPeriod;
-  assessment.support.costBenchmarkSource = benchmark.sourceLabel;
-  assessment.support.costBenchmarkPageOrTable = benchmark.sourcePageOrTable ?? null;
-
-  const gate = assessCostAgainstBenchmark({
-    primaryMetal,
-    primaryMetalRevenueShare: assessment.primaryMetalRevenueShare,
-    metric: benchmark.metric,
-    value: reported.value,
-    benchmark,
-    nowUtc: new Date().toISOString(),
-  });
-  gate.reason = `${gate.reason} Projektkostnaden kommer från bästa tillgängliga rapporterade cost i project_json; benchmark-specifik basis/year är inte en hard guard.`;
-  assessment.gates.cost = gate;
+  for (const project of loaded) {
+    if (project.rawJson.version === 'project_json_v3') {
+      details.push(...readV3ReportedCostCheckpoints(project.rawJson, expectedMetric, project.projectId));
+      continue;
+    }
+    const candidates = extractReportedCostEvidenceCandidates(project.rawJson, expectedMetric);
+    for (const candidate of candidates) {
+      details.push({
+        projectId: project.projectId,
+        metric: candidate.metric,
+        value: candidate.value,
+        unit: candidate.unit,
+        period: candidate.period,
+        sourceId: candidate.sourceId,
+        pageOrTable: candidate.pageOrTable,
+        role: 'REPORT_CHECKPOINT_ONLY',
+        reason: `${candidate.reason} Evidence only: reported cost cannot override the canonical Project-engine cost gate.`,
+      });
+    }
+  }
+  return details;
 }
 
 export default async function handler(req: any, res: any): Promise<void> {
@@ -180,9 +144,8 @@ export default async function handler(req: any, res: any): Promise<void> {
     try {
       const loaded = await loadProjectsForSymbol(symbol);
 
-      // Keep the existing multi-project Tier rule: the weakest verified project
-      // investment IRR caps the company Tier. This is Tier-only behavior and does
-      // not alter Project or Corporate engines.
+      // Policy-only multi-project cap. Every observation is still calculated from
+      // the same canonical Project parser/engine used elsewhere.
       if (loaded.length > 1) {
         const observations = await computeProjectIrrObservations(symbol);
         const selection = selectConservativeProjectIrr(observations);
@@ -216,15 +179,16 @@ export default async function handler(req: any, res: any): Promise<void> {
         }
       }
 
-      // Single source of truth: the base Tier route already derives cost from the
-      // existing project engine. A reported JSON cost only overrides that result
-      // when it is complete for all primary-metal projects; otherwise the base
-      // engine result remains untouched.
+      // Reported C1/AISC is now evidence/checkpoint only. It is deliberately not
+      // passed to assessCostAgainstBenchmark and cannot replace canonical Project economics.
       if (assessment.primaryMetal) {
-        const reported = await computeReportedCompanyCost(symbol, assessment.primaryMetal as Tier1Metal);
-        assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
-        assessment.diagnostics.push(...reported.diagnostics.map((item) => `Kostnad: ${item}`));
-        if (reported.cost) applyReportedCostOverride(assessment, reported.cost);
+        const evidence = await collectReportedCostEvidence(symbol, assessment.primaryMetal as Tier1Metal);
+        assessment.support = assessment.support ?? {};
+        assessment.support.reportedCostEvidence = evidence;
+        if (evidence.length > 0) {
+          assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
+          assessment.diagnostics.push('Kostnad: rapporterade C1/AISC-värden visas endast som checkpoints; Tier-cost kommer från canonical Project-ekonomi och får inte override:as av rapportmåttet.');
+        }
       }
 
       const cyclePriceDisplay = await buildTierCyclePriceDisplay(
@@ -240,9 +204,6 @@ export default async function handler(req: any, res: any): Promise<void> {
       assessment.status = classification.status;
       assessment.classificationReason = classification.reason;
     } catch (error) {
-      // Optional Tier post-processing must not invalidate a calculation that the
-      // base Tier route already completed from project_json. Keep that result and
-      // expose the post-processing problem as a diagnostic only.
       assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
       const message = error instanceof Error ? error.message : String(error);
       assessment.diagnostics.push(`Tier post-processing: ${message}. Basberäkningen behålls.`);

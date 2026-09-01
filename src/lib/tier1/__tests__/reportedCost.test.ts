@@ -1,145 +1,61 @@
 import assert from 'node:assert/strict';
 import { TIER1_COST_BENCHMARKS } from '../config.ts';
 import { assessCostAgainstBenchmark } from '../costBenchmarkAssessment.ts';
-import { extractReportedCostEvidence, reportedCostWeightInBenchmarkUnits } from '../reportedCost.ts';
+import { extractReportedCostEvidence, extractReportedCostEvidenceCandidates, reportedCostWeightInBenchmarkUnits } from '../reportedCost.ts';
+import { assessReportedCostBenchmarkCompatibility } from '../reportedCostCompatibility.ts';
 
-const minimal = extractReportedCostEvidence({
-  economicsBreakdown: {
-    reportedCostMetrics: [{
-      metric: 'C1_CU_USD_PER_LB',
-      value: 1.21,
-      unit: 'USD/lb',
-    }],
-  },
-}, 'C1_CU_USD_PER_LB');
+const minimal = extractReportedCostEvidence({ economicsBreakdown: { reportedCostMetrics: [{ metric: 'C1_CU_USD_PER_LB', value: 1.21, unit: 'USD/lb' }] } }, 'C1_CU_USD_PER_LB');
 assert.equal(minimal.status, 'AVAILABLE');
-assert.equal(minimal.value, 1.21);
-assert.equal(minimal.basisId, null);
-assert.equal(minimal.costBaseYear, null);
-assert.equal(minimal.reportedLabel, null);
+assert.equal(assessReportedCostBenchmarkCompatibility({ evidence: minimal, benchmark: TIER1_COST_BENCHMARKS.Cu }).status, 'INSUFFICIENT_DEFINITION');
 
-const comparableArcticCashCost = extractReportedCostEvidence({
-  economicsBreakdown: {
-    reportedCostMetrics: [{
-      metric: 'C1_CU_USD_PER_LB',
-      reportedLabel: 'Cash Costs, Net of By-product Credits',
-      value: 0.72,
-      unit: 'USD/lb',
-      definitionNotes: 'FS wording; used as best available reported cash-cost measure for Cu C1 benchmarking.',
-      sourceId: 'arctic-fs-2023',
-      pageOrTable: 'Table 22-2, p.390',
-    }],
-  },
-}, 'C1_CU_USD_PER_LB');
-assert.equal(comparableArcticCashCost.status, 'AVAILABLE');
-assert.equal(comparableArcticCashCost.value, 0.72);
-assert.equal(comparableArcticCashCost.reportedLabel, 'Cash Costs, Net of By-product Credits');
-assert.match(comparableArcticCashCost.definitionNotes ?? '', /best available reported cash-cost measure/);
-assert.match(comparableArcticCashCost.reason, /rapportmått “Cash Costs, Net of By-product Credits”/);
+const arcticCashCost = extractReportedCostEvidence({ economicsBreakdown: { reportedCostMetrics: [{
+  metric: 'C1_CU_USD_PER_LB', reportedLabel: 'Cash Costs, Net of By-product Credits', value: 0.72, unit: 'USD/lb',
+  basis: 'net_by_product', denominator: 'payable_primary_metal', period: { kind: 'LOM' }, quality: 'reported_exact',
+  sourceId: 'arctic-fs-2023', pageOrTable: 'Table 22-2, p.390',
+}] } }, 'C1_CU_USD_PER_LB');
+assert.equal(arcticCashCost.status, 'AVAILABLE');
+assert.equal(arcticCashCost.basis, 'net_by_product');
+assert.equal(assessReportedCostBenchmarkCompatibility({ evidence: arcticCashCost, benchmark: TIER1_COST_BENCHMARKS.Cu }).status, 'NOT_COMPARABLE');
 
-const comparableArcticGate = assessCostAgainstBenchmark({
-  primaryMetal: 'Cu',
-  primaryMetalRevenueShare: 0.608,
-  metric: 'C1_CU_USD_PER_LB',
-  value: comparableArcticCashCost.value!,
-  benchmark: TIER1_COST_BENCHMARKS.Cu,
-  nowUtc: '2026-08-30T00:00:00Z',
-});
-assert.equal(comparableArcticGate.status, 'PASS');
-assert.equal(comparableArcticGate.tier, 1);
+const bergCandidates = extractReportedCostEvidenceCandidates({ economicsBreakdown: { reportedCostMetrics: [
+  { metric: 'C1_CU_USD_PER_LB', reportedLabel: 'C1 cost – by-product basis', value: -0.17, unit: 'USD/lb', primaryMetal: 'Cu', basis: 'net_by_product', denominator: 'payable_primary_metal', period: { kind: 'LOM' }, quality: 'reported_exact', sourceId: 'berg-pfs-2026', pageOrTable: 'Table 22-3, p.323' },
+  { metric: 'C1_CU_USD_PER_LB', reportedLabel: 'C1 cost – co-product basis', value: 1.95, unit: 'USD/lb', primaryMetal: 'Cu', basis: 'co_product', denominator: 'metal_equivalent', period: { kind: 'LOM' }, quality: 'reported_exact', sourceId: 'berg-pfs-2026', pageOrTable: 'Table 22-3, p.323' },
+] } }, 'C1_CU_USD_PER_LB');
+assert.equal(bergCandidates.length, 2);
+assert.equal(bergCandidates[0].value, -0.17);
+assert.equal(bergCandidates[1].value, 1.95);
+const bergSingle = extractReportedCostEvidence({ economicsBreakdown: { reportedCostMetrics: [
+  { metric: 'C1_CU_USD_PER_LB', value: -0.17, unit: 'USD/lb', basis: 'net_by_product', denominator: 'payable_primary_metal', period: { kind: 'LOM' } },
+  { metric: 'C1_CU_USD_PER_LB', value: 1.95, unit: 'USD/lb', basis: 'co_product', denominator: 'metal_equivalent', period: { kind: 'LOM' } },
+] } }, 'C1_CU_USD_PER_LB');
+assert.equal(bergSingle.status, 'INVALID');
+assert.match(bergSingle.reason, /Arrayordning/);
 
-const negativeCopperC1 = extractReportedCostEvidence({
-  economicsBreakdown: {
-    reportedCostMetrics: [{
-      metric: 'C1_CU_USD_PER_LB',
-      value: -0.17,
-      unit: 'USD/lb',
-    }],
-  },
-}, 'C1_CU_USD_PER_LB');
-assert.equal(negativeCopperC1.status, 'AVAILABLE');
-assert.equal(negativeCopperC1.value, -0.17);
+const vizPeriodSelection = extractReportedCostEvidence({ economicsBreakdown: { reportedCostMetrics: [
+  { metric: 'C1_CU_USD_PER_LB', value: 0.93, unit: 'USD/lb', basis: 'reported_other', denominator: 'payable_primary_metal', period: { kind: 'FIRST_N_OPERATING_YEARS', years: 8 }, costBaseYear: 2023, sourceId: 'viz-pfs', pageOrTable: 'Table 21.11' },
+  { metric: 'C1_CU_USD_PER_LB', value: 1.25, unit: 'USD/lb', basis: 'reported_other', denominator: 'payable_primary_metal', period: { kind: 'LOM' }, costBaseYear: 2023, sourceId: 'viz-pfs', pageOrTable: 'Table 21.11' },
+] } }, 'C1_CU_USD_PER_LB');
+assert.equal(vizPeriodSelection.status, 'AVAILABLE');
+assert.equal(vizPeriodSelection.value, 1.25);
+assert.equal(vizPeriodSelection.period?.kind, 'LOM');
 
-const negativeCopperC1Gate = assessCostAgainstBenchmark({
-  primaryMetal: 'Cu',
-  primaryMetalRevenueShare: 0.55,
-  metric: 'C1_CU_USD_PER_LB',
-  value: -0.17,
-  benchmark: TIER1_COST_BENCHMARKS.Cu,
-  nowUtc: '2026-08-30T00:00:00Z',
-});
-assert.equal(negativeCopperC1Gate.status, 'PASS');
-assert.equal(negativeCopperC1Gate.tier, 1);
-assert.equal(negativeCopperC1Gate.value, -0.17);
+const exactCopper = extractReportedCostEvidence({ economicsBreakdown: { reportedCostMetrics: [{
+  metric: 'C1_CU_USD_PER_LB', value: 1.21, unit: 'USD/lb', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2024, sourceId: 'pfs-2024', pageOrTable: 'Table 22-4',
+}] } }, 'C1_CU_USD_PER_LB');
+assert.equal(assessReportedCostBenchmarkCompatibility({ evidence: exactCopper, benchmark: TIER1_COST_BENCHMARKS.Cu }).status, 'COMPARABLE');
+const exactCopperGate = assessCostAgainstBenchmark({ primaryMetal: 'Cu', primaryMetalRevenueShare: 0.90, metric: 'C1_CU_USD_PER_LB', value: exactCopper.value!, benchmark: TIER1_COST_BENCHMARKS.Cu, nowUtc: '2026-08-30T00:00:00Z' });
+assert.equal(exactCopperGate.status, 'PASS');
+assert.equal(exactCopperGate.tier, 1);
 
-const legacyRich = extractReportedCostEvidence({
-  economicsBreakdown: {
-    reportedCostMetrics: [{
-      metric: 'AISC_AU_USD_PER_TOZ',
-      basisId: 'S_AND_P_CO_PRODUCT_AISC_AU',
-      value: 1_061,
-      unit: 'USD/toz',
-      costBaseYear: 2025,
-      sourceId: 'bilboes-gold-project-trs-2025',
-      pageOrTable: 'Table 19-6, p. 158',
-    }],
-  },
-}, 'AISC_AU_USD_PER_TOZ');
-assert.equal(legacyRich.status, 'AVAILABLE');
-assert.equal(legacyRich.value, 1_061);
-assert.equal(legacyRich.basisId, 'S_AND_P_CO_PRODUCT_AISC_AU');
-assert.equal(legacyRich.costBaseYear, 2025);
-assert.equal(legacyRich.pageOrTable, 'Table 19-6, p. 158');
+const wrongCopperYear = extractReportedCostEvidence({ economicsBreakdown: { reportedCostMetrics: [{ metric: 'C1_CU_USD_PER_LB', value: 1.21, unit: 'USD/lb', basisId: 'S_AND_P_CO_PRODUCT_C1_CU', costBaseYear: 2025, sourceId: 'pfs-2025', pageOrTable: 'Table 22-4' }] } }, 'C1_CU_USD_PER_LB');
+assert.equal(assessReportedCostBenchmarkCompatibility({ evidence: wrongCopperYear, benchmark: TIER1_COST_BENCHMARKS.Cu }).status, 'NOT_COMPARABLE');
 
-const updated = extractReportedCostEvidence({
-  economicsBreakdown: {
-    reportedCostMetrics: [
-      { metric: 'AISC_AU_USD_PER_TOZ', value: 1_400, unit: 'USD/toz' },
-      { metric: 'AISC_AU_USD_PER_TOZ', value: 1_650, unit: 'USD/toz' },
-    ],
-  },
-}, 'AISC_AU_USD_PER_TOZ');
-assert.equal(updated.status, 'AVAILABLE');
-assert.equal(updated.value, 1_650);
+const wrongMetric = extractReportedCostEvidence({ economicsBreakdown: { reportedCostMetrics: [{ metric: 'AISC_AGEQ_USD_PER_TOZ', value: 12.9, unit: 'USD/toz' }] } }, 'AISC_AG_CO_PRODUCT_USD_PER_TOZ');
+assert.equal(wrongMetric.status, 'INVALID');
 
-const wrongMetric = extractReportedCostEvidence({
-  economicsBreakdown: {
-    reportedCostMetrics: [{ metric: 'AISC_AGEQ_USD_PER_TOZ', value: 12.9, unit: 'USD/toz' }],
-  },
-}, 'AISC_AG_CO_PRODUCT_USD_PER_TOZ');
-assert.equal(wrongMetric.status, 'NOT_AVAILABLE');
-
-const invalid = extractReportedCostEvidence({
-  economicsBreakdown: {
-    reportedCostMetrics: [{ metric: 'C1_CU_USD_PER_LB', value: 1.21, unit: 'USD/tonne' }],
-  },
-}, 'C1_CU_USD_PER_LB');
-assert.equal(invalid.status, 'INVALID');
-
-const lbWeight = reportedCostWeightInBenchmarkUnits({
-  payableSeries: [0, 1000, 2000],
-  payableUnit: 'kg',
-  benchmarkUnit: 'USD/lb',
-});
+const lbWeight = reportedCostWeightInBenchmarkUnits({ payableSeries: [0, 1000, 2000], payableUnit: 'kg', benchmarkUnit: 'USD/lb' });
 assert.ok(lbWeight !== null && Math.abs(lbWeight - 6613.867865546327) < 1e-9);
-
-const ozWeight = reportedCostWeightInBenchmarkUnits({
-  payableSeries: [0, 31.1034768],
-  payableUnit: 'g',
-  benchmarkUnit: 'USD/toz',
-});
+const ozWeight = reportedCostWeightInBenchmarkUnits({ payableSeries: [0, 31.1034768], payableUnit: 'g', benchmarkUnit: 'USD/toz' });
 assert.ok(ozWeight !== null && Math.abs(ozWeight - 1) < 1e-9);
-
-const bilboesCostGate = assessCostAgainstBenchmark({
-  primaryMetal: 'Au',
-  primaryMetalRevenueShare: 1,
-  metric: 'AISC_AU_USD_PER_TOZ',
-  value: 1_061,
-  benchmark: TIER1_COST_BENCHMARKS.Au,
-  nowUtc: '2026-08-28T00:00:00Z',
-});
-assert.equal(bilboesCostGate.status, 'PASS');
-assert.equal(bilboesCostGate.tier, 1);
-assert.equal(bilboesCostGate.threshold, 1_228);
 
 console.log('reportedCost.test.ts passed');

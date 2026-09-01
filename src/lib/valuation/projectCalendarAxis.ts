@@ -1,4 +1,4 @@
-export type ProjectJsonVersion = 'project_json_v1' | 'project_json_v2';
+export type ProjectJsonVersion = 'project_json_v1' | 'project_json_v2' | 'project_json_v3';
 
 export type NormalizedProjectCalendarAxis = {
   yearsByPeriod: number[];
@@ -71,7 +71,7 @@ export function verifyNormalizedProjectCalendarAxis(args: {
 }): ProjectCalendarAxisResult {
   if (!Number.isInteger(args.masterN) || args.masterN < 0) return fail('masterN must be a non-negative integer');
   const periodCount = args.normalized.yearsByPeriod.length;
-  const allowedCounts = args.version === 'project_json_v2' ? [args.masterN + 1] : [args.masterN, args.masterN + 1];
+  const allowedCounts = args.version === 'project_json_v1' ? [args.masterN, args.masterN + 1] : [args.masterN + 1];
   if (!allowedCounts.includes(periodCount)) {
     return fail(`normaliserad periodmängd=${periodCount}, expected ${allowedCounts.join(' or ')} for ${args.version}`);
   }

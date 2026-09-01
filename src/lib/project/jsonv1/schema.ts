@@ -1,7 +1,15 @@
 import type { StreamMVIConfig } from '../streams/types.ts';
+import type {
+  ProjectReportedCostBasis,
+  ProjectReportedCostByProductTreatment,
+  ProjectReportedCostComponentTreatment,
+  ProjectReportedCostCoProductMethod,
+  ProjectReportedCostDenominator,
+  ProjectReportedCostPeriod,
+  ProjectReportedCostQuality,
+} from './costSemantics.ts';
 
 export type QtyUnit = 'toz' | 'g' | 'kg' | 'lb' | 'tonne' | 'short_ton' | 'long_ton';
-
 export type PriceUnit = 'USD_per_toz' | 'USD_per_lb' | 'USD_per_tonne';
 
 export type ProjectReportedCostMetric =
@@ -16,30 +24,10 @@ export type ProjectReportedCostMetric =
 
 export type ProjectJsonV1 = {
   version: 'project_json_v2';
-
-  meta?: {
-    projectId?: string;
-    projectName?: string;
-    currency?: 'USD';
-    notes?: string;
-    disabled?: boolean;
-  };
-
-  time: {
-    masterN: number;
-    productionStartPeriod: number;
-    productionStartYear: number;
-  };
-
-  economics: {
-    taxRate?: number | null;
-  };
-
-  equity?: {
-    fdExtraShares?: number | null;
-    fdNotes?: string | null;
-  };
-
+  meta?: { projectId?: string; projectName?: string; currency?: 'USD'; notes?: string; disabled?: boolean };
+  time: { masterN: number; productionStartPeriod: number; productionStartYear: number };
+  economics: { taxRate?: number | null };
+  equity?: { fdExtraShares?: number | null; fdNotes?: string | null };
   series: {
     capexUSD: Array<number | null>;
     operatingCostsUSD: Array<number | null>;
@@ -50,18 +38,9 @@ export type ProjectJsonV1 = {
     royaltiesUSD?: Array<number | null>;
     reclamationUSD: Array<number | null>;
     byproductCreditsUSD?: Array<number | null>;
-    /**
-     * Report-locked net tax cash flow. Positive = cash inflow/refundable tax
-     * credit; negative = cash tax payment. Mutually exclusive with taxRate.
-     */
     taxCashFlowUSD?: Array<number | null>;
-    /**
-     * Report-locked non-operating terminal proceeds such as salvage value.
-     * Positive values are FCFF inflows and do not affect revenue/EBITDA/EBIT/tax.
-     */
     terminalProceedsUSD?: Array<number | null>;
   };
-
   metals: {
     payableQtyByMetal: Record<string, Array<number | null>>;
     payableQtyUnitByMetal: Record<string, QtyUnit>;
@@ -71,18 +50,10 @@ export type ProjectJsonV1 = {
     spotPriceUnitByMetal?: Record<string, PriceUnit>;
     auPriceUSDPerOz?: Array<number | null>;
   };
-
   streamsByMetal?: Record<string, StreamMVIConfig> | null;
-
   takeItems?: Array<unknown> | null;
-
   operations?: {
-    capacity: {
-      throughputUnit: 'tpd' | 'tpa' | null;
-      nameplateThroughput: number | null;
-      utilizationPct?: number | null;
-    };
-
+    capacity: { throughputUnit: 'tpd' | 'tpa' | null; nameplateThroughput: number | null; utilizationPct?: number | null };
     oreMilledTonnes?: Array<number | null>;
     oreMinedTonnes?: Array<number | null>;
     oreTonnageUnit?: 'tonne' | 'short_ton' | 'long_ton' | null;
@@ -90,26 +61,26 @@ export type ProjectJsonV1 = {
     gradeUnitByMetal?: Record<string, 'gpt' | 'pct' | 'ozpt' | string>;
     recoveryPctByMetal?: Record<string, Array<number | null>>;
   } | null;
-
   economicsBreakdown?: {
-    meta?: {
-      defaultSource?: 'PEA' | 'PFS' | 'FS' | 'Other' | null;
-      notes?: string | null;
-    } | null;
-    /**
-     * Optional reported project cost used by Tier as best-available evidence.
-     * `metric` selects the canonical Tier benchmark the reported measure is
-     * economically comparable to; it does not assert that the report itself
-     * uses that exact label. Preserve the report's wording in reportedLabel and
-     * explain material definition differences in definitionNotes. Only map a
-     * reported measure when its economic basis is sufficiently comparable.
-     */
+    meta?: { defaultSource?: 'PEA' | 'PFS' | 'FS' | 'Other' | null; notes?: string | null } | null;
+    /** Report evidence. `metric` is a legacy family/selector, not proof of benchmark compatibility. */
     reportedCostMetrics?: Array<{
       metric: ProjectReportedCostMetric;
       reportedLabel?: string | null;
       value: number;
       unit: 'USD/lb' | 'USD/toz';
       definitionNotes?: string | null;
+      primaryMetal?: string | null;
+      basis?: ProjectReportedCostBasis | null;
+      denominator?: ProjectReportedCostDenominator | null;
+      period?: ProjectReportedCostPeriod | null;
+      byProductTreatment?: ProjectReportedCostByProductTreatment | null;
+      royaltyTreatment?: ProjectReportedCostComponentTreatment | null;
+      offSiteTreatment?: ProjectReportedCostComponentTreatment | null;
+      coProductMethod?: ProjectReportedCostCoProductMethod | null;
+      equivalentFormula?: string | null;
+      costBaseYear?: number | null;
+      quality?: ProjectReportedCostQuality | null;
       sourceId?: string | null;
       pageOrTable?: string | null;
     }> | null;
@@ -128,22 +99,15 @@ export type ProjectJsonV1 = {
       transportUSD?: Array<number | null>;
     };
     royaltiesDetail?: Array<{
-      id: string;
-      label: string;
-      name?: string | null;
+      id: string; label: string; name?: string | null;
       base: 'revenue' | 'ebit' | 'ebitda' | 'quantity';
-      rateType?: string | null;
-      rate?: number | null;
+      rateType?: string | null; rate?: number | null;
       royaltyUSD?: Array<number | null>;
       source?: 'PEA' | 'PFS' | 'FS' | 'Other' | null;
       notes?: string | null;
     }> | null;
-    taxesDetail?: {
-      federalIncomeTaxUSD?: Array<number | null>;
-      municipalRevenueTaxUSD?: Array<number | null>;
-    } | null;
+    taxesDetail?: { federalIncomeTaxUSD?: Array<number | null>; municipalRevenueTaxUSD?: Array<number | null> } | null;
   } | null;
-
   priceOverrides?: {
     spotPriceUSDByMetal?: Record<string, Array<number | null>>;
     auPriceUSDPerOz?: Array<number | null>;

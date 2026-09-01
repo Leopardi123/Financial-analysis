@@ -1,7 +1,6 @@
 import { computeProjectEngineFullProductionV1 } from '../project/engineFullProductionV1.ts';
 import { parseProjectJsonV1 } from '../project/jsonv1/parse.ts';
 import { resolveProjectPricesToEngineInput } from '../project/jsonv1/resolvePrices.ts';
-import { resolveV2TimeAxis } from '../time/resolveV2TimeAxis.ts';
 import type {
   CorporateAggregationDeps,
   CorporateAggregationInput,
@@ -9,7 +8,7 @@ import type {
   CorporateProjectEngineSnapshot,
 } from './types.ts';
 
-type V2ProjectAxis = {
+type ProjectAxis = {
   projectId: string;
   masterN: number;
   productionStartPeriod: number;
@@ -23,23 +22,43 @@ function validateBaseInput(input: CorporateAggregationInput): void {
   if (input.projects.length < 1) throw new Error('At least one project is required for corporate aggregation');
 }
 
-function getV2AxisOrThrow(projectId: string, rawJson: unknown): V2ProjectAxis {
-  const time = (rawJson as { time?: { masterN?: unknown; productionStartPeriod?: unknown; productionStartYear?: unknown } }).time;
-  const masterN = time?.masterN;
-  const productionStartPeriod = time?.productionStartPeriod;
-  const productionStartYear = time?.productionStartYear;
+function getProjectAxisOrThrow(
+  projectId: string,
+  rawJson: unknown,
+  parse: NonNullable<CorporateAggregationDeps['parseProject']>,
+): ProjectAxis {
   try {
-    const resolved = resolveV2TimeAxis({ masterN: masterN as number, productionStartPeriod: productionStartPeriod as number, productionStartYear: productionStartYear as number });
+    const parsed = parse(rawJson);
+    const engine = parsed.engineInputWithoutPrices;
+    const masterN = engine.masterN;
+    const productionStartPeriod = engine.productionStartPeriod;
+    const yearsByPeriod = engine.yearsByPeriod;
+
+    if (!Number.isInteger(masterN) || masterN < 0) throw new Error(`masterN=${String(masterN)}`);
+    if (!Number.isInteger(productionStartPeriod) || productionStartPeriod < 0 || productionStartPeriod > masterN) {
+      throw new Error(`productionStartPeriod=${String(productionStartPeriod)}`);
+    }
+    if (!Array.isArray(yearsByPeriod) || yearsByPeriod.length !== masterN + 1) {
+      throw new Error(`yearsByPeriod length=${Array.isArray(yearsByPeriod) ? yearsByPeriod.length : 'missing'}, expected=${masterN + 1}`);
+    }
+    if (!yearsByPeriod.every((year) => Number.isInteger(year) && year >= 1000 && year <= 9999)) {
+      throw new Error('yearsByPeriod must contain absolute 4-digit years');
+    }
+    for (let t = 1; t < yearsByPeriod.length; t += 1) {
+      if (yearsByPeriod[t] <= yearsByPeriod[t - 1]) throw new Error(`yearsByPeriod is not strictly increasing at t=${t}`);
+    }
+
+    const productionStartYear = yearsByPeriod[productionStartPeriod];
     return {
       projectId,
-      masterN: resolved.masterN,
-      productionStartPeriod: resolved.productionStartPeriod,
-      productionStartYear: resolved.productionStartYear,
-      yearsByPeriod: resolved.yearsByPeriod,
-      yearToT: new Map<number, number>(resolved.yearsByPeriod.map((year, t) => [year, t])),
+      masterN,
+      productionStartPeriod,
+      productionStartYear,
+      yearsByPeriod: [...yearsByPeriod],
+      yearToT: new Map<number, number>(yearsByPeriod.map((year, t) => [year, t])),
     };
-  } catch {
-    throw new Error(`Invalid v2 time for project ${projectId}: masterN=${String(masterN)}, productionStartPeriod=${String(productionStartPeriod)}, productionStartYear=${String(productionStartYear)}`);
+  } catch (error) {
+    throw new Error(`Invalid project timeline for project ${projectId}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -154,11 +173,12 @@ async function projectToSeriesViaDeps(
 
 export async function aggregateProjectsCorporateV1(input: CorporateAggregationInput, deps: CorporateAggregationDeps = {}): Promise<CorporateAggregationOutput> {
   validateBaseInput(input);
-  const v2ProjectAxes = input.projects.map((project) => getV2AxisOrThrow(project.projectId, project.rawJson));
-  const projects = await Promise.all(input.projects.map((project, index) => projectToSeriesViaDeps({ projectId: project.projectId, rawJson: project.rawJson, yearsByPeriod: v2ProjectAxes[index].yearsByPeriod }, deps)));
+  const parse = deps.parseProject ?? parseProjectJsonV1;
+  const projectAxes = input.projects.map((project) => getProjectAxisOrThrow(project.projectId, project.rawJson, parse));
+  const projects = await Promise.all(input.projects.map((project, index) => projectToSeriesViaDeps({ projectId: project.projectId, rawJson: project.rawJson, yearsByPeriod: projectAxes[index].yearsByPeriod }, deps)));
 
   for (let index = 0; index < input.projects.length; index += 1) {
-    const periodLength = v2ProjectAxes[index].masterN + 1;
+    const periodLength = projectAxes[index].masterN + 1;
     const projectId = input.projects[index].projectId;
     assertSeriesLength(projects[index].capexUSD, periodLength, projectId, 'capexUSD');
     assertSeriesLength(projects[index].fcffUSD, periodLength, projectId, 'fcffUSD');
@@ -169,13 +189,13 @@ export async function aggregateProjectsCorporateV1(input: CorporateAggregationIn
     for (const [metal, series] of Object.entries(projects[index].priceUSDByMetal ?? {})) assertSeriesLength(series, periodLength, projectId, `priceUSDByMetal[${metal}]`);
   }
 
-  const minYear = Math.min(...v2ProjectAxes.flatMap((time) => time.yearsByPeriod));
-  const maxYear = Math.max(...v2ProjectAxes.flatMap((time) => time.yearsByPeriod));
+  const minYear = Math.min(...projectAxes.flatMap((time) => time.yearsByPeriod));
+  const maxYear = Math.max(...projectAxes.flatMap((time) => time.yearsByPeriod));
   const corporateYearsByPeriod = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
   const yearToCorporateIndex = new Map<number, number>(corporateYearsByPeriod.map((year, j) => [year, j]));
   if (yearToCorporateIndex.size !== corporateYearsByPeriod.length) throw new Error('Corporate years axis contains duplicate years');
 
-  const projectsWithYears = projects.map((projectSeries, index) => ({ ...projectSeries, yearToT: v2ProjectAxes[index].yearToT }));
+  const projectsWithYears = projects.map((projectSeries, index) => ({ ...projectSeries, yearToT: projectAxes[index].yearToT }));
   const capexUSD_total = sumStrictByYearGrid(corporateYearsByPeriod, projectsWithYears, (project) => project.capexUSD);
   const fcffUSD_total = sumStrictByYearGrid(corporateYearsByPeriod, projectsWithYears, (project) => project.fcffUSD);
   const grossRevenueUSD_total = sumStrictByYearGrid(corporateYearsByPeriod, projectsWithYears, (project) => project.grossRevenueUSD);

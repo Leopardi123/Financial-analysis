@@ -1,4 +1,5 @@
 import './terminalProceedsCashFlow.test.ts';
+import '../jsonv3/__tests__/foundation.test.ts';
 import { computeProjectPhase1 } from '../phase1.ts';
 import { parseProjectJsonV1 } from '../jsonv1/parse.ts';
 import { parseProjectJsonV1 as parseProjectJsonV1Legacy } from '../jsonv1/parseLegacy.ts';
@@ -60,31 +61,31 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
     'one Phase1 invocation cannot double-tax',
   );
 
-  // Project JSON taxCashFlowUSD is report evidence only. It must never enter canonical
-  // spot runtime input, and it may coexist with a dynamic tax model.
+  // V2 compatibility: taxCashFlowUSD remains report evidence only. V3 removes this
+  // dual representation and makes taxModel an explicit XOR canonical source.
   const evidenceJson = getProjectJsonV1Template();
   evidenceJson.economics.taxRate = 0.27;
   evidenceJson.series.taxCashFlowUSD = new Array(evidenceJson.time.masterN + 1).fill(0);
   evidenceJson.series.taxCashFlowUSD[0] = 10;
   evidenceJson.series.taxCashFlowUSD[2] = -20;
   const parsedEvidence = parseProjectJsonV1(evidenceJson);
-  assertEqual(parsedEvidence.engineInput.phase1.taxCashFlowUSD, undefined, 'report tax evidence must not enter priced runtime input');
-  assertEqual(parsedEvidence.engineInputWithoutPrices.phase1.taxCashFlowUSD, undefined, 'report tax evidence must not enter price-free runtime input');
-  assertEqual(parsedEvidence.engineInputWithoutPrices.taxRate, 0.27, 'dynamic runtime taxRate remains authoritative');
+  assertEqual(parsedEvidence.engineInput.phase1.taxCashFlowUSD, undefined, 'v2 report tax evidence must not enter priced runtime input');
+  assertEqual(parsedEvidence.engineInputWithoutPrices.phase1.taxCashFlowUSD, undefined, 'v2 report tax evidence must not enter price-free runtime input');
+  assertEqual(parsedEvidence.engineInputWithoutPrices.taxRate, 0.27, 'v2 dynamic runtime taxRate remains authoritative');
 
   const noDynamicTaxJson = getProjectJsonV1Template();
   noDynamicTaxJson.economics.taxRate = null;
   noDynamicTaxJson.series.taxCashFlowUSD = new Array(noDynamicTaxJson.time.masterN + 1).fill(-1);
   const parsedNoDynamicTax = parseProjectJsonV1(noDynamicTaxJson);
-  assertEqual(parsedNoDynamicTax.engineInput.phase1.taxCashFlowUSD, undefined, 'report tax evidence cannot silently become runtime tax');
-  assertEqual(parsedNoDynamicTax.engineInputWithoutPrices.taxRate, null, 'missing dynamic tax remains unverified rather than substituted');
+  assertEqual(parsedNoDynamicTax.engineInput.phase1.taxCashFlowUSD, undefined, 'v2 report tax evidence cannot silently become runtime tax');
+  assertEqual(parsedNoDynamicTax.engineInputWithoutPrices.taxRate, null, 'missing v2 dynamic tax remains unverified rather than substituted');
 
   const shortTaxSeries = getProjectJsonV1Template();
   shortTaxSeries.series.taxCashFlowUSD = [0, 0];
   assertThrows(
     () => parseProjectJsonV1(shortTaxSeries),
     /series\.taxCashFlowUSD must be an array of length .*masterN\+1/,
-    'report tax evidence must match report timeline exactly',
+    'v2 report tax evidence must match report timeline exactly',
   );
 
   const nonFiniteTaxSeries = getProjectJsonV1Template();
@@ -93,7 +94,7 @@ function assertThrows(fn: () => void, pattern: RegExp, message: string): void {
   assertThrows(
     () => parseProjectJsonV1(nonFiniteTaxSeries),
     /series\.taxCashFlowUSD\[1\] must be null or a finite number/,
-    'non-finite report tax evidence is rejected',
+    'non-finite v2 report tax evidence is rejected',
   );
 
   console.log('Explicit tax cash-flow tests passed');

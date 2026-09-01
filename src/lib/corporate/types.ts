@@ -1,12 +1,12 @@
 import type { ParsedProjectJsonV1 } from '../project/jsonv1/parse.ts';
 import type { ProjectEngineFullProductionV1Input, ProjectEngineFullProductionV1Output } from '../project/types.ts';
-import type { ProjectJsonV1 } from '../project/jsonv1/schema.ts';
 
 export type CorporateAggregationInput = {
   discountRate: number;
   projects: Array<{
     projectId: string;
-    rawJson: unknown & Partial<ProjectJsonV1>;
+    /** Version-dispatched project JSON. V2 and V3 are parsed through the same canonical parser boundary. */
+    rawJson: unknown;
   }>;
 };
 

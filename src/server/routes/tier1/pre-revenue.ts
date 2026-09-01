@@ -26,7 +26,6 @@ import {
   type Tier1Gate,
   type Tier1PreRevenueAssessment,
 } from '../../../lib/tier1/preRevenue.ts';
-import { assessCostAgainstBenchmark } from '../../../lib/tier1/costBenchmarkAssessment.ts';
 
 const LB_PER_TONNE = 2204.6226218487757;
 const GRAMS_PER_TOZ = 31.1034768;
@@ -340,8 +339,6 @@ export default async function handler(req: any, res: any): Promise<void> {
       const physicalInput = parsed.engineInputWithoutPrices;
       const yearsByPeriod = physicalInput.yearsByPeriod;
 
-      // Physical mine-plan gates use physical payable quantities and their
-      // declared quantity units. Price keys must never determine scale units.
       for (const [metal, qtySeries] of Object.entries(physicalInput.payableQtyByMetal)) {
         if (!isTier1Metal(metal)) continue;
         const qtyUnit = physicalInput.payableQtyUnitByMetal[metal];
@@ -514,29 +511,11 @@ export default async function handler(req: any, res: any): Promise<void> {
     const znEqAisc = equivalentAiscForMetal(preparedProjects, 'Zn', sustainingCostUsd);
     if (finite(znEqAisc)) costMetricValues.AISC_ZNEQ_USD_PER_LB = znEqAisc;
 
-    let costGate = assessCost({ primaryMetal, primaryMetalRevenueShare, costMetricValues, nowUtc: new Date().toISOString() });
+    const costGate = assessCost({ primaryMetal, primaryMetalRevenueShare, costMetricValues, nowUtc: new Date().toISOString() });
     let selectedCostMetric: Tier1CostMetric | null = null;
 
-    // Silver best-available fallback: the existing project engine already
-    // computes AgEq AISC from the same sustaining-cost numerator and the gross
-    // revenue-equivalent silver denominator. When no explicit reported
-    // co-product Ag AISC exists, use that canonical economic output as an
-    // explicitly labelled proxy against the primary-silver co-product curve.
-    // This adds no project input and does not alter Project/Corporate economics.
     if (primaryMetal === 'Ag' && finite(agEqAisc) && (costGate.status === 'NOT_VERIFIED' || costGate.tier === null)) {
-      const benchmark = TIER1_COST_BENCHMARKS.Ag;
-      const proxyGate = assessCostAgainstBenchmark({
-        primaryMetal: 'Ag',
-        primaryMetalRevenueShare,
-        metric: benchmark.metric,
-        value: agEqAisc,
-        benchmark,
-        nowUtc: new Date().toISOString(),
-      });
-      proxyGate.reason = `Best available från befintlig ekonomisk modell: AgEq AISC ${agEqAisc.toFixed(2)} USD/toz används som silver-cost proxy mot S&P:s co-product Ag-kurva. Ingen extra project_json-data antas. ${proxyGate.reason}`;
-      costGate = proxyGate;
-      selectedCostMetric = 'AISC_AGEQ_USD_PER_TOZ';
-      diagnostics.push(`Kostnad Ag: engine-baserad AgEq AISC ${agEqAisc.toFixed(4)} USD/toz används som best-available proxy mot Ag co-product-kurvan.`);
+      diagnostics.push(`Kostnad Ag: engine-baserad AgEq AISC ${agEqAisc.toFixed(4)} USD/toz bevaras som cost evidence men jämförs inte med S&P:s co-product Ag AISC-kurva utan definitionskompatibel metric.`);
     }
 
     const cycleReason = missingCycle.length > 0
@@ -582,7 +561,7 @@ export default async function handler(req: any, res: any): Promise<void> {
         scaleWindowEndYear: scaleWindow.endYear,
         scaleWindowYears: scaleWindow.years,
         costMetric: selectedCostMetric,
-        costMetricValue: selectedCostMetric ? costMetricValues[selectedCostMetric] ?? (selectedCostMetric === 'AISC_AGEQ_USD_PER_TOZ' ? agEqAisc : null) : null,
+        costMetricValue: selectedCostMetric ? costMetricValues[selectedCostMetric] ?? null : null,
       },
       diagnostics,
     };
