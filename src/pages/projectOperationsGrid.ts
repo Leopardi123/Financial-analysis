@@ -1,5 +1,4 @@
 import { rowHasDisplayValue } from '../lib/project/rowDisplayValue.ts';
-import { convertMass } from '../lib/prices/units.ts';
 
 export type OperationsGridInput = {
   masterN: number;
@@ -23,6 +22,7 @@ export type OperationsGridInput = {
     payableQtyUnitByMetal?: Record<string, string>;
   };
   economics?: {
+    /** Effective price in the same displayed quantity unit as payableQtyUnitByMetal. */
     priceUSDByMetal?: Record<string, Array<number | null>>;
     operatingCostsUSD?: Array<number | null>;
     royaltiesUSD?: Array<number | null>;
@@ -90,21 +90,6 @@ function normalizeRecoverySeries(values: Array<number | null> | undefined, colum
     if (typeof value !== 'number' || !Number.isFinite(value)) return null;
     return isFraction ? value * 100 : value;
   });
-}
-
-function quantityForDisplayedRevenue(metal: string, quantity: number, unit: string | undefined): number | null {
-  // The canonical Mo benchmark is MO_USD_TONNE. Project JSON may preserve report
-  // payable Mo in lb, so the display grid must normalize quantity before multiplying
-  // by the resolved canonical price. The project engine already performs this same
-  // normalization; this keeps the UI display aligned with the engine without
-  // changing the source payable series shown to the user.
-  if (metal === 'Mo') {
-    if (unit === 'tonne') return quantity;
-    if (unit === 'lb' || unit === 'kg' || unit === 'short_ton' || unit === 'long_ton') {
-      return convertMass(quantity, unit, 'tonne');
-    }
-  }
-  return quantity;
 }
 
 export function buildOperationsGridModel(input: OperationsGridInput): OperationsGridModel {
@@ -179,15 +164,21 @@ export function buildOperationsGridModel(input: OperationsGridInput): Operations
   for (const metal of metals) {
     const qty = input.metals.payableQtyByMetal?.[metal];
     const price = priceUSDByMetal[metal];
-    const qtyUnit = input.metals.payableQtyUnitByMetal?.[metal];
+    const qtyUnit = input.metals.payableQtyUnitByMetal?.[metal] ?? '—';
     if (!Array.isArray(qty)) continue;
+
+    if (Array.isArray(price)) {
+      rows.push({ label: `Price ${metal} (USD/${qtyUnit})`, values: price });
+    }
+
     const revenue = Array.from({ length: columnCount }, (_, t) => {
       const q = qty[t];
       const p = price?.[t];
       if (q === null || p === null || !Number.isFinite(q) || !Number.isFinite(p)) return null;
-      const normalizedQuantity = quantityForDisplayedRevenue(metal, q, qtyUnit);
-      if (normalizedQuantity === null || !Number.isFinite(normalizedQuantity)) return null;
-      return normalizedQuantity * p;
+      // priceUSDByMetal is the effective display price in the same unit as the
+      // payable row, so this identity must stay directly auditable in the UI:
+      // Payable quantity × Price = Revenue.
+      return q * p;
     });
     revenueByMetal[metal] = revenue;
     rows.push({ label: `Revenue ${metal} (USD)`, values: revenue });
