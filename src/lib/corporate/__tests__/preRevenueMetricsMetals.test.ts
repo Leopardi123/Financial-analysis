@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import { UNIT_CONSTANTS } from '../../prices/units/types.ts';
-import {
-  deriveCorporatePreRevenueMetrics,
-  type CorporateSnapshotWithValuationSeries,
-} from '../preRevenueMetrics.ts';
+import { deriveCorporatePreRevenueMetrics } from '../preRevenueMetrics.ts';
+import type { CorporateSnapshot } from '../snapshot/types.ts';
 
 const metalPrices: Record<string, { key: string; price: number; unit: string; expectedLomEq: number; expectedUnit: 'oz' | 't' }> = {
   Au: { key: 'XAU_USD_TOZ', price: 100, unit: 'USD_toz', expectedLomEq: 30, expectedUnit: 'oz' },
@@ -57,7 +55,7 @@ const snapshot = {
     unitAudit: { metals: unitAuditMetals },
   },
   modeledValuationTimeline: { markers: [] },
-} as unknown as CorporateSnapshotWithValuationSeries;
+} as unknown as CorporateSnapshot;
 
 const result = deriveCorporatePreRevenueMetrics({
   snapshot,

@@ -6,10 +6,8 @@ import { COPPER_CREEK_PEA_V3 } from '../../project/jsonv3/__tests__/fixtures/cop
 import { getPriceKeyDefinition } from '../../prices/keys.ts';
 import { canonicalUnitForMetal } from '../../units/metalUnits.ts';
 import { convertPriceToCanonical } from '../../units/conversion.ts';
-import {
-  deriveCorporatePreRevenueMetrics,
-  type CorporateSnapshotWithValuationSeries,
-} from '../preRevenueMetrics.ts';
+import { deriveCorporatePreRevenueMetrics } from '../preRevenueMetrics.ts';
+import type { CorporateSnapshot } from '../snapshot/types.ts';
 
 const LEGACY_LB_PER_TONNE = 2204.6226218;
 const VALUATION_YEAR = 2026;
@@ -28,7 +26,7 @@ function recordValue<T>(record: Record<string, T> | undefined, metal: string): T
   return key === undefined ? undefined : record[key];
 }
 
-function legacyEq(snapshot: CorporateSnapshotWithValuationSeries, metal: string) {
+function legacyEq(snapshot: CorporateSnapshot, metal: string) {
   const revenue = snapshot.series?.totalRevenue_USD ?? snapshot.aggregation?.grossRevenueUSD_total;
   if (!Array.isArray(revenue)) return null;
   const qtyUnit = canonicalUnitForMetal(metal);
@@ -94,7 +92,7 @@ function markerYear(marker: any): number | null {
   return null;
 }
 
-function legacyMetrics(snapshot: CorporateSnapshotWithValuationSeries, metals: string[]) {
+function legacyMetrics(snapshot: CorporateSnapshot, metals: string[]) {
   const markers = Array.isArray(snapshot.modeledValuationTimeline?.markers)
     ? snapshot.modeledValuationTimeline.markers
       .filter((marker) => markerYear(marker) !== null && finite(marker.value_low) && finite(marker.value_high))
@@ -170,7 +168,7 @@ function testDeck(raw: any): Record<string, number> {
   return deck;
 }
 
-async function buildRealProjectSnapshot(rawInput: any, productionStartYear: number): Promise<CorporateSnapshotWithValuationSeries> {
+async function buildRealProjectSnapshot(rawInput: any, productionStartYear: number): Promise<CorporateSnapshot> {
   const raw = clone(rawInput);
   raw.time.runtimePlacement = {
     productionStart: {
@@ -203,7 +201,7 @@ async function buildRealProjectSnapshot(rawInput: any, productionStartYear: numb
   });
   assert.equal(result.ok, true, result.ok ? 'snapshot ok' : JSON.stringify(result.diagnostics));
   if (!result.ok) throw new Error('unreachable');
-  return result.snapshot as unknown as CorporateSnapshotWithValuationSeries;
+  return result.snapshot as unknown as CorporateSnapshot;
 }
 
 const cases = [

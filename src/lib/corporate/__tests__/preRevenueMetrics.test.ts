@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import { UNIT_CONSTANTS } from '../../prices/units/types.ts';
-import {
-  deriveCorporatePreRevenueMetrics,
-  type CorporateSnapshotWithValuationSeries,
-} from '../preRevenueMetrics.ts';
+import { deriveCorporatePreRevenueMetrics } from '../preRevenueMetrics.ts';
+import type { CorporateSnapshot } from '../snapshot/types.ts';
 
 const snapshot = {
   targetCurrency: 'CAD',
@@ -57,7 +55,7 @@ const snapshot = {
     }],
   },
   corporateValuationTimeSeries: { rows: [{ year: 2029, evEbitda6xPerShare: 10 }, { year: 2030, evEbitda6xPerShare: 20 }] },
-} as unknown as CorporateSnapshotWithValuationSeries;
+} as unknown as CorporateSnapshot;
 
 const result = deriveCorporatePreRevenueMetrics({
   snapshot,
@@ -99,7 +97,7 @@ const noCorporateIrr = {
   ...snapshot,
   corporate: undefined,
   project: { modeled: { npvSpotRange: { base: { irr: 0.99 } } } },
-} as unknown as CorporateSnapshotWithValuationSeries;
+} as unknown as CorporateSnapshot;
 const noFallback = deriveCorporatePreRevenueMetrics({ snapshot: noCorporateIrr, currentPriceTargetCurrency: 2, valuationYear: 2026 });
 assert.equal(noFallback.irr, null, 'Corporate derivation must not fall back to Project IRR');
 assert.ok(noFallback.diagnostics.some((message) => message.includes('no Project-engine fallback')));

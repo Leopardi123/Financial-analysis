@@ -7,8 +7,8 @@ import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancin
 import {
   deriveCorporatePreRevenueMetrics,
   type CorporatePreRevenueMetrics,
-  type CorporateSnapshotWithValuationSeries,
 } from '../lib/corporate/preRevenueMetrics.ts';
+import type { CorporateSnapshot } from '../lib/corporate/snapshot/types.ts';
 import { extraSharesStorageKey, parseExtraShares } from '../lib/market/extraShares.ts';
 import '../styles/compareStocks.css';
 
@@ -20,14 +20,14 @@ type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 type CompanyListResponse = { ok: boolean; companies?: Array<{ ticker: string; name: string }> };
 type ProfileResponse = { ok?: boolean; profile?: Record<string, unknown> | null };
 type CompanyResponse = { balance?: Record<string, Array<number | null>>; income?: Record<string, Array<number | null>> };
-type SnapshotResponse = { ok: boolean; snapshot?: CorporateSnapshotWithValuationSeries; diagnostics?: { errors?: string[]; warnings?: string[] } };
+type SnapshotResponse = { ok: boolean; snapshot?: CorporateSnapshot; diagnostics?: { errors?: string[]; warnings?: string[] } };
 
 type PreRevenueCompany = {
   ticker: string;
   name: string;
   projects: CompanyProjectSummary[];
   metals: string[];
-  snapshot: CorporateSnapshotWithValuationSeries | null;
+  snapshot: CorporateSnapshot | null;
   metrics: CorporatePreRevenueMetrics | null;
   price: number | null;
   sharesCurrent: number | null;

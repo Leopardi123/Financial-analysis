@@ -13,12 +13,6 @@ import {
   preRevenuePostFinancingShares,
 } from './preRevenueValuation.ts';
 
-export type CorporateSnapshotWithValuationSeries = CorporateSnapshot & {
-  corporateValuationTimeSeries?: {
-    rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }>;
-  };
-};
-
 export type EquivalentMetalMetrics = {
   metal: string;
   unit: 'oz' | 't';
@@ -96,14 +90,14 @@ function markerYear(marker: ValuationMarker | null | undefined): number | null {
   return null;
 }
 
-function validValuationMarkers(snapshot: CorporateSnapshotWithValuationSeries): ValuationMarker[] {
+function validValuationMarkers(snapshot: CorporateSnapshot): ValuationMarker[] {
   const markers = snapshot.modeledValuationTimeline?.markers;
   return Array.isArray(markers)
     ? markers.filter((marker) => markerYear(marker) !== null && finite(marker.value_low) && finite(marker.value_high))
     : [];
 }
 
-function nextRelevantProjectMarker(snapshot: CorporateSnapshotWithValuationSeries, valuationYear: number): ValuationMarker | null {
+function nextRelevantProjectMarker(snapshot: CorporateSnapshot, valuationYear: number): ValuationMarker | null {
   return validValuationMarkers(snapshot)
     .sort((a, b) => (markerYear(a) ?? Infinity) - (markerYear(b) ?? Infinity))
     .find((marker) => (markerYear(marker) ?? -Infinity) > valuationYear) ?? null;
@@ -115,21 +109,21 @@ function canonicalMarkerTarget(marker: ValuationMarker | null): number | null {
   return finite(marker.value_low) && finite(marker.value_high) ? (marker.value_low + marker.value_high) / 2 : null;
 }
 
-function targetCurrencyToUsd(snapshot: CorporateSnapshotWithValuationSeries, value: number | null): number | null {
+function targetCurrencyToUsd(snapshot: CorporateSnapshot, value: number | null): number | null {
   if (!finite(value)) return null;
   const fx = readFinite(snapshot.fx_USD_to_TargetCurrency);
   if (!finite(fx) || fx <= 0) return null;
   return value / fx;
 }
 
-function canonicalProductionLife(snapshot: CorporateSnapshotWithValuationSeries) {
+function canonicalProductionLife(snapshot: CorporateSnapshot) {
   return deriveCorporateProductionLife({
     payableQtyByMetal: snapshot.series?.payableQtyByMetal,
     corporateYearsByPeriod: snapshot.aggregation?.corporateYearsByPeriod,
   });
 }
 
-function candidateMetals(snapshot: CorporateSnapshotWithValuationSeries, requested?: string[]): string[] {
+function candidateMetals(snapshot: CorporateSnapshot, requested?: string[]): string[] {
   const metals = new Set<string>();
   for (const metal of requested ?? []) if (metal.trim()) metals.add(metal.trim());
   for (const record of [
@@ -145,7 +139,7 @@ function candidateMetals(snapshot: CorporateSnapshotWithValuationSeries, request
 }
 
 export function deriveEquivalentMetalMetrics(
-  snapshot: CorporateSnapshotWithValuationSeries,
+  snapshot: CorporateSnapshot,
   metal: string,
 ): EquivalentMetalMetrics {
   const revenue = snapshot.series?.totalRevenue_USD ?? snapshot.aggregation?.grossRevenueUSD_total;
@@ -227,7 +221,7 @@ export function deriveEquivalentMetalMetrics(
 }
 
 export function deriveCorporatePreRevenueMetrics(args: {
-  snapshot: CorporateSnapshotWithValuationSeries;
+  snapshot: CorporateSnapshot;
   currentPriceTargetCurrency: number | null;
   valuationYear: number;
   manualExtraShares?: number;

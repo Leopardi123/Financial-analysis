@@ -14,16 +14,12 @@ import type {
 import type { Tier1PreRevenueAssessment } from '../../lib/tier1/preRevenue.ts';
 import '../../styles/investment-score-cell.css';
 
-type SnapshotWithValuationSeries = CorporateSnapshot & Record<string, unknown> & {
-  corporateValuationTimeSeries?: { rows?: Array<{ year?: number; evEbitda6xPerShare?: number | null }> };
-};
-
 type TierResponse = { ok?: boolean; assessment?: Tier1PreRevenueAssessment };
 
 type Props = {
   symbol: string;
   projectIds: string[];
-  snapshot: SnapshotWithValuationSeries | null;
+  snapshot: CorporateSnapshot | null;
   priceCurrentTargetCurrency: number | null;
   manualExtraShares: number;
 };
