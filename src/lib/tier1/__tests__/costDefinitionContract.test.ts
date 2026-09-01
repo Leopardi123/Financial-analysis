@@ -22,6 +22,14 @@ assert.deepEqual(current.blockers, [
   'project-to-benchmark cost-vintage alignment',
 ]);
 
+const noStreamProject = assessCuC1DefinitionReadiness(S_AND_P_CO_PRODUCT_C1_CU_DEFINITION, { hasStreams: false });
+assert.equal(noStreamProject.status, 'NOT_VERIFIED');
+assert.deepEqual(noStreamProject.blockers, [
+  'exact allocation revenue/price vector',
+  'full current C1 component boundary',
+  'project-to-benchmark cost-vintage alignment',
+]);
+
 const fullyVerified: Tier1CuC1DefinitionContract = {
   ...S_AND_P_CO_PRODUCT_C1_CU_DEFINITION,
   allocation: {
