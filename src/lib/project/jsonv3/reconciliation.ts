@@ -61,7 +61,11 @@ function reportTargetChecks(parsed: ReturnType<typeof parseProjectJsonV3>, repor
   const checks: Check[] = [];
   const phase1 = parsed.engineInputWithoutPrices.phase1;
   const terminal = phase1.terminalProceedsUSD ?? [];
+  const capitalizedDevelopmentRevenue = phase1.capitalizedDevelopmentRevenueUSD ?? [];
+  const capitalizedDevelopmentCosts = phase1.capitalizedDevelopmentCostsUSD ?? [];
   addMoneyCheck(checks, 'initial_capex', sumFinite(phase1.capexUSD), report.reportInitialCapexUSD, tolerance);
+  addMoneyCheck(checks, 'preproduction_revenue', sumFinite(capitalizedDevelopmentRevenue), report.reportPreproductionRevenueUSD, tolerance);
+  addMoneyCheck(checks, 'preproduction_costs', sumFinite(capitalizedDevelopmentCosts), report.reportPreproductionCostsUSD, tolerance);
   addMoneyCheck(checks, 'sustaining_capex', sumFinite(phase1.sustainingCapexUSD), report.reportSustainingCapexUSD, tolerance);
   addMoneyCheck(checks, 'closure_total', sumFinite(phase1.reclamationUSD), report.reportClosureUSD, tolerance);
   addMoneyCheck(checks, 'terminal_proceeds_total', terminal.length > 0 ? sumFinite(terminal) : 0, report.reportTerminalProceedsUSD, tolerance);
