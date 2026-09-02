@@ -228,6 +228,7 @@ export async function reconstructSourceLockedCuCoProductC1(args: {
     ];
   }
   if ('error' in revenue && typeof revenue.error === 'string') return { status: 'NOT_VERIFIED', reason: revenue.error };
+  const allocationRevenueUSDByProduct = revenue as Record<string, number[]>;
 
   const allocation = allocateTier1CoProductCost({
     components: [{
@@ -236,7 +237,7 @@ export async function reconstructSourceLockedCuCoProductC1(args: {
       seriesUSD: pool,
       allocation: { mode: 'MIXED_REVENUE_WEIGHTED' },
     }],
-    allocationRevenueUSDByProduct: revenue,
+    allocationRevenueUSDByProduct,
     toleranceAbsUSD: 0.01,
   });
   if (allocation.status !== 'COMPUTABLE') return { status: 'NOT_VERIFIED', reason: allocation.reason };
@@ -258,7 +259,7 @@ export async function reconstructSourceLockedCuCoProductC1(args: {
     costBaseYear: normalized.costBaseYear,
     allocationMethod: 'MIXED_REVENUE_WEIGHTED',
     allocationRevenueBasis,
-    allocationProducts: Object.keys(revenue),
+    allocationProducts: Object.keys(allocationRevenueUSDByProduct),
     sourcePoolUSD,
     allocatedCuCostUSD,
     denominatorCuLb,
