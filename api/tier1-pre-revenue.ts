@@ -7,6 +7,7 @@ import { computeProjectEngineFullProductionV1 } from '../src/lib/project/engineF
 import { computeIrr } from '../src/lib/metrics/lista3.ts';
 import { TIER1_COST_BENCHMARKS, type Tier1Metal } from '../src/lib/tier1/config.ts';
 import { assessCapitalReturns, assessCost, classifyTier } from '../src/lib/tier1/preRevenue.ts';
+import { computeTier1CyclePolicyForSymbol, TIER1_CYCLE_POLICY } from '../src/lib/tier1/cyclePolicyRuntime.ts';
 import { selectConservativeProjectIrr, type ProjectIrrObservation } from '../src/lib/tier1/projectIrr.ts';
 import { extractReportedCostEvidenceCandidates } from '../src/lib/tier1/reportedCost.ts';
 import { runTier1CostNormalizationRecipes } from '../src/lib/tier1/costNormalizationRecipe.ts';
@@ -344,6 +345,26 @@ export default async function handler(req: any, res: any): Promise<void> {
           assessment.diagnostics.push(gate.reason);
         }
       }
+
+      const cyclePolicy = await computeTier1CyclePolicyForSymbol(symbol);
+      assessment.gates.cycle = cyclePolicy.gate;
+      assessment.support = assessment.support ?? {};
+      assessment.support.cycleNpv10Usd = cyclePolicy.stressNpv10Usd;
+      assessment.support.cycleDurationProductionPeriods = TIER1_CYCLE_POLICY.classificationStressYears;
+      assessment.support.cycleMultipliersByMetal = cyclePolicy.multipliersByMetal;
+      assessment.support.cycleMethod = cyclePolicy.method;
+      assessment.support.cycleBaseRevenueUsd = cyclePolicy.baseRevenueUsd;
+      assessment.support.cycleStressRevenueUsd = cyclePolicy.stressRevenueUsd;
+      assessment.support.cycleRevenueRetention = cyclePolicy.revenueRetention;
+      assessment.support.cycleNpvRetention = cyclePolicy.npvRetention;
+      assessment.support.cycleDownsideBeta = cyclePolicy.downsideBeta;
+      assessment.support.cycleStressIrr = cyclePolicy.stressIrr;
+      assessment.support.cycleSurvivalNpv10Usd = cyclePolicy.survivalNpv10Usd;
+      assessment.support.cycleSurvivalProductionPeriods = TIER1_CYCLE_POLICY.survivalStressYears;
+      assessment.support.cycleProjectCount = cyclePolicy.projectCount;
+      assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
+      assessment.diagnostics.push(...cyclePolicy.diagnostics);
+      assessment.diagnostics.push(`Cykelresistens aktiv policy: ${cyclePolicy.method} Corporate projectCount=${cyclePolicy.projectCount}.`);
 
       if (assessment.primaryMetal) {
         const evidence = await collectReportedCostEvidence(symbol, assessment.primaryMetal as Tier1Metal);

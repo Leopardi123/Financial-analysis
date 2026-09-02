@@ -17,14 +17,7 @@ import type { Tier1Metal, Tier1CostMetric } from './config.ts';
 export const TIER1_COST_QUARTILE_INACTIVE_REASON =
   'N/A — Cost Quartile är avstängd som Tier-input. Kostnadsdata och externa referenser är endast diagnostik och påverkar inte Tier-resultatet. Se docs/TIER1_COST_QUARTILE_DISABLED_READ_BEFORE_REACTIVATION.md.';
 
-/**
- * Active policy: cost quartile never participates in Tier classification.
- *
- * This is deliberately unconditional. Even if an old/research caller passes a
- * populated or Tier-3 cost gate, the active classifyTier() ignores it. Historical
- * cost-scoring behavior exists only in preRevenueLegacySnapshot.ts and must not
- * leak back into the active Tier engine.
- */
+/** Active policy: Cost Quartile is N/A; cycle resistance is a real Tier ceiling. */
 export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   status: Tier1OverallStatus;
   reason: string;
@@ -32,8 +25,8 @@ export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   if (gates.capitalReturns.status === 'FAIL' && gates.capitalReturns.tier === null) {
     return { status: 'NOT_QUALIFIED', reason: 'After-tax IRR ligger under miniminivån 15 %. Cost Quartile är N/A och räknas inte.' };
   }
-  if (gates.cycle.status === 'FAIL') {
-    return { status: 'NOT_QUALIFIED', reason: 'Projektet klarar inte det definierade bear-scenariot med positiv NPV10. Cost Quartile är N/A och räknas inte.' };
+  if (gates.cycle.status === 'FAIL' && gates.cycle.tier === null) {
+    return { status: 'NOT_QUALIFIED', reason: 'Projektet klarar inte den 7-åriga survival-stressen med positiv NPV10. Cost Quartile är N/A och räknas inte.' };
   }
 
   const essential = [gates.lom, gates.scale, gates.capitalReturns, gates.cycle];
@@ -45,12 +38,13 @@ export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
     gates.lom.tier as 1 | 2 | 3,
     gates.scale.tier as 1 | 2 | 3,
     gates.capitalReturns.tier as 1 | 2 | 3,
+    gates.cycle.tier as 1 | 2 | 3,
   ) as 1 | 2 | 3;
 
   if (structuralTier === 1) {
     return {
       status: 'TIER_1',
-      reason: 'Tier-1-kraven uppfylls för livslängd, fysisk produktionsskala, cykelresistens och kapitalavkastning. Cost Quartile är N/A och påverkar inte klassningen.',
+      reason: 'Tier-1-kraven uppfylls för livslängd, fysisk produktionsskala, 5-årig normaliserad cykelresistens med 7-årig survival-gate och kapitalavkastning. Cost Quartile är N/A och påverkar inte klassningen.',
     };
   }
 
@@ -58,6 +52,7 @@ export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   if (gates.lom.tier === structuralTier) limiters.push('LOM');
   if (gates.scale.tier === structuralTier) limiters.push('produktionsskala');
   if (gates.capitalReturns.tier === structuralTier) limiters.push('kapitalavkastning');
+  if (gates.cycle.tier === structuralTier) limiters.push('cykelresistens');
 
   return {
     status: structuralTier === 2 ? 'TIER_2' : 'TIER_3',

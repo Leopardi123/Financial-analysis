@@ -1,6 +1,6 @@
 // Active Tier policy regression wrapper. The historical broad test suite remains
 // in tier1LegacySnapshot.test.ts; this file adds the 2026-09-02 Cost Quartile
-// disablement contract on top of it.
+// disablement contract and active cycle-ceiling contract on top of it.
 
 import './cycleExactPolicyAudit.test.ts';
 import './tier1LegacySnapshot.test.ts';
@@ -35,8 +35,6 @@ const tier2WithoutCost = classifyTier({
 assert.equal(tier2WithoutCost.status, 'TIER_2');
 assert.ok(!tier2WithoutCost.reason.toLowerCase().includes('provisor'));
 
-// The active classifier must ignore cost unconditionally, not only when the
-// inactive marker happens to be present in the cost-gate reason.
 const arbitraryLegacyTier3Cost = gate(3);
 assert.equal(classifyTier({
   lom: gate(1), scale: gate(1), cost: arbitraryLegacyTier3Cost, cycle: gate(1), capitalReturns: gate(1),
@@ -52,4 +50,16 @@ const tier3CostMustNotLowerTier1 = classifyTier({
 });
 assert.equal(tier3CostMustNotLowerTier1.status, 'TIER_1');
 
-console.log('tier1 active Cost Quartile disabled regression passed');
+// Active cycle policy is a structural Tier ceiling. T2/T3 cycle outcomes are
+// valid surviving projects (PASS), while only the 7y survival failure disqualifies.
+assert.equal(classifyTier({
+  lom: gate(1), scale: gate(1), cost: inactiveCost, cycle: gate(2, 'PASS'), capitalReturns: gate(1),
+}).status, 'TIER_2');
+assert.equal(classifyTier({
+  lom: gate(1), scale: gate(1), cost: inactiveCost, cycle: gate(3, 'PASS'), capitalReturns: gate(1),
+}).status, 'TIER_3');
+assert.equal(classifyTier({
+  lom: gate(1), scale: gate(1), cost: inactiveCost, cycle: gate(null, 'FAIL'), capitalReturns: gate(1),
+}).status, 'NOT_QUALIFIED');
+
+console.log('tier1 active Cost Quartile disabled + cycle ceiling regressions passed');
