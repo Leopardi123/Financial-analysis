@@ -2,6 +2,7 @@
 // in tier1LegacySnapshot.test.ts; this file adds the 2026-09-02 Cost Quartile
 // disablement contract on top of it.
 
+import './cycleExactPolicyAudit.test.ts';
 import './tier1LegacySnapshot.test.ts';
 import assert from 'node:assert/strict';
 import { assessCost, classifyTier, TIER1_COST_QUARTILE_INACTIVE_REASON, type Tier1Gate } from '../preRevenue.ts';
