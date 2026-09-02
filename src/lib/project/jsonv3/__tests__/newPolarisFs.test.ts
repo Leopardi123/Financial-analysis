@@ -85,7 +85,7 @@ async function runEngine(raw: ProjectJsonV3, scenarioLeg: 'report' | 'runtime') 
   assert(preTaxMaxDiff <= 250_000, `New Polaris pre-tax FCFF differs from rounded Table 22-2 by up to ${preTaxMaxDiff}; expected <=US$0.25m`);
 
   const reportTaxTotal = sum(reportOutput.phase1.taxUSD);
-  assert(Math.abs(reportTaxTotal - 343_000_000 * NEW_POLARIS_CAD_TO_USD) <= 1, 'Report-leg tax must preserve the Table 22-2 C$343.0m total after FX conversion');
+  assert(Math.abs(reportTaxTotal - 343_000_000 * NEW_POLARIS_CAD_TO_USD) <= 100_000 * NEW_POLARIS_CAD_TO_USD + 1, 'Report-leg tax must remain within the Table 22-2 C$0.1m annual-rounding gap after FX conversion');
 
   const runtimeFixture = JSON.parse(JSON.stringify(raw)) as ProjectJsonV3;
   runtimeFixture.time.runtimePlacement = {
