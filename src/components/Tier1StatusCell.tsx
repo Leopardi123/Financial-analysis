@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Tier1Gate, Tier1PreRevenueAssessment } from '../lib/tier1/preRevenue.ts';
 import { TIER1_COST_BENCHMARKS } from '../lib/tier1/config.ts';
+import Tier1CostReferencePanel from './Tier1CostReferencePanel.tsx';
+import '../styles/tier1-diagnostic-hierarchy.css';
 
 const assessmentPromiseCache = new Map<string, Promise<Tier1PreRevenueAssessment | null>>();
 
@@ -155,29 +157,6 @@ function formatScaleQuantity(row: ScaleProductDisplayRow): string {
     return `${formatNumber(value, 0)} lb/år`;
   }
   return `${formatNumber(value)} ${unit}/år`;
-}
-
-function costPositionLabel(value: CostPositionDisplayRow['rawReferencePosition']): string {
-  if (value === 'BELOW_Q1_REFERENCE') return 'Under Q1-referensen';
-  if (value === 'Q1_TO_P50_REFERENCE') return 'Mellan Q1 och P50';
-  if (value === 'P50_TO_Q3_REFERENCE') return 'Mellan P50 och P75';
-  if (value === 'ABOVE_Q3_REFERENCE') return 'Över P75';
-  return 'Ej jämförbar';
-}
-
-function costComparabilityLabel(value: CostPositionDisplayRow['comparability']): string {
-  if (value === 'DIRECT_REFERENCE') return 'Direkt referens';
-  if (value === 'REFERENCE_ONLY') return 'Endast referens';
-  return 'Ej jämförbar';
-}
-
-function costEvidenceLabel(value: CostPositionDisplayRow['costEvidenceClass']): string {
-  if (value === 'ACTUAL_OPERATION') return 'Actual operation';
-  if (value === 'FS_ESTIMATE') return 'FS-estimat';
-  if (value === 'PFS_ESTIMATE') return 'PFS-estimat';
-  if (value === 'PEA_ESTIMATE') return 'PEA-estimat';
-  if (value === 'OTHER_ESTIMATE') return 'Annat estimat';
-  return 'Okänd';
 }
 
 function extendedSupport(assessment: Tier1PreRevenueAssessment | null): ExtendedTierSupport | null {
@@ -371,44 +350,11 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <ul>{support.costProjectDetails.map((item) => <li key={item}>{item}</li>)}</ul>
           </div>}
 
-          {costPositions.length > 0 && <div className="tier1-modal__section">
-            <h4>Kostnadsposition · referensdiagnostik</h4>
-            <p><strong>Påverkar inte Tier-gaten.</strong> Projektkostnaden visas i sin verifierade definition och sitt eget kostnadsår. Ingen CPI-, FX- eller annan vintage-rebasing görs för att få gruvan att passa referensen.</p>
-            {costPositions.map((row) => <div key={`${row.projectId}-${row.recipeId}`} className="tier1-modal__gate tier1-modal__gate--not-verified">
-              <div className="tier1-modal__gate-head"><strong>{row.projectId}</strong><span>{costComparabilityLabel(row.comparability).toUpperCase()}</span></div>
-              <dl className="tier1-modal__facts">
-                <div><dt>Source-locked recipe</dt><dd>{row.recipeId}</dd></div>
-                <div><dt>Projektkostnad</dt><dd>{row.measuredCost === null ? 'Ej verifierad' : `${formatNumber(row.measuredCost, 4)} ${row.measuredCostUnit ?? ''}`}</dd></div>
-                <div><dt>Projektmetric</dt><dd>{row.measuredMetric}</dd></div>
-                <div><dt>Cost base year</dt><dd>{row.costBaseYear ?? 'Ej verifierad'}</dd></div>
-                <div><dt>Evidensklass</dt><dd>{costEvidenceLabel(row.costEvidenceClass)}</dd></div>
-                <div><dt>Referens</dt><dd>{row.referenceDataYear} · {row.reference.denominatorLabel}</dd></div>
-                <div><dt>Referensmetric</dt><dd>{row.referenceMetric}</dd></div>
-                <div><dt>Q1 / P50 / P75</dt><dd>{`${formatNumber(row.reference.q1Max, 3)} / ${formatNumber(row.reference.p50Max, 3)} / ${formatNumber(row.reference.p75Max, 3)} ${row.reference.unit}`}</dd></div>
-                <div><dt>Rå position</dt><dd>{costPositionLabel(row.rawReferencePosition)}</dd></div>
-                <div><dt>Jämförbarhet</dt><dd>{costComparabilityLabel(row.comparability)}</dd></div>
-                <div><dt>Justerad kostnad</dt><dd>Ingen</dd></div>
-                <div><dt>Hard Cost Tier</dt><dd>Ingen</dd></div>
-              </dl>
-              <div className="tier1-modal__gate-reason">{row.reason}</div>
-            </div>)}
-          </div>}
-
-          {benchmark && <div className="tier1-modal__section">
-            <h4>Kostnadskurva · {benchmark.metal}</h4>
-            <dl className="tier1-modal__facts">
-              <div><dt>P25 / Q1 max</dt><dd>{benchmark.q1Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.q1Max)} ${benchmark.unit}`}</dd></div>
-              <div><dt>P50 / median</dt><dd>{benchmark.p50Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.p50Max)} ${benchmark.unit}`}</dd></div>
-              <div><dt>P75</dt><dd>{benchmark.p75Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.p75Max)} ${benchmark.unit}`}</dd></div>
-              <div><dt>Kurvtyp</dt><dd>{benchmark.benchmarkKind === 'FULL_QUARTILE_CURVE' ? 'Full P25/P50/P75' : benchmark.benchmarkKind === 'EXACT_Q1_BOUNDARY' ? 'Exakt Q1-gräns' : benchmark.benchmarkKind === 'CURVE_IDENTIFIED_NO_BOUNDARIES' ? 'Kurva identifierad · gränser saknas' : 'Q1-referens · pass-only'}</dd></div>
-              <div><dt>Jämförelse</dt><dd>{benchmark.comparisonEnabled ? 'Aktiverad' : 'Ej aktiverad'}</dd></div>
-              <div><dt>Gränsosäkerhet</dt><dd>{benchmark.boundaryUncertaintyAbs > 0 ? `±${formatNumber(benchmark.boundaryUncertaintyAbs)} ${benchmark.unit}` : 'Ingen angiven'}</dd></div>
-            </dl>
-            <p>{benchmark.notes}</p>
-            <p><strong>Benchmarkbasis:</strong> {benchmark.basisId}</p>
-            <p><strong>Dataperiod:</strong> {benchmark.dataPeriod}{benchmark.sourcePageOrTable ? ` · ${benchmark.sourcePageOrTable}` : ''}</p>
-            <a href={benchmark.sourceUrl} target="_blank" rel="noreferrer">Källa</a>{benchmark.evidenceUrl && <> · <a href={benchmark.evidenceUrl} target="_blank" rel="noreferrer">Evidens</a></>}
-          </div>}
+          <Tier1CostReferencePanel
+            rows={costPositions}
+            primaryMetal={benchmark?.metal ?? assessment.primaryMetal}
+            hardCostGateVerified={assessment.gates.cost.status !== 'NOT_VERIFIED'}
+          />
 
           {diagnostics.length > 0 && <details className="tier1-modal__section tier1-modal__diagnostics">
             <summary>Teknisk diagnostik</summary>
