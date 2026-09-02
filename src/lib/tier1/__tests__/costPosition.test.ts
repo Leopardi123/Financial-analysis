@@ -1,3 +1,4 @@
+import './costCoProductReconstruction.test.ts';
 import assert from 'node:assert/strict';
 import {
   assessCostPositionAgainstReference,
