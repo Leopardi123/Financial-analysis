@@ -24,15 +24,15 @@ function fixture(): ProjectJsonV3 {
       masterN: 3,
       productionStartPeriod: 1,
       nameplateCapacityPeriod: null,
-      reportPeriodLabels: ['-1', '1', '2', '3'],
-      phaseByPeriod: ['construction', 'operations', 'operations', 'closure'],
+      reportPeriodLabels: ['-2', '-1', '1', '2'],
+      phaseByPeriod: ['construction', 'ramp_up', 'operations', 'closure'],
       runtimePlacement: {
         constructionStart: { year: 2028, sourceId: 'fixture-schedule' },
         productionStart: { year: 2029, sourceId: 'fixture-schedule' },
       },
     },
     metals: {
-      payableQtyByMetal: { Au: [100, 100, 0, 0] },
+      payableQtyByMetal: { Au: [0, 100, 100, 0] },
       metalInProductQtyByMetal: {},
       revenueBasisByMetal: { Au: 'PAYABLE_DIRECT' },
       payableQtyUnitByMetal: { Au: 'toz' },
@@ -44,12 +44,12 @@ function fixture(): ProjectJsonV3 {
       sellingModel: { mode: 'NONE' },
       developmentModel: {
         mode: 'REPORT_LOCKED_WITH_RUNTIME_PROXY',
-        reportCapitalizedRevenueUSD: [40, 20, 0, 0],
-        reportCapitalizedCostsUSD: [10, 5, 0, 0],
+        reportCapitalizedRevenueUSD: [0, 40, 20, 0],
+        reportCapitalizedCostsUSD: [0, 10, 5, 0],
         runtime: {
           method: 'REVENUE_SHARE',
-          capitalizedRevenueShareByPeriod: [0.4, 0.2, 0, 0],
-          capitalizedCostsUSD: [10, 5, 0, 0],
+          capitalizedRevenueShareByPeriod: [0, 0.4, 0.2, 0],
+          capitalizedCostsUSD: [0, 10, 5, 0],
           sourceId: 'fixture-report',
           pageOrTable: 'Runtime split evidence',
         },
@@ -146,26 +146,31 @@ async function engineAtPrice(raw: ProjectJsonV3, price: number, leg: 'runtime' |
   const raw = fixture();
   const reportAtDeck = await engineAtPrice(raw, 1, 'report');
   const runtimeAtDeck = await engineAtPrice(raw, 1, 'runtime');
-  near(reportAtDeck.phase1.capitalizedDevelopmentRevenueUSD_effective?.[0], 40);
-  near(runtimeAtDeck.phase1.capitalizedDevelopmentRevenueUSD_effective?.[0], 40);
-  near(reportAtDeck.phase1.operatingRevenueUSD_effective?.[0], 60);
-  near(runtimeAtDeck.phase1.operatingRevenueUSD_effective?.[0], 60);
-  near(reportAtDeck.fiscalTake?.operatingExpenseUSD[0], 6);
-  near(runtimeAtDeck.fiscalTake?.operatingExpenseUSD[0], 6);
+  near(reportAtDeck.phase1.capitalizedDevelopmentRevenueUSD_effective?.[1], 40);
+  near(runtimeAtDeck.phase1.capitalizedDevelopmentRevenueUSD_effective?.[1], 40);
+  near(reportAtDeck.phase1.operatingRevenueUSD_effective?.[1], 60);
+  near(runtimeAtDeck.phase1.operatingRevenueUSD_effective?.[1], 60);
+  near(reportAtDeck.fiscalTake?.operatingExpenseUSD[1], 6);
+  near(runtimeAtDeck.fiscalTake?.operatingExpenseUSD[1], 6);
+
+  // Period 2 is deliberately mixed: it contains commercial operating revenue and
+  // a report-defined precommercial carve-out within the same annual period.
+  near(reportAtDeck.phase1.capitalizedDevelopmentRevenueUSD_effective?.[2], 20);
+  near(reportAtDeck.phase1.operatingRevenueUSD_effective?.[2], 80);
 
   const reportAtDoublePrice = await engineAtPrice(raw, 2, 'report');
   const runtimeAtDoublePrice = await engineAtPrice(raw, 2, 'runtime');
-  near(reportAtDoublePrice.phase1.capitalizedDevelopmentRevenueUSD_effective?.[0], 40);
-  near(reportAtDoublePrice.phase1.operatingRevenueUSD_effective?.[0], 160);
-  near(runtimeAtDoublePrice.phase1.capitalizedDevelopmentRevenueUSD_effective?.[0], 80);
-  near(runtimeAtDoublePrice.phase1.operatingRevenueUSD_effective?.[0], 120);
-  near(runtimeAtDoublePrice.fiscalTake?.operatingExpenseUSD[0], 12);
+  near(reportAtDoublePrice.phase1.capitalizedDevelopmentRevenueUSD_effective?.[1], 40);
+  near(reportAtDoublePrice.phase1.operatingRevenueUSD_effective?.[1], 160);
+  near(runtimeAtDoublePrice.phase1.capitalizedDevelopmentRevenueUSD_effective?.[1], 80);
+  near(runtimeAtDoublePrice.phase1.operatingRevenueUSD_effective?.[1], 120);
+  near(runtimeAtDoublePrice.fiscalTake?.operatingExpenseUSD[1], 12);
 
   const lockedOnly = clone(raw);
   lockedOnly.economics.developmentModel = {
     mode: 'LOCKED_SERIES',
-    capitalizedRevenueUSD: [40, 20, 0, 0],
-    capitalizedCostsUSD: [10, 5, 0, 0],
+    capitalizedRevenueUSD: [0, 40, 20, 0],
+    capitalizedCostsUSD: [0, 10, 5, 0],
     sourceId: 'fixture-report',
     pageOrTable: 'Report development cash flows',
   };
