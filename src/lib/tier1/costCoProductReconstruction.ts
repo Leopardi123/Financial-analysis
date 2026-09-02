@@ -34,6 +34,11 @@ type ReportDeckRun = {
   output: ReturnType<typeof computeProjectEngineFullProductionV1>;
 };
 
+const BERG_CAD_TO_USD = 0.73;
+const BERG_ROYALTY_CADM = [
+  22.3, 27.0, 18.9, 22.6, 30.4, 24.8, 19.0, 17.9, 13.9, 16.7, 10.1, 18.2, 17.2, 11.9,
+  17.9, 22.0, 20.1, 17.7, 16.7, 13.6, 18.7, 19.8, 15.3, 17.0, 13.5, 12.8, 15.9, 10.8,
+] as const;
 const BERG_NET_REVENUE_CADM_BY_PRODUCT = {
   Cu: [1363.6, 1751.5, 1221.0, 1501.9, 1887.5, 1320.1, 974.0, 1091.6, 801.1, 908.7, 659.6, 928.4, 985.7, 758.4, 1116.7, 1262.8, 1071.2, 940.1, 875.9, 741.5, 951.1, 927.3, 753.9, 813.1, 676.1, 606.8, 735.8, 401.6],
   Mo: [572.7, 581.6, 384.8, 433.7, 759.9, 837.2, 661.1, 457.8, 405.8, 523.3, 162.4, 592.3, 505.7, 249.3, 423.9, 658.4, 696.2, 618.4, 590.4, 426.9, 645.1, 762.9, 575.8, 711.7, 499.7, 491.4, 677.0, 568.3],
@@ -140,10 +145,10 @@ function commonPoolForSource(raw: ProjectJsonV3, run: ReportDeckRun, reportSourc
     if (raw.economics.sellingModel.mode !== 'AGGREGATE') return { error: 'Berg sellingModel måste vara AGGREGATE.' };
     const onsite = numericSeries(raw.economics.costModel.operatingCostsUSD, length, 'Berg onsite cost');
     const offsite = numericSeries(raw.economics.sellingModel.sellingCostsUSD, length, 'Berg offsite cost');
-    const royalty = numericSeries(run.output.fiscalTake?.revenueDeductionUSD, length, 'Berg royalty');
     if ('error' in onsite) return onsite;
     if ('error' in offsite) return offsite;
-    if ('error' in royalty) return royalty;
+    if (length !== 32) return { error: `Berg royaltyvektor kräver 32 modellperioder, fick ${length}.` };
+    const royalty = [0, 0, 0, ...BERG_ROYALTY_CADM.map((value) => value * 1_000_000 * BERG_CAD_TO_USD), 0];
     series.push(onsite, offsite, royalty);
   } else if (reportSourceId === 'warintza-pfs-2025') {
     if (raw.economics.costModel.mode !== 'COMPONENTS') return { error: 'Warintza costModel måste vara COMPONENTS.' };
@@ -205,7 +210,7 @@ export async function reconstructSourceLockedCuCoProductC1(args: {
   if (reportSourceId === 'berg-pfs-2026') {
     revenue = buildBergNetRevenueVector(length, selected);
     allocationRevenueBasis = 'PUBLISHED_PRODUCT_NET_REVENUE_TABLE_22_4';
-    provenance = 'Berg PFS Table 22-4 pp.322-324: annual product-level net revenue Cu/Mo/Ag/Au; report C1 common pool from onsite + offsite + royalty.';
+    provenance = 'Berg PFS Table 22-4 pp.322-324: annual product-level net revenue Cu/Mo/Ag/Au and annual royalty; report C1 common pool from onsite + offsite + published royalty. CAD:USD 0.73 from report economic assumptions.';
     limitations = [
       'Berg allocation uses the PFS report-deck published net-revenue vector, not a verified S&P 2024 allocation vector.',
       'Berg costs are Q2 2026 constant-dollar estimates, not 2024 actual.',
