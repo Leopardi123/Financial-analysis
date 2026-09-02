@@ -24,7 +24,7 @@ for (const testFile of testFiles) {
 
 for (const testFile of testFiles) {
   const absoluteTestPath = resolve(testDirectory, testFile);
-  const displayPath = relative(repositoryRoot, absoluteTestPath).replaceAll('\\\\', '/');
+  const displayPath = relative(repositoryRoot, absoluteTestPath).split(sep).join('/');
   console.log(`\nRunning ${displayPath}`);
 
   const result = spawnSync(
