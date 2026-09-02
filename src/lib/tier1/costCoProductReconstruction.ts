@@ -227,7 +227,7 @@ export async function reconstructSourceLockedCuCoProductC1(args: {
       'One common Warintza C1 cost base year is not source-locked.',
     ];
   }
-  if ('error' in revenue) return { status: 'NOT_VERIFIED', reason: revenue.error };
+  if ('error' in revenue && typeof revenue.error === 'string') return { status: 'NOT_VERIFIED', reason: revenue.error };
 
   const allocation = allocateTier1CoProductCost({
     components: [{
