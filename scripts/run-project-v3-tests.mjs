@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
