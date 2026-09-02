@@ -87,8 +87,12 @@ function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | nu
   return promise;
 }
 
+function costQuartileIsInactive(gate: Tier1Gate | null | undefined): boolean {
+  return Boolean(gate?.reason.startsWith('N/A — Cost Quartile är avstängd'));
+}
+
 function assessmentIsProvisional(assessment: Tier1PreRevenueAssessment | null): boolean {
-  if (!assessment) return false;
+  if (!assessment || costQuartileIsInactive(assessment.gates.cost)) return false;
   return assessment.status === 'TIER_2' && assessment.gates.cost.status === 'NOT_VERIFIED';
 }
 
@@ -103,6 +107,7 @@ function overallText(assessment: Tier1PreRevenueAssessment | null): string {
 }
 
 function gateText(gate: Tier1Gate): string {
+  if (costQuartileIsInactive(gate)) return 'N/A';
   if (gate.status === 'NOT_VERIFIED') return 'EJ VERIFIERAD';
   if (gate.tier === 1) return 'TIER 1';
   if (gate.tier === 2) return 'TIER 2';
@@ -251,7 +256,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
 
   const title = useMemo(() => {
     if (!assessment) return 'Tier-bedömning kunde inte hämtas.';
-    if (assessmentIsProvisional(assessment)) return 'Tier 2 är provisorisk eftersom kostnads-Tier fortfarande kan sänka klassningen. Klicka för detaljer.';
+    if (assessmentIsProvisional(assessment)) return 'Tier 2 är provisorisk eftersom en aktiv Tier-gate fortfarande kan sänka klassningen. Klicka för detaljer.';
     return 'Klicka för full Tier-bedömning.';
   }, [assessment]);
   if (!loaded) return <span title="Tier-bedömning beräknas…">…</span>;
@@ -267,9 +272,12 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
   const diagnostics = assessment ? displayDiagnostics(assessment.diagnostics) : [];
   const cyclePrices = cyclePriceRows(assessment);
   const costPositions = costPositionRows(assessment);
-  const costBasisLabel = primaryProduct && !assessment?.primaryMetal
-    ? 'Ej verifierad'
-    : support?.costMethod === 'REPORTED_COST_BEST_AVAILABLE' ? 'Rapporterad cost' : 'Ekonomisk modell';
+  const costInactive = costQuartileIsInactive(assessment?.gates.cost);
+  const costBasisLabel = costInactive
+    ? 'Diagnostik · ej Tier-input'
+    : primaryProduct && !assessment?.primaryMetal
+      ? 'Ej verifierad'
+      : support?.costMethod === 'REPORTED_COST_BEST_AVAILABLE' ? 'Rapporterad cost' : 'Ekonomisk modell';
 
   return <>
     <button
@@ -289,7 +297,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           <div>
             <div className="tier1-modal__eyebrow">TIER · PRE REVENUE</div>
             <h3 id={`tier1-title-${symbol}`}>{symbol} · {overallText(assessment)}</h3>
-            <p>Tier-ekonomin räknas apples-to-apples med Instrumentbrädans gemensamma aktuella spot-deck och den ekonomiska information som finns i project_json. Produktionsskala och LOM är prisoberoende.</p>
+            <p>Tier-ekonomin räknas apples-to-apples med Instrumentbrädans gemensamma aktuella spot-deck och den ekonomiska information som finns i project_json. Produktionsskala och LOM är prisoberoende. Cost Quartile är för närvarande N/A och påverkar inte Tier-resultatet.</p>
           </div>
           <button type="button" className="tier1-modal__close" onClick={() => setOpen(false)} aria-label="Stäng Tier-bedömning">×</button>
         </div>
@@ -303,7 +311,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <div><span>Uthållig combined scale</span><strong>{typeof assessment.support.combinedScaleEquivalent === 'number' ? `${assessment.support.combinedScaleEquivalent.toFixed(2)}x` : '—'}</strong></div>
             <div><span>Skalfönster</span><strong>{scaleWindow}</strong></div>
             <div><span>Tier-IRR · spot</span><strong>{typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : '—'}</strong></div>
-            <div><span>Kostnads-Tier</span><strong>{gateText(assessment.gates.cost)}</strong></div>
+            <div><span>Cost Quartile</span><strong>{gateText(assessment.gates.cost)}</strong></div>
             <div><span>Cost-underlag</span><strong>{costBasisLabel}</strong></div>
             <div><span>Spotdatum</span><strong>{formatDate(assessment.support.tierBasePriceAsOfUtc)}</strong></div>
           </div>
@@ -311,7 +319,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           <div className="tier1-modal__gates">
             <GateRow label="1. Lång livslängd" gate={assessment.gates.lom} />
             <GateRow label="2. Produktionsskala" gate={assessment.gates.scale} />
-            <GateRow label="3. Låg kostnadsposition" gate={assessment.gates.cost} />
+            <GateRow label="3. Cost Quartile · inaktiv" gate={assessment.gates.cost} />
             <GateRow label="4. Cykelresistens" gate={assessment.gates.cycle} />
             <GateRow label="5. Kapitalavkastning" gate={assessment.gates.capitalReturns} />
           </div>
@@ -346,14 +354,14 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           </div>
 
           {support?.costProjectDetails && support.costProjectDetails.length > 0 && <div className="tier1-modal__section">
-            <h4>Kostnadsunderlag · project_json</h4>
+            <h4>Kostnadsunderlag · project_json · diagnostik</h4>
             <ul>{support.costProjectDetails.map((item) => <li key={item}>{item}</li>)}</ul>
           </div>}
 
           <Tier1CostReferencePanel
             rows={costPositions}
             primaryMetal={benchmark?.metal ?? assessment.primaryMetal}
-            hardCostGateVerified={assessment.gates.cost.status !== 'NOT_VERIFIED'}
+            hardCostGateVerified={false}
           />
 
           {diagnostics.length > 0 && <details className="tier1-modal__section tier1-modal__diagnostics">
