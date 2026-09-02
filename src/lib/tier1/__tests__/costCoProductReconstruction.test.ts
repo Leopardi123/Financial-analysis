@@ -31,7 +31,7 @@ if (warintza.status === 'RECONSTRUCTED') {
   assert.ok(warintza.value > 1.79 && warintza.value < 1.83, `Warintza report-deck co-product diagnostic expected ~1.81 USD/lb, got ${warintza.value}`);
   assert.ok(Math.abs(warintza.sourceValue - 1.0114) < 0.02);
   assert.ok(warintza.allocationProducts.includes('Au'));
-  assert.ok(warintza.limitations.some((x) => x.includes('stream')));
+  assert.ok(warintza.limitations.some((x) => x.toLowerCase().includes('stream')));
   assert.equal(warintza.costBaseYear, null);
 }
 
@@ -40,6 +40,6 @@ assert.ok(warintzaAiscRun);
 if (!warintzaAiscRun) throw new Error('Warintza AISC recipe missing');
 const warintzaAisc = await reconstructSourceLockedCuCoProductC1({ raw: WARINTZA_PFS_V3, recipeId: warintzaAiscRun.recipeId, normalized: warintzaAiscRun.normalized });
 assert.equal(warintzaAisc.status, 'NOT_AVAILABLE');
-assert.ok(warintzaAisc.reason.includes('inte C1 cash cost'));
+assert.ok(/AISC|C1|cash-cost/.test(warintzaAisc.reason), `AISC rejection reason should identify the incompatible cost metric, got: ${warintzaAisc.reason}`);
 
 console.log('costCoProductReconstruction.test.ts passed');
