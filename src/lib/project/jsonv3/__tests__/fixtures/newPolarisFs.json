@@ -4,7 +4,7 @@
     "projectId": "new-polaris-fs-2025-golden",
     "projectName": "New Polaris Gold Project",
     "currency": "USD",
-    "notes": "Importable V3 JSON reconstructed from the New Polaris FS 2025. Table 22-2 CAD cash flows are converted to canonical USD using the report assumption 1 CAD = 0.725 USD. Runtime calendar placement remains null until current company schedule guidance is sourced."
+    "notes": "Importable V3 JSON reconstructed from the New Polaris FS 2025. Table 22-2 CAD cash flows are converted to canonical USD using the report assumption 1 CAD = 0.725 USD. No verified company production-start guidance was available, so runtime placement uses the required 2030 fallback."
   },
   "time": {
     "masterN": 13,
@@ -42,7 +42,29 @@
       "closure",
       "closure"
     ],
-    "runtimePlacement": null
+    "runtimePlacement": {
+      "constructionStart": {
+        "year": 2028,
+        "sourceId": "runtime-fallback-policy-2030",
+        "pageOrTable": "User-defined fallback: production start 2030 when company guidance is unavailable",
+        "asOfDate": "2026-09-02",
+        "notes": "Derived from the two-year construction sequence preceding fallback production start 2030."
+      },
+      "productionStart": {
+        "year": 2030,
+        "sourceId": "runtime-fallback-policy-2030",
+        "pageOrTable": "User-defined fallback: production start 2030 when company guidance is unavailable",
+        "asOfDate": "2026-09-02"
+      },
+      "nameplateCapacity": {
+        "year": 2031,
+        "sourceId": "runtime-fallback-policy-2030",
+        "pageOrTable": "User-defined fallback: production start 2030 when company guidance is unavailable",
+        "asOfDate": "2026-09-02",
+        "notes": "Derived from report Year 2 / relative t=3 as the first full annual production period."
+      },
+      "notes": "Fallback runtime placement. Replace all three anchors if later company guidance provides a different schedule."
+    }
   },
   "metals": {
     "payableQtyByMetal": {
