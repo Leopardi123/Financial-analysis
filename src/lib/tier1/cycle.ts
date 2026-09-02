@@ -50,25 +50,16 @@ export function toMonthlyLast(rows: PriceHistoryRow[]): PriceHistoryRow[] {
 
 /**
  * Active Tier cycle policy (2026-09-02): Recent Sustained Low.
- *
- * Use the most recent seven years of monthly history, calculate a six-month
- * rolling average, select the three lowest observations that are separated by
- * at least twelve months, and use the median of those three lows as the modern
- * sustained low-price reference. The runtime still consumes a multiplier, so
- * the absolute low-price reference is converted relative to the latest monthly
- * observation. If the latest price is already below the historical reference,
- * the scenario must never raise the price; it therefore uses a near-1x floor.
+ * Uses the most recent seven years of monthly history, a six-month rolling
+ * average, three lowest observations separated by at least twelve months, and
+ * the median of those lows as the modern sustained low-price reference.
  */
 export function computeTier1CycleMultiplier(rows: PriceHistoryRow[]): Tier1CycleMultiplierResult {
   const monthlyAll = toMonthlyLast(rows);
-  const method = `Modernt uthålligt lågpris: senaste ${RECENT_LOW_LOOKBACK_YEARS} åren; ${RECENT_LOW_ROLLING_MONTHS} månaders rullande genomsnitt; tre lägsta punkter med minst ${RECENT_LOW_MIN_SEPARATION_MONTHS} månaders separation; medianen av de tre används som lågprisreferens; appliceras under 3 produktionsår`;
+  const method = `Modernt uthålligt lågpris (ersätter Uthålliga lågcykelepisoder): senaste ${RECENT_LOW_LOOKBACK_YEARS} åren; ${RECENT_LOW_ROLLING_MONTHS} månaders rullande genomsnitt; tre lägsta punkter med minst ${RECENT_LOW_MIN_SEPARATION_MONTHS} månaders separation; medianen av de tre används som lågprisreferens; appliceras under 3 produktionsår`;
 
   if (monthlyAll.length === 0) {
-    return {
-      status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: 0,
-      ratioObservations: 0, bearEpisodes: 0, method,
-      reason: 'Ingen användbar prishistorik hittades.',
-    };
+    return { status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: 0, ratioObservations: 0, bearEpisodes: 0, method, reason: 'Ingen användbar prishistorik hittades.' };
   }
 
   const latest = monthlyAll[monthlyAll.length - 1];
@@ -92,10 +83,7 @@ export function computeTier1CycleMultiplier(rows: PriceHistoryRow[]): Tier1Cycle
 
   const selected: Array<{ date: string; average: number }> = [];
   for (const candidate of [...rolling].sort((a, b) => a.average - b.average || a.date.localeCompare(b.date))) {
-    const separated = selected.every((existing) =>
-      Math.abs(monthOrdinal(candidate.date) - monthOrdinal(existing.date)) >= RECENT_LOW_MIN_SEPARATION_MONTHS,
-    );
-    if (!separated) continue;
+    if (!selected.every((existing) => Math.abs(monthOrdinal(candidate.date) - monthOrdinal(existing.date)) >= RECENT_LOW_MIN_SEPARATION_MONTHS)) continue;
     selected.push(candidate);
     if (selected.length === RECENT_LOW_COUNT) break;
   }
@@ -109,8 +97,7 @@ export function computeTier1CycleMultiplier(rows: PriceHistoryRow[]): Tier1Cycle
     };
   }
 
-  const rawMultiplier = stressPrice / latest.close;
-  const multiplier = Math.min(rawMultiplier, 0.999999);
+  const multiplier = Math.min(stressPrice / latest.close, 0.999999);
   if (!finite(multiplier) || multiplier <= 0 || multiplier >= 1) {
     return {
       status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthly.length,
