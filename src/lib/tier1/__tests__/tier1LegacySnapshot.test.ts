@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { computeTier1CycleMultiplier } from '../cycle.ts';
 import { getTier1CostBenchmarkTodos } from '../config.ts';
-import { assessCapitalReturns, assessCombinedScale, assessLom, classifyCostAgainstPercentiles, classifyTier, type Tier1Gate } from '../preRevenue.ts';
+import { assessCapitalReturns, assessCombinedScale, assessLom, classifyCostAgainstPercentiles, classifyTier, type Tier1Gate } from '../preRevenueLegacySnapshot.ts';
 import { selectConservativeProjectIrr } from '../projectIrr.ts';
 import { canonicalCostMetricForPrimaryMetal, computeCanonicalC1ForProject, costVintageCompatibility } from '../cost.ts';
 import { getFredCommodityPriceMapping, getFredHistoryCommodityPriceMapping, isFredHistoryOnlyCommodityPriceKey } from '../../prices/providers/fred.ts';
@@ -166,4 +166,4 @@ const staleTodos = getTier1CostBenchmarkTodos('2027-08-30T00:00:00Z');
 assert.equal(staleTodos.length, 8);
 assert.ok(staleTodos.every((todo) => todo.includes('uppdatera statisk kostnadskurva')));
 
-console.log('tier1.test.ts passed');
+console.log('tier1 legacy snapshot test passed');
