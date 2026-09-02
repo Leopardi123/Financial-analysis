@@ -1,4 +1,5 @@
 import './publicCuCostCurveBatch3.test.ts';
+import './publicCuCostCurveBatch5.test.ts';
 import assert from 'node:assert/strict';
 import {
   PUBLIC_CU_COST_BATCH4_OBSERVATIONS,
