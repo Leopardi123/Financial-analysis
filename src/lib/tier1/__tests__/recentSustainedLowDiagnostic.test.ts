@@ -41,6 +41,8 @@ const SERIES = [
   'CU_USD_LB', 'ZN_USD_LB', 'PB_USD_LB', 'NI_USD_LB', 'MO_USD_TONNE',
 ] as const;
 
+const LOOKBACK_YEARS = [5, 6, 7, 8, 9, 10] as const;
+
 function dateYearsAgo(to: string, yearsAgo: number): string {
   const date = new Date(`${to}T00:00:00Z`);
   date.setUTCFullYear(date.getUTCFullYear() - yearsAgo);
@@ -51,7 +53,7 @@ function dateYearsAgo(to: string, yearsAgo: number): string {
   const to = new Date().toISOString().slice(0, 10);
   console.log('RECENT_LOW_LIVE_DIAGNOSTIC_BEGIN');
   for (const priceKey of SERIES) {
-    for (const lookbackYears of [7, 10] as const) {
+    for (const lookbackYears of LOOKBACK_YEARS) {
       const from = dateYearsAgo(to, lookbackYears);
       try {
         const history = await readHistoryRowsInRange({ priceKey: priceKey as PriceKey, from, to });
