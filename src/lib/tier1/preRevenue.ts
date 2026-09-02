@@ -10,11 +10,10 @@ export * from './preRevenueLegacySnapshot.ts';
 import {
   classifyTier as classifyTierWithCost,
   type Tier1Gate,
-  type Tier1Metal,
-  type Tier1CostMetric,
   type Tier1OverallStatus,
   type Tier1PreRevenueAssessment,
 } from './preRevenueLegacySnapshot.ts';
+import type { Tier1Metal, Tier1CostMetric } from './config.ts';
 
 export const TIER1_COST_QUARTILE_INACTIVE_REASON =
   'N/A — Cost Quartile är avstängd som Tier-input. Kostnadsdata och externa referenser är endast diagnostik och påverkar inte Tier-resultatet. Se docs/TIER1_COST_QUARTILE_DISABLED_READ_BEFORE_REACTIVATION.md.';
