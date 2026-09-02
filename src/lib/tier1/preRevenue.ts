@@ -8,7 +8,6 @@
 export * from './preRevenueLegacySnapshot.ts';
 
 import {
-  classifyTier as classifyTierWithCost,
   type Tier1Gate,
   type Tier1OverallStatus,
   type Tier1PreRevenueAssessment,
@@ -18,29 +17,23 @@ import type { Tier1Metal, Tier1CostMetric } from './config.ts';
 export const TIER1_COST_QUARTILE_INACTIVE_REASON =
   'N/A — Cost Quartile är avstängd som Tier-input. Kostnadsdata och externa referenser är endast diagnostik och påverkar inte Tier-resultatet. Se docs/TIER1_COST_QUARTILE_DISABLED_READ_BEFORE_REACTIVATION.md.';
 
-function costQuartileIsInactive(gate: Tier1Gate): boolean {
-  return gate.reason.startsWith('N/A — Cost Quartile är avstängd');
-}
-
 /**
- * Active policy: cost quartile does not participate in Tier classification.
+ * Active policy: cost quartile never participates in Tier classification.
  *
- * The fallback to the legacy classifier is intentionally retained only so old
- * explicit tests/research callers that construct an active cost gate by hand
- * keep their historical semantics. Normal runtime always receives the N/A cost
- * gate from assessCost() below and therefore follows the no-cost classifier.
+ * This is deliberately unconditional. Even if an old/research caller passes a
+ * populated or Tier-3 cost gate, the active classifyTier() ignores it. Historical
+ * cost-scoring behavior exists only in preRevenueLegacySnapshot.ts and must not
+ * leak back into the active Tier engine.
  */
 export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   status: Tier1OverallStatus;
   reason: string;
 } {
-  if (!costQuartileIsInactive(gates.cost)) return classifyTierWithCost(gates);
-
   if (gates.capitalReturns.status === 'FAIL' && gates.capitalReturns.tier === null) {
-    return { status: 'NOT_QUALIFIED', reason: 'After-tax IRR ligger under miniminivån 15 %.' };
+    return { status: 'NOT_QUALIFIED', reason: 'After-tax IRR ligger under miniminivån 15 %. Cost Quartile är N/A och räknas inte.' };
   }
   if (gates.cycle.status === 'FAIL') {
-    return { status: 'NOT_QUALIFIED', reason: 'Projektet klarar inte det definierade bear-scenariot med positiv NPV10.' };
+    return { status: 'NOT_QUALIFIED', reason: 'Projektet klarar inte det definierade bear-scenariot med positiv NPV10. Cost Quartile är N/A och räknas inte.' };
   }
 
   const essential = [gates.lom, gates.scale, gates.capitalReturns, gates.cycle];

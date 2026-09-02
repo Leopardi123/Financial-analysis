@@ -34,6 +34,16 @@ const tier2WithoutCost = classifyTier({
 assert.equal(tier2WithoutCost.status, 'TIER_2');
 assert.ok(!tier2WithoutCost.reason.toLowerCase().includes('provisor'));
 
+// The active classifier must ignore cost unconditionally, not only when the
+// inactive marker happens to be present in the cost-gate reason.
+const arbitraryLegacyTier3Cost = gate(3);
+assert.equal(classifyTier({
+  lom: gate(1), scale: gate(1), cost: arbitraryLegacyTier3Cost, cycle: gate(1), capitalReturns: gate(1),
+}).status, 'TIER_1');
+assert.equal(classifyTier({
+  lom: gate(1), scale: gate(2), cost: arbitraryLegacyTier3Cost, cycle: gate(1), capitalReturns: gate(1),
+}).status, 'TIER_2');
+
 const tier3CostMustNotLowerTier1 = classifyTier({
   lom: gate(1), scale: gate(1),
   cost: { ...inactiveCost, tier: 3, status: 'FAIL' },

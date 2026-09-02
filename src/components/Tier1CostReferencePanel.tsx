@@ -70,20 +70,24 @@ export default function Tier1CostReferencePanel({
   primaryMetal: string | null | undefined;
   hardCostGateVerified: boolean;
 }) {
+  // Compatibility prop retained while Cost Quartile is inactive. Its value is
+  // deliberately ignored for Tier semantics.
+  void hardCostGateVerified;
+
   const benchmark = primaryMetal && primaryMetal in TIER1_COST_BENCHMARKS
     ? TIER1_COST_BENCHMARKS[primaryMetal as keyof typeof TIER1_COST_BENCHMARKS]
     : null;
 
   return <>
     {rows.length > 0 && <div className="tier1-modal__section">
-      <h4>Kostnadsposition · projekt och referens</h4>
-      <p><strong>Diagnostik, inte Tier-beslut.</strong> Projektkostnaden behåller sin verifierade definition och sitt eget kostnadsår. Ingen CPI-, FX- eller annan vintage-rebasing görs för att flytta projektet mot referensen.</p>
+      <h4>Kostnadsposition · diagnostik</h4>
+      <p><strong>N/A i Tier-motorn.</strong> Projektkostnaden och referenspositionen bevaras endast som diagnostik/evidens. De får inte blockera, höja, sänka eller göra Tier-resultatet provisoriskt. Projektkostnaden behåller sin verifierade definition och sitt eget kostnadsår; ingen CPI-, FX- eller annan vintage-rebasing görs.</p>
       {rows.map((row) => <article key={`${row.projectId}-${row.recipeId}`} className="tier1-cost-card">
         <div className="tier1-modal__gate-head"><strong>{row.projectId}</strong><span>{costComparabilityLabel(row.comparability).toUpperCase()}</span></div>
         <div className="tier1-cost-card__headline">
           <div><span>Projektkostnad</span><strong>{row.measuredCost === null ? 'Ej verifierad' : `${formatNumber(row.measuredCost, 4)} ${row.measuredCostUnit ?? ''}`}</strong></div>
           <div><span>Referensposition · utan rebasing</span><strong>{costPositionLabel(row.rawReferencePosition)}</strong></div>
-          <div><span>Hard Cost Tier</span><strong>{hardCostGateVerified ? 'Verifierad' : 'Ej verifierad'}</strong></div>
+          <div><span>Tier-påverkan</span><strong>N/A</strong></div>
         </div>
         <details>
           <summary>Teknisk kostnadsdiagnostik</summary>
@@ -105,7 +109,7 @@ export default function Tier1CostReferencePanel({
     {benchmark && <div className="tier1-modal__section">
       <h4>Extern kostnadsreferens · S&amp;P · {benchmark.metal}</h4>
       <div className="tier1-reference-card">
-        <p className="tier1-reference-card__status"><strong>Kurvreferens:</strong> {benchmark.comparisonEnabled ? 'Tillgänglig för diagnostisk read-off' : 'Ej tillgänglig'} · <strong>Tier-gate:</strong> {hardCostGateVerified ? 'Verifierad' : 'Ej verifierad'}.</p>
+        <p className="tier1-reference-card__status"><strong>Kurvreferens:</strong> {benchmark.comparisonEnabled ? 'Tillgänglig för diagnostisk read-off' : 'Ej tillgänglig'} · <strong>Tier-gate:</strong> N/A (avaktiverad).</p>
         <dl className="tier1-modal__facts">
           <div><dt>P25 / Q1 max</dt><dd>{benchmark.q1Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.q1Max)} ${benchmark.unit}`}</dd></div>
           <div><dt>P50 / median</dt><dd>{benchmark.p50Max === null ? 'Ej verifierad' : `${formatNumber(benchmark.p50Max)} ${benchmark.unit}`}</dd></div>
