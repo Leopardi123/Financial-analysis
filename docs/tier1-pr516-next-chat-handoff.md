@@ -1,6 +1,6 @@
 # PR #516 · next-chat handoff
 
-This file is the durable handoff for continuing work on `docs/tier1-polymetallic-cost-foundation` after the current chat. Always read the current PR head and this file before making changes; do not rely on stale chat hashes.
+This file is the durable handoff for continuing work on `docs/tier1-polymetallic-cost-foundation`. Always read the current PR head and this file before making changes; do not rely on stale chat hashes.
 
 ## Repository / workflow
 
@@ -15,7 +15,7 @@ This file is the durable handoff for continuing work on `docs/tier1-polymetallic
 
 Any future `project_json_v3` economic change must be reconciled period-for-period to the technical report: exact period count/order and construction/ramp/operations/closure placement, `productionStartPeriod`, CAPEX/closure/WC timing, report metal prices/payabilities/TC-RC/royalties/tax/FX, and report-defined after-tax/pre-tax cash flow. Before calling a Project JSON verified, state report table/page for prices and NPV/IRR, discount rate, NPV report vs JSON + difference, and IRR report vs JSON + difference. If anything is missing, state `Ej verifierad` and the exact blocker. Never guess API series names/keys/content.
 
-No Project JSON economic fixture is changed by the public Cu curve batches described below, so the existing V3 reconciliation remains authoritative.
+No Project JSON economic fixture is changed by the public Cu curve batches, so the existing V3 reconciliation remains authoritative.
 
 ## Tier architecture already implemented
 
@@ -53,59 +53,73 @@ Hard policy:
 - research quartiles are contained-Cu-production weighted;
 - at least 20 source-complete operations are required before Q1/P50/Q3 are emitted; even then `comparisonEnabled` stays false pending a separate sample/activation audit.
 
-Base 2024 reference deck: Cu 4.16 USD/lb, Au 2,386 USD/oz, Ag 28.27 USD/oz, Mo 21.30 USD/lb. Batch2 adds Co 11.26 USD/lb with Jinchuan 2024 source. Batch3 adds Zn 2,779.02 USD/t with Nexa 2024 Form 20-F source. These are research-price sources only; no API key/series is inferred.
+Base 2024 reference deck: Cu 4.16 USD/lb, Au 2,386 USD/oz, Ag 28.27 USD/oz, Mo 21.30 USD/lb. Batch2 adds Co 11.26 USD/lb. Batch3 adds Zn 2,779.02 USD/t. Batch4 adds Pb 2,072 USD/t from 29Metals' 2024 Annual Financial Report. These are research-price sources only; no API key/series is inferred.
 
-## Public curve status after batch 3
+## Public curve status after Batch 4
 
 Files:
 - `src/lib/tier1/publicCuCostCurve.ts`
 - `src/lib/tier1/publicCuCostCurveBatch2.ts`
 - `src/lib/tier1/publicCuCostCurveBatch3.ts`
-- tests with matching names under `src/lib/tier1/__tests__/`
+- `src/lib/tier1/publicCuCostCurveBatch4.ts`
+- matching tests under `src/lib/tier1/__tests__/`
 - `docs/tier1-public-cu-cost-curve-pilot.md`
 - `docs/tier1-public-cu-cost-curve-batch2.md`
 - `docs/tier1-public-cu-cost-curve-batch3.md`
+- `docs/tier1-public-cu-cost-curve-batch4.md`
+- `docs/tier1-public-cu-cost-curve-sample-audit.md`
 
-After Batch3: **29 reviewed, 15 eligible, 14 partial, 1,743,346.633 t contained Cu**. Status must still be `NOT_READY`; Q1/P50/Q3 must be `null`; `comparisonEnabled=false`.
+Batch4 adds three new clean operations and closes two prior source blockers:
 
-Eligible normalized observations, USD/lb contained Cu:
-
-| Operation | Cost |
+| Operation | Normalized research cost USD/lb contained Cu |
 | --- | ---: |
-| Kounrad | 0.801271 |
-| Kamoa-Kakula | 1.602441 |
-| Las Bambas | 1.653198 |
-| Cozamin | 1.739713 |
-| Constancia / Hudbay Peru | 1.799071 |
-| Kansanshi | 1.931082 |
-| Sentinel | 1.940000 |
-| MVC | 2.094806 |
-| Çayeli | 2.104130 |
-| Centinela | 2.114236 |
-| El Roble | 2.413998 |
-| Mantos Blancos | 2.788146 |
-| Mantoverde | 2.900981 |
-| Kinsevere | 2.919331 |
-| Copper Mountain | 3.023580 |
+| New Afton | 1.878743 |
+| CSA Copper Mine | 2.035203 |
+| Bolivar | 2.337139 |
+| Golden Grove | 2.998272 |
+| Zaldívar | 3.020000 |
 
-Important Batch3 source locks:
-- Mantos Blancos: 44,574 t contained Cu; Ag 830 koz; common pool US$289.71414m.
-- Mantoverde: 57,707 t contained Cu on 100% basis; Au 9,237 oz; common pool US$384.43835m.
-- Cozamin: 24,907 t contained Cu; Ag 1.462 Moz; common pool US$112.81311m.
-- Çayeli: 11,491 t Cu + 2,629 t Zn; annual C1 US$49m after US$8m by-product credits => pre-credit pool US$57m; fixed Zn reference price US$2,779.02/t.
+New Afton supersedes its prior missing-silver `PARTIAL`; the NI 43-101 Table 6-1 source-locks 2024 Cu 54.0 Mlb, Au 71,550 oz and Ag 144,741 oz. Zaldívar supersedes its prior attributable-basis `PARTIAL`; Antofagasta explicitly states the reported 40.1 kt is its 50% share, so full-operation 80.2 kt is an exact source-defined transformation rather than guessed ownership scaling.
 
-Mount Milligan must remain **partial** despite its excellent cost bridge because Centerra explicitly calls the 2024 copper quantity `payable copper produced`; do not relabel it contained Cu. Other current partials include Caraíba, Candelaria, Caserones, Chapada, Antucoya, Zaldívar, Khoemacau, Los Pelambres, Pinto Valley, Lumwana, Quellaveco, Guelb Moghrein and New Afton. Read the batch docs/code for exact blockers; do not midpoint, annualize, double ownership, infer physical quantities or guess product prices to force eligibility.
+Unique sample after Batch4: **32 reviewed, 20 eligible, 12 partial, 1,923,521.546 t contained Cu**.
+
+The count threshold is now met and `buildBatch4PublicCuPilotCurve()` emits:
+- status `RESEARCH_CURVE_READY`;
+- Q1 max **1.6531976163511322** USD/lb (Las Bambas threshold);
+- P50 max **1.931082177131546** USD/lb (Kansanshi threshold);
+- Q3 max **2.114235966665641** USD/lb (Centinela threshold);
+- **`comparisonEnabled=false` remains mandatory.**
+
+## Batch4 source locks
+
+- **CSA:** 41,128 t Cu + 114.0 koz Ag; C1 before by-product credits US$186.112m; royalties/sustaining separately excluded.
+- **Bolivar:** 27.454 Mlb Cu + 812 koz Ag + 13,424 oz Au; common pool US$95.055m = total cash cost + T&R + selling + site G&A, excluding US$0.760m finished-inventory variation and sustaining capital.
+- **Golden Grove:** Cu 21.9 kt, Zn 56.7 kt, Au 21.4 koz, Ag 822 koz, Pb 0.91 kt; mining+processing+site G&A+transport+TCRC A$474.6m; explicit FY average USD:AUD 0.660 -> US$313.236m. Stockpile movement, by-products, royalties and capital excluded. Pb fixed research price US$2,072/t is source-locked from the same 2024 Annual Financial Report.
+- **New Afton:** technical-report production vector above; common pool US$160.7m operating expenses + US$19.7m T&R = US$180.4m before silver credit and excluding sustaining/reclamation.
+- **Zaldívar:** pure Cu SX-EW; source states 50% attributable 40.1 kt and cash cost US$3.02/lb copper produced; full-operation denominator 80.2 kt and common pool scaled by the same explicit factor.
+
+## Sample / activation audit result
+
+The separate audit concludes **NOT ACTIVATION READY** even though the research curve has reached 20 observations.
+
+Main blockers:
+- weight concentration: largest mine 22.7%, top 3 51.5%, top 5 72.0%, top 10 89.0%;
+- geography: DRC/Chile/Peru/Zambia together ~90.5% of contained-Cu weight;
+- operator concentration: Ivanhoe/Zijin ~22.7%, First Quantum ~21.5%, MMG ~19.1%;
+- residual common-pool/inventory-treatment heterogeneity across issuer disclosures.
+
+Denominator consistency passes for emitted rows: all are contained Cu produced; payable/sold/unsupported cases remain fail-closed.
+
+Fixed-deck sensitivity cross-check against 29Metals' public 2024 market-price table is tiny at the three current quartile threshold mines: Las Bambas -0.006%, Kansanshi -0.047%, Centinela -0.052%; threshold identities do not change.
+
+S&P external cross-check remains semantically non-comparable: public research Q1/P50/Q3 = 1.653/1.931/2.114 vs S&P digitised 1.40/1.76/2.18, but S&P is Paid Copper and proprietary component/allocation semantics are still unavailable. Do not interpret the numerical gap as an error in either curve.
 
 ## Next task
 
-Continue public-disclosure research from **15 toward at least 20 source-complete operations**. Prefer mines with:
-1. full-calendar 2024, full-operation contained Cu production;
-2. complete physical economic co-product quantities;
-3. a decomposable absolute cash-cost-before-by-product pool on the canonical boundary;
-4. products already covered by the fixed deck or a separately source-lockable 2024 public reference price.
+Do **not** activate Tier. Broaden the sample beyond 20 with clean source-complete mines specifically to reduce mine/operator/geographic concentration and test common-pool consistency. Prefer operations that add underrepresented geographies/operators and have absolute, decomposable pre-by-product pools with exact contained-metal production vectors. Continue keeping existing partials fail-closed unless the exact blocker can genuinely be closed.
 
-Do not chase the existing partial rows unless the exact blocker can actually be closed. It is better to add clean new mines. Once >=20 eligible operations are reached, calculate the production-weighted research Q1/P50/Q3 but **do not activate Tier**. First perform a separate sample audit: geographic/operator concentration, weight concentration, denominator consistency, common-pool consistency, sensitivity to fixed price deck, and comparison against the S&P external curve. Only after that should any proposal to replace the current Cu benchmark be made.
+A later activation proposal requires a second audit after sample broadening. Until then, the S&P Cu curve remains the active external benchmark/cross-check and the public curve remains research-only.
 
 ## Validation expectation
 
-Before reporting a new batch complete, the single Vercel preview must show the public-curve tests, entire Tier suite, five technical-report cost bridges, `project_json_v3` reconciliation suite, Compare parity, TypeScript and Vite build passing. If a build fails, fix it, but avoid document-only/no-op pushes.
+Before reporting Batch4 complete, the single Vercel preview must show Batch4 plus prior public-curve tests, entire Tier suite, five technical-report cost bridges, `project_json_v3` reconciliation suite, Compare parity, TypeScript and Vite build passing. If a build fails, fix it, but avoid document-only/no-op pushes.
