@@ -27,10 +27,44 @@ type ScaleProductDisplayRow = {
   reason: string;
 };
 
+type CostPositionDisplayRow = {
+  projectId: string;
+  recipeId: string;
+  reportSourceId: string | null;
+  status: 'ASSESSED' | 'NOT_VERIFIED';
+  measuredMetric: string;
+  measuredCost: number | null;
+  measuredCostUnit: string | null;
+  costBaseYear: number | null;
+  costEvidenceClass: 'ACTUAL_OPERATION' | 'FS_ESTIMATE' | 'PFS_ESTIMATE' | 'PEA_ESTIMATE' | 'OTHER_ESTIMATE' | 'UNKNOWN';
+  referenceId: string;
+  referenceMetric: string;
+  referenceDataYear: number;
+  rawReferencePosition: 'BELOW_Q1_REFERENCE' | 'Q1_TO_P50_REFERENCE' | 'P50_TO_Q3_REFERENCE' | 'ABOVE_Q3_REFERENCE' | 'UNAVAILABLE';
+  comparability: 'DIRECT_REFERENCE' | 'REFERENCE_ONLY' | 'NOT_COMPARABLE';
+  adjustedCost: null;
+  adjustmentApplied: false;
+  hardTier: null;
+  reason: string;
+  reference: {
+    id: string;
+    metric: string;
+    dataYear: number;
+    q1Max: number;
+    p50Max: number;
+    p75Max: number;
+    unit: string;
+    denominatorLabel: string;
+    sourceRole: 'RESEARCH_ONLY' | 'ACTIVATED_BENCHMARK';
+    activationAllowed: boolean;
+  };
+};
+
 type ExtendedTierSupport = Tier1PreRevenueAssessment['support'] & {
   cyclePrices?: CyclePriceDisplayRow[];
   costMethod?: string;
   costProjectDetails?: string[];
+  costPositionEvidence?: CostPositionDisplayRow[];
   scaleProducts?: Record<string, ScaleProductDisplayRow>;
   primaryProduct?: string | null;
   primaryProductRevenueShare?: number | null;
@@ -40,7 +74,7 @@ function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | nu
   const key = symbol.trim().toUpperCase();
   const cached = assessmentPromiseCache.get(key);
   if (cached) return cached;
-  const promise = fetch(`/api/tier1/pre-revenue?symbol=${encodeURIComponent(key)}`)
+  const promise = fetch(`/api/tier1-pre-revenue?symbol=${encodeURIComponent(key)}`)
     .then(async (response) => {
       if (!response.ok) return null;
       const payload = await response.json() as { ok?: boolean; assessment?: Tier1PreRevenueAssessment };
@@ -123,6 +157,29 @@ function formatScaleQuantity(row: ScaleProductDisplayRow): string {
   return `${formatNumber(value)} ${unit}/år`;
 }
 
+function costPositionLabel(value: CostPositionDisplayRow['rawReferencePosition']): string {
+  if (value === 'BELOW_Q1_REFERENCE') return 'Under Q1-referensen';
+  if (value === 'Q1_TO_P50_REFERENCE') return 'Mellan Q1 och P50';
+  if (value === 'P50_TO_Q3_REFERENCE') return 'Mellan P50 och P75';
+  if (value === 'ABOVE_Q3_REFERENCE') return 'Över P75';
+  return 'Ej jämförbar';
+}
+
+function costComparabilityLabel(value: CostPositionDisplayRow['comparability']): string {
+  if (value === 'DIRECT_REFERENCE') return 'Direkt referens';
+  if (value === 'REFERENCE_ONLY') return 'Endast referens';
+  return 'Ej jämförbar';
+}
+
+function costEvidenceLabel(value: CostPositionDisplayRow['costEvidenceClass']): string {
+  if (value === 'ACTUAL_OPERATION') return 'Actual operation';
+  if (value === 'FS_ESTIMATE') return 'FS-estimat';
+  if (value === 'PFS_ESTIMATE') return 'PFS-estimat';
+  if (value === 'PEA_ESTIMATE') return 'PEA-estimat';
+  if (value === 'OTHER_ESTIMATE') return 'Annat estimat';
+  return 'Okänd';
+}
+
 function extendedSupport(assessment: Tier1PreRevenueAssessment | null): ExtendedTierSupport | null {
   return assessment ? assessment.support as ExtendedTierSupport : null;
 }
@@ -131,6 +188,13 @@ function cyclePriceRows(assessment: Tier1PreRevenueAssessment | null): CyclePric
   const support = extendedSupport(assessment);
   return Array.isArray(support?.cyclePrices)
     ? support.cyclePrices.filter((row) => row && typeof row.metal === 'string' && Number.isFinite(row.spotPrice) && Number.isFinite(row.bearPrice) && Number.isFinite(row.multiplier))
+    : [];
+}
+
+function costPositionRows(assessment: Tier1PreRevenueAssessment | null): CostPositionDisplayRow[] {
+  const support = extendedSupport(assessment);
+  return Array.isArray(support?.costPositionEvidence)
+    ? support.costPositionEvidence.filter((row) => row && typeof row.projectId === 'string' && typeof row.recipeId === 'string')
     : [];
 }
 
@@ -223,6 +287,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
     : '—';
   const diagnostics = assessment ? displayDiagnostics(assessment.diagnostics) : [];
   const cyclePrices = cyclePriceRows(assessment);
+  const costPositions = costPositionRows(assessment);
   const costBasisLabel = primaryProduct && !assessment?.primaryMetal
     ? 'Ej verifierad'
     : support?.costMethod === 'REPORTED_COST_BEST_AVAILABLE' ? 'Rapporterad cost' : 'Ekonomisk modell';
@@ -304,6 +369,29 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
           {support?.costProjectDetails && support.costProjectDetails.length > 0 && <div className="tier1-modal__section">
             <h4>Kostnadsunderlag · project_json</h4>
             <ul>{support.costProjectDetails.map((item) => <li key={item}>{item}</li>)}</ul>
+          </div>}
+
+          {costPositions.length > 0 && <div className="tier1-modal__section">
+            <h4>Kostnadsposition · referensdiagnostik</h4>
+            <p><strong>Påverkar inte Tier-gaten.</strong> Projektkostnaden visas i sin verifierade definition och sitt eget kostnadsår. Ingen CPI-, FX- eller annan vintage-rebasing görs för att få gruvan att passa referensen.</p>
+            {costPositions.map((row) => <div key={`${row.projectId}-${row.recipeId}`} className="tier1-modal__gate tier1-modal__gate--not-verified">
+              <div className="tier1-modal__gate-head"><strong>{row.projectId}</strong><span>{costComparabilityLabel(row.comparability).toUpperCase()}</span></div>
+              <dl className="tier1-modal__facts">
+                <div><dt>Source-locked recipe</dt><dd>{row.recipeId}</dd></div>
+                <div><dt>Projektkostnad</dt><dd>{row.measuredCost === null ? 'Ej verifierad' : `${formatNumber(row.measuredCost, 4)} ${row.measuredCostUnit ?? ''}`}</dd></div>
+                <div><dt>Projektmetric</dt><dd>{row.measuredMetric}</dd></div>
+                <div><dt>Cost base year</dt><dd>{row.costBaseYear ?? 'Ej verifierad'}</dd></div>
+                <div><dt>Evidensklass</dt><dd>{costEvidenceLabel(row.costEvidenceClass)}</dd></div>
+                <div><dt>Referens</dt><dd>{row.referenceDataYear} · {row.reference.denominatorLabel}</dd></div>
+                <div><dt>Referensmetric</dt><dd>{row.referenceMetric}</dd></div>
+                <div><dt>Q1 / P50 / P75</dt><dd>{`${formatNumber(row.reference.q1Max, 3)} / ${formatNumber(row.reference.p50Max, 3)} / ${formatNumber(row.reference.p75Max, 3)} ${row.reference.unit}`}</dd></div>
+                <div><dt>Rå position</dt><dd>{costPositionLabel(row.rawReferencePosition)}</dd></div>
+                <div><dt>Jämförbarhet</dt><dd>{costComparabilityLabel(row.comparability)}</dd></div>
+                <div><dt>Justerad kostnad</dt><dd>Ingen</dd></div>
+                <div><dt>Hard Cost Tier</dt><dd>Ingen</dd></div>
+              </dl>
+              <div className="tier1-modal__gate-reason">{row.reason}</div>
+            </div>)}
           </div>}
 
           {benchmark && <div className="tier1-modal__section">

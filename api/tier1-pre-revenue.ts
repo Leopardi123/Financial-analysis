@@ -10,6 +10,11 @@ import { assessCapitalReturns, assessCost, classifyTier } from '../src/lib/tier1
 import { selectConservativeProjectIrr, type ProjectIrrObservation } from '../src/lib/tier1/projectIrr.ts';
 import { extractReportedCostEvidenceCandidates } from '../src/lib/tier1/reportedCost.ts';
 import { runTier1CostNormalizationRecipes } from '../src/lib/tier1/costNormalizationRecipe.ts';
+import {
+  assessCostPositionAgainstReference,
+  buildPublicCu2024CostPositionReference,
+  technicalReportCostEvidenceClass,
+} from '../src/lib/tier1/costPosition.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
 function finite(value: unknown): value is number {
@@ -153,8 +158,55 @@ async function applySourceLockedCostRecipes(args: {
     }
   }
 
-  // Promotion is fail-closed. A normalized Cu result may affect the Cost Tier only
-  // after the separate external benchmark definition/vintage contract is VERIFIED.
+  // Method-pivot diagnostic. This is deliberately independent of gates.cost.
+  // It never changes Tier and never re-labels a report-defined metric as the
+  // public contained-Cu/co-product research metric.
+  if (assessment.primaryMetal === 'Cu') {
+    const reference = buildPublicCu2024CostPositionReference();
+    if (reference) {
+      const costPositionEvidence = batches.flatMap((batch) => batch.result.runs.flatMap((run) => {
+        if (run.normalized.status !== 'NORMALIZED') return [];
+        const sourceId = batch.result.reportSourceId;
+        const position = assessCostPositionAgainstReference({
+          measuredMetric: run.normalized.metric,
+          value: run.normalized.value,
+          unit: run.normalized.unit,
+          costBaseYear: run.normalized.costBaseYear,
+          costEvidenceClass: technicalReportCostEvidenceClass(sourceId),
+          reference,
+        });
+        return [{
+          projectId: batch.projectId,
+          recipeId: run.recipeId,
+          reportSourceId: sourceId,
+          reference: {
+            id: reference.id,
+            metric: reference.metric,
+            dataYear: reference.dataYear,
+            q1Max: reference.q1Max,
+            p50Max: reference.p50Max,
+            p75Max: reference.p75Max,
+            unit: reference.unit,
+            denominatorLabel: reference.denominatorLabel,
+            sourceRole: reference.sourceRole,
+            activationAllowed: reference.activationAllowed,
+          },
+          ...position,
+        }];
+      }));
+      assessment.support.costPositionReference = reference;
+      assessment.support.costPositionEvidence = costPositionEvidence;
+      for (const row of costPositionEvidence) {
+        assessment.diagnostics.push(
+          `Cost position ${row.projectId}/${row.recipeId}: ${row.comparability} · ${row.rawReferencePosition} · ${row.reason} Påverkar inte Tier-gaten.`,
+        );
+      }
+    }
+  }
+
+  // Existing promotion remains untouched in this preview block. It is separately
+  // fail-closed behind the legacy exact external benchmark-readiness contract.
+  // The new cost-position layer above cannot promote or demote Tier.
   if (assessment.primaryMetal !== 'Cu') return;
   const eligible = batches.flatMap((batch) => batch.result.runs.flatMap((run) => (
     run.normalized.status === 'NORMALIZED'
