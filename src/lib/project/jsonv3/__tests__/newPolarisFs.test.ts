@@ -55,7 +55,9 @@ async function runEngine(raw: ProjectJsonV3, scenarioLeg: 'report' | 'runtime') 
   assert(NEW_POLARIS_REPORT_PERIODS.join(',') === '-2,-1,1,2,3,4,5,6,7,8,9,10,11,12', 'Table 22-2 report labels must be preserved exactly');
   assert(raw.time.productionStartPeriod === 2, 'First payable production in report Year 1 must map to t=2');
   assert(raw.time.nameplateCapacityPeriod === 3, 'First full annual production period must map to report Year 2/t=3');
-  assert(raw.time.runtimePlacement === null, 'FS report periods must not be silently converted into current calendar guidance');
+  assert(raw.time.runtimePlacement?.constructionStart?.year === 2028, 'Fallback two-year construction must start in 2028');
+  assert(raw.time.runtimePlacement?.productionStart?.year === 2030, 'Runtime production start must use the required 2030 fallback');
+  assert(raw.time.runtimePlacement?.nameplateCapacity?.year === 2031, 'First full annual production period must map to 2031');
   assert(raw.metals.revenueBasisByMetal.Au === 'PAYABLE_DIRECT', 'New Polaris Au revenue must use directly reported payable ounces');
   assert(raw.metals.priceKeyByMetal.Au === 'XAU_USD_TOZ', 'New Polaris must use the canonical Au price key');
 
@@ -87,16 +89,7 @@ async function runEngine(raw: ProjectJsonV3, scenarioLeg: 'report' | 'runtime') 
   const reportTaxTotal = sum(reportOutput.phase1.taxUSD);
   assert(Math.abs(reportTaxTotal - 343_000_000 * NEW_POLARIS_CAD_TO_USD) <= 100_000 * NEW_POLARIS_CAD_TO_USD + 1, 'Report-leg tax must remain within the Table 22-2 C$0.1m annual-rounding gap after FX conversion');
 
-  const runtimeFixture = JSON.parse(JSON.stringify(raw)) as ProjectJsonV3;
-  runtimeFixture.time.runtimePlacement = {
-    productionStart: {
-      year: 2030,
-      sourceId: 'golden-test-only',
-      pageOrTable: 'test-only runtime placement',
-      asOfDate: '2026-09-02',
-    },
-  };
-  const runtimeOutput = await runEngine(runtimeFixture, 'runtime');
+  const runtimeOutput = await runEngine(raw, 'runtime');
   assert(runtimeOutput.phase1.fcffUSD.every(finite), 'New Polaris runtime FCFF must remain finite with the disclosed 27% corporate-tax proxy');
 
   console.log(
