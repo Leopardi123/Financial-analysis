@@ -1,5 +1,3 @@
-import { TIER1_POLICY } from './config.ts';
-
 export type PriceHistoryRow = { date: string; close: number };
 
 export type Tier1CycleMultiplierResult = {
@@ -12,8 +10,18 @@ export type Tier1CycleMultiplierResult = {
   reason: string | null;
 };
 
+const RECENT_LOW_LOOKBACK_YEARS = 7;
+const RECENT_LOW_ROLLING_MONTHS = 6;
+const RECENT_LOW_MIN_SEPARATION_MONTHS = 12;
+const RECENT_LOW_COUNT = 3;
+
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function median(values: number[]): number | null {
@@ -23,21 +31,10 @@ function median(values: number[]): number | null {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-function mean(values: number[]): number | null {
-  if (values.length === 0) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function quantile(values: number[], q: number): number | null {
-  if (values.length === 0 || !Number.isFinite(q) || q < 0 || q > 1) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.length === 1) return sorted[0];
-  const position = (sorted.length - 1) * q;
-  const lower = Math.floor(position);
-  const upper = Math.ceil(position);
-  if (lower === upper) return sorted[lower];
-  const weight = position - lower;
-  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+function monthOrdinal(date: string): number {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  return year * 12 + month - 1;
 }
 
 export function toMonthlyLast(rows: PriceHistoryRow[]): PriceHistoryRow[] {
@@ -52,78 +49,78 @@ export function toMonthlyLast(rows: PriceHistoryRow[]): PriceHistoryRow[] {
 }
 
 /**
- * Measures a sustained bear regime rather than mixing bull and bear months.
- * Each observation compares the trailing 12-month average price with the median
- * of the PRECEDING 60 months. Months at or below 95% of that prior regime are
- * grouped into contiguous bear episodes. Only episodes lasting at least six
- * months count; the stored stress multiplier is the configured trough quantile
- * across those episodes. The result is relative to each commodity's own regime.
+ * Active Tier cycle policy (2026-09-02): Recent Sustained Low.
+ *
+ * Use the most recent seven years of monthly history, calculate a six-month
+ * rolling average, select the three lowest observations that are separated by
+ * at least twelve months, and use the median of those three lows as the modern
+ * sustained low-price reference. The runtime still consumes a multiplier, so
+ * the absolute low-price reference is converted relative to the latest monthly
+ * observation. If the latest price is already below the historical reference,
+ * the scenario must never raise the price; it therefore uses a near-1x floor.
  */
 export function computeTier1CycleMultiplier(rows: PriceHistoryRow[]): Tier1CycleMultiplierResult {
-  const monthly = toMonthlyLast(rows);
-  const trendMonths = TIER1_POLICY.cycleTrendMonths;
-  const rollingMonths = TIER1_POLICY.cycleRollingMonths;
-  const threshold = TIER1_POLICY.cycleBearThresholdRatio;
-  const minEpisodeMonths = TIER1_POLICY.cycleMinimumEpisodeMonths;
-  const troughQuantilePct = Math.round(TIER1_POLICY.cycleEpisodeTroughQuantile * 100);
-  const method = `Uthålliga lågcykelepisoder: ${rollingMonths} månaders prisgenomsnitt / medianen för föregående ${trendMonths} månader; lågcykel ≤${threshold.toFixed(2)}x i minst ${minEpisodeMonths} månader; P${troughQuantilePct} av episodernas bottennivåer; ${TIER1_POLICY.cycleLookbackYears} års historik; appliceras under ${TIER1_POLICY.cycleDurationProductionPeriods} produktionsår`;
+  const monthlyAll = toMonthlyLast(rows);
+  const method = `Modernt uthålligt lågpris: senaste ${RECENT_LOW_LOOKBACK_YEARS} åren; ${RECENT_LOW_ROLLING_MONTHS} månaders rullande genomsnitt; tre lägsta punkter med minst ${RECENT_LOW_MIN_SEPARATION_MONTHS} månaders separation; medianen av de tre används som lågprisreferens; appliceras under 3 produktionsår`;
 
-  if (monthly.length < TIER1_POLICY.minimumHistoryMonths) {
+  if (monthlyAll.length === 0) {
     return {
-      status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthly.length,
+      status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: 0,
       ratioObservations: 0, bearEpisodes: 0, method,
-      reason: `Minst ${TIER1_POLICY.minimumHistoryMonths} månadsobservationer krävs; ${monthly.length} hittades.`,
+      reason: 'Ingen användbar prishistorik hittades.',
     };
   }
 
-  const ratios: Array<{ index: number; ratio: number }> = [];
-  const firstIndex = trendMonths + rollingMonths - 1;
-  for (let index = firstIndex; index < monthly.length; index += 1) {
-    const current = monthly.slice(index - rollingMonths + 1, index + 1).map((row) => row.close);
-    const prior = monthly.slice(index - rollingMonths - trendMonths + 1, index - rollingMonths + 1).map((row) => row.close);
-    const currentAverage = mean(current);
-    const priorMedian = median(prior);
-    if (currentAverage === null || priorMedian === null || priorMedian <= 0) continue;
-    const ratio = currentAverage / priorMedian;
-    if (finite(ratio) && ratio > 0) ratios.push({ index, ratio });
-  }
+  const latest = monthlyAll[monthlyAll.length - 1];
+  const latestOrdinal = monthOrdinal(latest.date);
+  const firstAllowedOrdinal = latestOrdinal - RECENT_LOW_LOOKBACK_YEARS * 12 + 1;
+  const monthly = monthlyAll.filter((row) => monthOrdinal(row.date) >= firstAllowedOrdinal);
 
-  const episodes: number[][] = [];
-  let active: number[] = [];
-  let previousIndex: number | null = null;
-  for (const observation of ratios) {
-    const qualifies = observation.ratio <= threshold;
-    const contiguous = previousIndex !== null && observation.index === previousIndex + 1;
-    if (qualifies) {
-      if (!contiguous && active.length > 0) {
-        episodes.push(active);
-        active = [];
-      }
-      active.push(observation.ratio);
-    } else if (active.length > 0) {
-      episodes.push(active);
-      active = [];
-    }
-    previousIndex = observation.index;
-  }
-  if (active.length > 0) episodes.push(active);
-
-  const sustainedEpisodes = episodes.filter((episode) => episode.length >= minEpisodeMonths);
-  const troughs = sustainedEpisodes.map((episode) => Math.min(...episode));
-  const multiplier = quantile(troughs, TIER1_POLICY.cycleEpisodeTroughQuantile);
-
-  if (multiplier === null || multiplier <= 0 || multiplier >= 1) {
+  if (monthly.length < RECENT_LOW_ROLLING_MONTHS + (RECENT_LOW_COUNT - 1) * RECENT_LOW_MIN_SEPARATION_MONTHS) {
     return {
       status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthly.length,
-      ratioObservations: ratios.length, bearEpisodes: sustainedEpisodes.length, method,
-      reason: sustainedEpisodes.length === 0
-        ? `Ingen uthållig lågcykelepisod uppfyllde ≤${threshold.toFixed(2)}x i minst ${minEpisodeMonths} månader.`
-        : `Relativ bear-multiplikator måste ligga mellan 0 och 1; beräknat värde ${String(multiplier)}.`,
+      ratioObservations: 0, bearEpisodes: 0, method,
+      reason: `För få månadsobservationer för ${RECENT_LOW_LOOKBACK_YEARS}-årsmetoden; ${monthly.length} hittades.`,
+    };
+  }
+
+  const rolling: Array<{ date: string; average: number }> = [];
+  for (let index = RECENT_LOW_ROLLING_MONTHS - 1; index < monthly.length; index += 1) {
+    const average = mean(monthly.slice(index - RECENT_LOW_ROLLING_MONTHS + 1, index + 1).map((row) => row.close));
+    if (average !== null && average > 0) rolling.push({ date: monthly[index].date, average });
+  }
+
+  const selected: Array<{ date: string; average: number }> = [];
+  for (const candidate of [...rolling].sort((a, b) => a.average - b.average || a.date.localeCompare(b.date))) {
+    const separated = selected.every((existing) =>
+      Math.abs(monthOrdinal(candidate.date) - monthOrdinal(existing.date)) >= RECENT_LOW_MIN_SEPARATION_MONTHS,
+    );
+    if (!separated) continue;
+    selected.push(candidate);
+    if (selected.length === RECENT_LOW_COUNT) break;
+  }
+
+  const stressPrice = median(selected.map((point) => point.average));
+  if (selected.length < RECENT_LOW_COUNT || stressPrice === null || !(stressPrice > 0) || !(latest.close > 0)) {
+    return {
+      status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthly.length,
+      ratioObservations: rolling.length, bearEpisodes: selected.length, method,
+      reason: `Kunde bara identifiera ${selected.length} av ${RECENT_LOW_COUNT} separerade moderna lågprispunkter.`,
+    };
+  }
+
+  const rawMultiplier = stressPrice / latest.close;
+  const multiplier = Math.min(rawMultiplier, 0.999999);
+  if (!finite(multiplier) || multiplier <= 0 || multiplier >= 1) {
+    return {
+      status: 'NOT_VERIFIED', multiplier: null, monthlyObservations: monthly.length,
+      ratioObservations: rolling.length, bearEpisodes: selected.length, method,
+      reason: `Lågprismultiplikatorn kunde inte beräknas giltigt från referenspris ${stressPrice} och senaste månadspris ${latest.close}.`,
     };
   }
 
   return {
     status: 'COMPUTABLE', multiplier, monthlyObservations: monthly.length,
-    ratioObservations: ratios.length, bearEpisodes: sustainedEpisodes.length, method, reason: null,
+    ratioObservations: rolling.length, bearEpisodes: selected.length, method, reason: null,
   };
 }
