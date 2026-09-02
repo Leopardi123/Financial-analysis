@@ -37,6 +37,26 @@ export function validateProjectJsonV3SingleSource(raw: ProjectJsonV3): void {
   else if (selling.mode === 'AGGREGATE') forbid(selling, ['components'], 'economics.sellingModel', 'AGGREGATE');
   else if (selling.mode === 'COMPONENTS') forbid(selling, ['sellingCostsUSD'], 'economics.sellingModel', 'COMPONENTS');
 
+  if (economics.developmentModel != null) {
+    const development = record(economics.developmentModel, 'economics.developmentModel');
+    if (development.mode === 'UNKNOWN' || development.mode === 'NONE') {
+      forbid(
+        development,
+        ['capitalizedRevenueUSD', 'capitalizedCostsUSD', 'reportCapitalizedRevenueUSD', 'reportCapitalizedCostsUSD', 'runtime'],
+        'economics.developmentModel',
+        String(development.mode),
+      );
+    } else if (development.mode === 'LOCKED_SERIES') {
+      forbid(development, ['reportCapitalizedRevenueUSD', 'reportCapitalizedCostsUSD', 'runtime'], 'economics.developmentModel', 'LOCKED_SERIES');
+    } else if (development.mode === 'REPORT_LOCKED_WITH_RUNTIME_PROXY') {
+      forbid(development, ['capitalizedRevenueUSD', 'capitalizedCostsUSD'], 'economics.developmentModel', 'REPORT_LOCKED_WITH_RUNTIME_PROXY');
+      const runtime = record(development.runtime, 'economics.developmentModel.runtime');
+      if (runtime.method === 'REVENUE_SHARE') {
+        forbid(runtime, ['capitalizedRevenueUSD', 'reportCapitalizedRevenueUSD', 'reportCapitalizedCostsUSD'], 'economics.developmentModel.runtime', 'REVENUE_SHARE');
+      }
+    }
+  }
+
   const fiscal = record(economics.fiscalTakeModel, 'economics.fiscalTakeModel');
   if (fiscal.mode === 'UNKNOWN' || fiscal.mode === 'NONE') forbid(fiscal, ['items', 'fiscalTakeUSD', 'placement'], 'economics.fiscalTakeModel', String(fiscal.mode));
   else if (fiscal.mode === 'RULES') forbid(fiscal, ['fiscalTakeUSD', 'placement'], 'economics.fiscalTakeModel', 'RULES');
