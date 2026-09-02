@@ -12,7 +12,8 @@ import { extractReportedCostEvidenceCandidates } from '../src/lib/tier1/reported
 import { runTier1CostNormalizationRecipes } from '../src/lib/tier1/costNormalizationRecipe.ts';
 import {
   assessCostPositionAgainstReference,
-  buildPublicCu2024CostPositionReference,
+  assessSAndPCuRawReferenceCompatibility,
+  buildSAndPCu2024CostPositionReference,
   technicalReportCostEvidenceClass,
 } from '../src/lib/tier1/costPosition.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
@@ -158,27 +159,31 @@ async function applySourceLockedCostRecipes(args: {
     }
   }
 
-  // Method-pivot diagnostic. This is deliberately independent of gates.cost.
-  // It never changes Tier and never re-labels a report-defined metric as the
-  // public contained-Cu/co-product research metric.
+  // Diagnostic only. Use the S&P paid/payable-Cu reference for source-locked C1
+  // recipes, because that is the benchmark contract those recipes were designed
+  // to approach. The separate contained-Cu public curve is not substituted here.
+  // Structural compatibility comes from normalized economics, not metric-id equality.
   if (assessment.primaryMetal === 'Cu') {
-    const reference = buildPublicCu2024CostPositionReference();
+    const reference = buildSAndPCu2024CostPositionReference();
     if (reference) {
       const costPositionEvidence = batches.flatMap((batch) => batch.result.runs.flatMap((run) => {
         if (run.normalized.status !== 'NORMALIZED') return [];
         const sourceId = batch.result.reportSourceId;
+        const semanticCompatibility = assessSAndPCuRawReferenceCompatibility(run.normalized);
         const position = assessCostPositionAgainstReference({
           measuredMetric: run.normalized.metric,
           value: run.normalized.value,
           unit: run.normalized.unit,
           costBaseYear: run.normalized.costBaseYear,
           costEvidenceClass: technicalReportCostEvidenceClass(sourceId),
+          semanticCompatibility,
           reference,
         });
         return [{
           projectId: batch.projectId,
           recipeId: run.recipeId,
           reportSourceId: sourceId,
+          benchmarkReadiness: run.benchmarkReadiness,
           reference: {
             id: reference.id,
             metric: reference.metric,
@@ -198,15 +203,14 @@ async function applySourceLockedCostRecipes(args: {
       assessment.support.costPositionEvidence = costPositionEvidence;
       for (const row of costPositionEvidence) {
         assessment.diagnostics.push(
-          `Cost position ${row.projectId}/${row.recipeId}: ${row.comparability} · ${row.rawReferencePosition} · ${row.reason} Påverkar inte Tier-gaten.`,
+          `Cost position ${row.projectId}/${row.recipeId}: ${row.comparability} · ${row.rawReferencePosition} · semanticBlockers=[${row.semanticBlockers.join(', ')}] · ${row.reason} Påverkar inte Tier-gaten.`,
         );
       }
     }
   }
 
-  // Existing promotion remains untouched in this preview block. It is separately
-  // fail-closed behind the legacy exact external benchmark-readiness contract.
-  // The new cost-position layer above cannot promote or demote Tier.
+  // Existing promotion remains fail-closed behind the exact external benchmark
+  // readiness contract. The diagnostic layer above cannot promote or demote Tier.
   if (assessment.primaryMetal !== 'Cu') return;
   const eligible = batches.flatMap((batch) => batch.result.runs.flatMap((run) => (
     run.normalized.status === 'NORMALIZED'
@@ -262,8 +266,6 @@ export default async function handler(req: any, res: any): Promise<void> {
     try {
       const loaded = await loadProjectsForSymbol(symbol);
 
-      // Policy-only multi-project cap. Every observation is still calculated from
-      // the same canonical Project parser/engine used elsewhere.
       if (loaded.length > 1) {
         const observations = await computeProjectIrrObservations(symbol);
         const selection = selectConservativeProjectIrr(observations);
@@ -297,8 +299,6 @@ export default async function handler(req: any, res: any): Promise<void> {
         }
       }
 
-      // Reported C1/AISC remains checkpoint evidence only. Source-locked recipes
-      // below read canonical series by explicit references and are separately gated.
       if (assessment.primaryMetal) {
         const evidence = await collectReportedCostEvidence(symbol, assessment.primaryMetal as Tier1Metal);
         assessment.support = assessment.support ?? {};

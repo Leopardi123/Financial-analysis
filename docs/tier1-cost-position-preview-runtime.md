@@ -1,74 +1,95 @@
 # Tier cost position · preview runtime wiring
 
-Status: implementation note for PR #516. Read together with `docs/tier1-cost-position-method-pivot.md`.
+Status: implementation note for PR #516. Read together with `docs/tier1-cost-position-method-pivot.md`, `docs/tier1-cu-c1-methodology-evidence.md`, `docs/tier1-cu-c1-methodology-third-pass.md` and `docs/tier1-cu-cost-golden-case-synthesis.md`.
 
-## Purpose
+## 2026-09-02 correction: the first preview wiring was too literal
 
-The 2026-09-02 methodology pivot is now exposed in the Pre Revenue Tier runtime and modal as **diagnostic evidence only**. This makes the new method user-testable without silently changing the existing Tier gate.
+The first preview implementation made project `metric` id equality with the public contained-Cu research metric a hard prerequisite for any raw reference position. That was an implementation error in the preview wiring, not a new methodology decision.
 
-The UI must let the user inspect the mine/report measurement and the reference side by side:
+It bypassed the architecture already established by the five golden technical-report bridges. A metric id is a label. Benchmark compatibility must be determined from the source-locked normalized economics: cost basis, denominator product/basis, unit, source conflicts and the external benchmark contract.
 
-- source-locked project cost and metric;
-- verified `costBaseYear` or `Ej verifierad`;
-- explicit `costEvidenceClass`;
-- public 2024 Cu research reference and Q1/P50/P75;
-- raw reference position only when the metric and unit are actually compatible;
-- `DIRECT_REFERENCE`, `REFERENCE_ONLY` or `NOT_COMPARABLE`;
+The correction restores the older architecture:
+
+`canonical Project economics -> source-locked recipe -> generic report-defined normalization -> semantic compatibility -> dated external reference -> conservative position statement`
+
+The 2026-09-02 method pivot remains binding: no CPI/FX/common-year rewrite of the mine, no invented uncertainty band and no automatic hard percentile from a technical-study estimate.
+
+## Which reference belongs in this runtime diagnostic
+
+The source-locked Cu C1 recipes were designed against the S&P Cu C1 contract. Therefore the runtime diagnostic now uses the actual external reference they are attempting to approach:
+
+- S&P Global Market Intelligence 2024 actual Cu C1 curve;
+- co-product basis;
+- paid/payable Cu denominator;
+- Q1/P50/P75 ≈ 1.40 / 1.76 / 2.18 USD/lb;
+- net-revenue pro-rata co-product method verified only at high level.
+
+The separate 23-mine public curve remains a distinct research distribution:
+
+- metric `TIER_PUBLIC_CO_PRODUCT_CASH_COST_CU_USD_PER_LB_CONTAINED`;
+- contained Cu denominator;
+- Q1/P50/P75 = 1.6531976 / 1.9310822 / 2.1142360 USD/lb;
+- `RESEARCH_ONLY`.
+
+It must not silently replace S&P in the source-locked C1 recipe diagnostic. Conversely, an S&P-compatible payable-Cu recipe must not be relabelled as the contained-Cu public metric.
+
+## Semantic compatibility guard
+
+`assessSAndPCuRawReferenceCompatibility()` evaluates the normalized output itself. A raw S&P reference position requires all of the following high-level structural facts:
+
+- metric is Cu C1 (`C1_CU_USD_PER_LB`);
+- cost basis is `co_product`;
+- denominator product is exact Cu;
+- denominator basis is payable primary metal;
+- denominator/output units are lb / USD/lb;
+- no unresolved source conflicts.
+
+These conditions are deliberately narrower than the complete proprietary S&P contract. Passing them means only **structurally compatible enough to show an unadjusted raw contextual relation**. It does not mean the exact S&P methodology is verified.
+
+If they fail, runtime returns `NOT_COMPARABLE` and lists the actual semantic blockers. It no longer says `Metric mismatch` merely because an internal project metric id differs from the public research-curve id.
+
+## Remaining S&P limitations
+
+The older S&P research remains authoritative. Public evidence supports paid/payable Cu and high-level net-revenue pro-rata co-product allocation, but the following remain unresolved:
+
+- exact 2024 S&P allocation revenue/price vector;
+- full current S&P C1 component boundary;
+- stream/hedge/offtake treatment where applicable;
+- a general S&P-compatible cost-vintage restatement method.
+
+Accordingly the runtime S&P reference is diagnostic/reference-only. Even a structurally compatible PFS/FS C1 may show a raw Q1/P50/P75 relation while remaining `REFERENCE_ONLY`. It cannot set `hardTier`.
+
+## Golden-case expectations
+
+The preview must regression-lock the distinctions already documented:
+
+- **Berg by-product C1**: `NOT_COMPARABLE` to S&P co-product C1 because the cost basis is by-product/net-credit, regardless of its very low or negative numeric value.
+- **Berg CuEq co-product C1**: does not fail merely because of the old contained-Cu metric id; it proceeds to semantic checks and is blocked by CuEq/metal-equivalent denominator semantics.
+- **Warintza C1**: does not fail on the string `C1_CU_USD_PER_LB`; that metric is the S&P contract metric. Its actual blockers include by-product rather than co-product basis, missing verified cost base year, stream treatment and unresolved external-contract fields.
+- A future source-locked **co-product payable-Cu C1** can show an unadjusted raw S&P position. If it is a 2026 PFS against 2024 actual, the result remains `REFERENCE_ONLY`; no synthetic 2024 cost is created.
+
+## UI contract
+
+`Kostnadsposition · referensdiagnostik` remains diagnostic only. It shows:
+
+- source-locked recipe;
+- project cost and project metric;
+- cost base year;
+- evidence class;
+- reference year/denominator/metric and Q1/P50/P75;
+- raw position only when structural semantics permit it;
+- comparability state;
 - adjusted cost = none;
-- hard Cost Tier = none.
+- hard Cost Tier = none;
+- explanatory reason with semantic and/or contextual blockers.
 
-## Critical semantic guard
+The separate `Kostnadskurva · Cu` section continues to show the S&P benchmark source and its public evidence. The diagnostic and the benchmark are now aligned to the same external basis; the contained-Cu public curve remains research evidence elsewhere in the PR.
 
-The public Cu curve metric is exactly:
+## Anti-regression rule
 
-`TIER_PUBLIC_CO_PRODUCT_CASH_COST_CU_USD_PER_LB_CONTAINED`
+Do not reintroduce either of these shortcuts:
 
-A report-defined `C1_CU_USD_PER_LB`, payable-Cu cash cost, by-product cash cost, CuEq cost or other superficially similar metric is **not** automatically that metric. If the source-locked recipe has not explicitly reconstructed the exact public contained-Cu/co-product research definition, runtime returns:
+1. `project.metric === reference.metricId` as the sole compatibility test; or
+2. “both are USD/lb, therefore comparable”.
 
-- `comparability = NOT_COMPARABLE`;
-- `rawReferencePosition = UNAVAILABLE`;
-- the original measured cost remains visible and unchanged;
-- no relabelling or implicit conversion is performed.
-
-This guard is intentionally stricter than merely checking that both numbers happen to be expressed in USD/lb.
-
-## Evidence class mapping
-
-For the five technical-report bridge sources already source-locked in PR #516, evidence class is explicit rather than inferred from publication year or project name:
-
-- `vizcachitas-pfs-2023` → `PFS_ESTIMATE`;
-- `berg-pfs-2026` → `PFS_ESTIMATE`;
-- `warintza-pfs-2025` → `PFS_ESTIMATE`;
-- `arctic-fs-2023` → `FS_ESTIMATE`;
-- `copper-creek-pea-2023` → `PEA_ESTIMATE`.
-
-Unknown source IDs fail to `UNKNOWN`.
-
-## Runtime path
-
-`api/tier1-pre-revenue.ts` runs the existing source-locked normalization recipes. For normalized Cu recipe outputs it now also creates `assessment.support.costPositionEvidence[]` against `buildPublicCu2024CostPositionReference()`.
-
-This diagnostic is separate from `assessment.gates.cost`. It does not promote or demote Tier and does not alter `classificationReason` except through the pre-existing gate logic. The existing cost-gate migration is a later, explicit task.
-
-## UI path
-
-`src/components/Tier1StatusCell.tsx` renders a new section:
-
-**Kostnadsposition · referensdiagnostik**
-
-The section explicitly states **Påverkar inte Tier-gaten** and shows the project metric, cost, cost base year, evidence class, reference metric/year/boundaries, raw position, comparability, and the fact that no adjusted cost or hard Tier is produced.
-
-A user seeing `Ej jämförbar` should not interpret it as missing implementation. It is the intended result when the technical-report cost definition does not equal the public research metric.
-
-## Why this must not be “fixed” later
-
-The apparent loss of decisiveness is the purpose of the pivot. Do not make the UI more decisive by:
-
-- converting a report cost to the public metric without an explicit source-locked reconstruction;
-- CPI/FX rebasing the mine to 2024;
-- inferring `costBaseYear` from publication year;
-- turning PEA/PFS/FS evidence into `ACTUAL_OPERATION`;
-- showing a raw Q1 relation despite metric mismatch;
-- wiring this diagnostic directly into Tier.
-
-The next legitimate strengthening step is empirical: measure actual year-to-year cost-position movement and estimate-vs-actual error before proposing any robust-low-cost rule.
+The correct test is the source-locked semantic chain established by the golden cases. Metric identity is one semantic fact among several, not a substitute for the chain.

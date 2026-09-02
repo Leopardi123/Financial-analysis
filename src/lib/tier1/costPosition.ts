@@ -1,3 +1,5 @@
+import { TIER1_COST_BENCHMARKS } from './config.ts';
+import type { Tier1CostNormalizationResult } from './costNormalization.ts';
 import { buildBatch6PublicCuPilotCurve } from './publicCuCostCurveBatch6.ts';
 
 export const TIER_PUBLIC_CU_COST_POSITION_METRIC = 'TIER_PUBLIC_CO_PRODUCT_CASH_COST_CU_USD_PER_LB_CONTAINED' as const;
@@ -22,6 +24,11 @@ export type Tier1CostReferenceComparability =
   | 'REFERENCE_ONLY'
   | 'NOT_COMPARABLE';
 
+export type Tier1CostSemanticCompatibility = {
+  status: 'COMPATIBLE_FOR_RAW_REFERENCE' | 'NOT_COMPARABLE';
+  blockers: string[];
+};
+
 export type Tier1CostReference = {
   id: string;
   metric: string;
@@ -33,6 +40,7 @@ export type Tier1CostReference = {
   denominatorLabel: string;
   sourceRole: 'RESEARCH_ONLY' | 'ACTIVATED_BENCHMARK';
   activationAllowed: boolean;
+  limitations?: string[];
 };
 
 export type Tier1CostPositionAssessment = {
@@ -47,6 +55,7 @@ export type Tier1CostPositionAssessment = {
   referenceDataYear: number;
   rawReferencePosition: Tier1CostReferencePosition;
   comparability: Tier1CostReferenceComparability;
+  semanticBlockers: string[];
   adjustedCost: null;
   adjustmentApplied: false;
   hardTier: null;
@@ -88,7 +97,7 @@ function base(args: {
   costBaseYear: number | null;
   costEvidenceClass: Tier1CostEvidenceClass;
   reference: Tier1CostReference;
-}): Omit<Tier1CostPositionAssessment, 'status' | 'rawReferencePosition' | 'comparability' | 'reason'> {
+}): Omit<Tier1CostPositionAssessment, 'status' | 'rawReferencePosition' | 'comparability' | 'semanticBlockers' | 'reason'> {
   return {
     measuredMetric: args.measuredMetric,
     measuredCost: args.value,
@@ -105,17 +114,42 @@ function base(args: {
 }
 
 /**
+ * High-level semantic compatibility with the public evidence that is actually
+ * known for S&P's 2024 Cu C1 curve. This deliberately does not claim the full
+ * proprietary S&P contract is known. It answers only whether a source-locked
+ * project normalization is structurally eligible for a raw contextual read-off.
+ */
+export function assessSAndPCuRawReferenceCompatibility(
+  normalized: Tier1CostNormalizationResult,
+): Tier1CostSemanticCompatibility {
+  if (normalized.status !== 'NORMALIZED') {
+    return { status: 'NOT_COMPARABLE', blockers: [`project cost normalization: ${normalized.reason}`] };
+  }
+
+  const blockers: string[] = [];
+  if (normalized.metric !== 'C1_CU_USD_PER_LB') blockers.push(`metric ${normalized.metric} is not Cu C1`);
+  if (normalized.basis !== 'co_product') blockers.push(`cost basis ${normalized.basis} is not co_product`);
+  if (normalized.denominator.product !== 'Cu') blockers.push(`denominator product ${normalized.denominator.product} is not Cu`);
+  if (normalized.denominator.basis !== 'payable_primary_metal') blockers.push(`denominator basis ${normalized.denominator.basis} is not payable Cu`);
+  if (normalized.denominator.unit !== 'lb' || normalized.unit !== 'USD/lb') blockers.push('denominator/output unit is not lb / USD/lb');
+  if (normalized.sourceConflicts.length > 0) blockers.push('unresolved source conflicts');
+
+  return blockers.length === 0
+    ? { status: 'COMPATIBLE_FOR_RAW_REFERENCE', blockers: [] }
+    : { status: 'NOT_COMPARABLE', blockers };
+}
+
+/**
  * Reference-position layer introduced after the 2026-09-02 methodology pivot.
  *
- * The project's measured cost is never inflation-adjusted, FX-rebased or otherwise
- * transformed to the reference year. Before even showing a raw relation to Q1/P50/P75,
- * the project metric and unit must match the reference exactly. Similar labels are not
- * enough: a payable-Cu C1, by-product C1 or report-defined C1 must not be placed on the
- * public contained-Cu/co-product curve unless it has explicitly been reconstructed into
- * that exact research metric.
+ * Metric ids are evidence labels, not the compatibility test. The caller first
+ * supplies an explicit semantic compatibility result derived from the source-
+ * locked normalization (basis, denominator, unit, conflicts etc.). Only then may
+ * this function show an unadjusted raw relation to Q1/P50/P75.
  *
- * Technical-study estimates and vintage mismatches are reference-only. The output always
- * has hardTier=null, so this layer cannot activate Tier by accident.
+ * The measured project cost is never CPI/FX/vintage rebased. Technical-study
+ * estimates, vintage mismatches and reference-method limitations remain contextual
+ * only. hardTier is always null.
  */
 export function assessCostPositionAgainstReference(args: {
   measuredMetric: string;
@@ -123,6 +157,7 @@ export function assessCostPositionAgainstReference(args: {
   unit: string;
   costBaseYear: number | null;
   costEvidenceClass: Tier1CostEvidenceClass;
+  semanticCompatibility: Tier1CostSemanticCompatibility;
   reference: Tier1CostReference;
 }): Tier1CostPositionAssessment {
   const { reference } = args;
@@ -144,15 +179,17 @@ export function assessCostPositionAgainstReference(args: {
     return {
       ...common,
       status: 'NOT_VERIFIED', rawReferencePosition: 'UNAVAILABLE', comparability: 'NOT_COMPARABLE',
+      semanticBlockers: [...args.semanticCompatibility.blockers],
       reason: 'Kostnad eller referensgränser är inte verifierbara. Ingen cost-position antas.',
     };
   }
 
-  if (args.measuredMetric !== reference.metric) {
+  if (args.semanticCompatibility.status !== 'COMPATIBLE_FOR_RAW_REFERENCE') {
     return {
       ...common,
       status: 'ASSESSED', rawReferencePosition: 'UNAVAILABLE', comparability: 'NOT_COMPARABLE',
-      reason: `Metric mismatch: projektet mäter ${args.measuredMetric}, medan referensen kräver ${reference.metric}. Ingen rå Q1/P50/P75-position visas och ingen ometikettering görs.`,
+      semanticBlockers: [...args.semanticCompatibility.blockers],
+      reason: `Semantisk mismatch: ${args.semanticCompatibility.blockers.join('; ')}. Metricnamnet används endast som etikett; ingen ometikettering eller dold definitionskonvertering görs.`,
     };
   }
 
@@ -160,7 +197,8 @@ export function assessCostPositionAgainstReference(args: {
     return {
       ...common,
       status: 'ASSESSED', rawReferencePosition: 'UNAVAILABLE', comparability: 'NOT_COMPARABLE',
-      reason: `Unit mismatch: projektet använder ${args.unit || 'okänd enhet'}, medan referensen kräver ${reference.unit}. Ingen implicit enhets-/definitionskonvertering görs.`,
+      semanticBlockers: [`unit ${args.unit || 'unknown'} != ${reference.unit}`],
+      reason: `Enhetsmismatch: projektet använder ${args.unit || 'okänd enhet'}, medan referensen kräver ${reference.unit}. Ingen implicit konvertering görs.`,
     };
   }
 
@@ -168,7 +206,7 @@ export function assessCostPositionAgainstReference(args: {
   if (!validYear(args.costBaseYear)) {
     return {
       ...common,
-      status: 'ASSESSED', rawReferencePosition: position, comparability: 'NOT_COMPARABLE',
+      status: 'ASSESSED', rawReferencePosition: position, comparability: 'NOT_COMPARABLE', semanticBlockers: [],
       reason: `Rå referensposition kan visas (${position}), men costBaseYear saknas. Ingen vintagejustering antas och ingen Tier-slutsats dras.`,
     };
   }
@@ -176,35 +214,65 @@ export function assessCostPositionAgainstReference(args: {
   if (args.costEvidenceClass === 'UNKNOWN') {
     return {
       ...common,
-      status: 'ASSESSED', rawReferencePosition: position, comparability: 'NOT_COMPARABLE',
+      status: 'ASSESSED', rawReferencePosition: position, comparability: 'NOT_COMPARABLE', semanticBlockers: [],
       reason: `Rå referensposition kan visas (${position}), men costEvidenceClass är UNKNOWN. Kostnaden lämnas oförändrad och ingen Tier-slutsats dras.`,
     };
   }
 
   const sameVintage = args.costBaseYear === reference.dataYear;
   const actualOperation = args.costEvidenceClass === 'ACTUAL_OPERATION';
-  const direct = reference.activationAllowed && reference.sourceRole === 'ACTIVATED_BENCHMARK' && sameVintage && actualOperation;
+  const limitations = [...(reference.limitations ?? [])];
+  const direct = reference.activationAllowed
+    && reference.sourceRole === 'ACTIVATED_BENCHMARK'
+    && sameVintage
+    && actualOperation
+    && limitations.length === 0;
 
   if (direct) {
     return {
       ...common,
-      status: 'ASSESSED', rawReferencePosition: position, comparability: 'DIRECT_REFERENCE',
+      status: 'ASSESSED', rawReferencePosition: position, comparability: 'DIRECT_REFERENCE', semanticBlockers: [],
       reason: `Samma cost-vintage och ACTUAL_OPERATION mot aktiverad referens. Rå position ${position}. Detta lager beskriver position men sätter fortfarande inte Tier.`,
     };
   }
 
   const blockers: string[] = [];
-  if (reference.sourceRole === 'RESEARCH_ONLY' || !reference.activationAllowed) blockers.push('referensen är research-only');
-  if (!actualOperation) blockers.push(`${args.costEvidenceClass} är en teknisk/annan kostnadsestimatklass, inte actual operation`);
+  if (reference.sourceRole === 'RESEARCH_ONLY' || !reference.activationAllowed) blockers.push('referensen är diagnostic/reference-only i detta lager');
+  blockers.push(...limitations);
+  if (!actualOperation) blockers.push(`${args.costEvidenceClass} är ett tekniskt/annat estimat, inte actual operation`);
   if (!sameVintage) blockers.push(`cost vintage ${args.costBaseYear} skiljer sig från referensåret ${reference.dataYear}`);
 
   return {
     ...common,
-    status: 'ASSESSED', rawReferencePosition: position, comparability: 'REFERENCE_ONLY',
+    status: 'ASSESSED', rawReferencePosition: position, comparability: 'REFERENCE_ONLY', semanticBlockers: [],
     reason: `Rå referensposition ${position}. ${blockers.join('; ')}. Projektkostnaden rebases inte till referensåret; ingen syntetisk inflation/FX eller egen tolerans läggs på.`,
   };
 }
 
+/** S&P 2024 reference used for source-locked payable-Cu C1 diagnostics. */
+export function buildSAndPCu2024CostPositionReference(): Tier1CostReference | null {
+  const benchmark = TIER1_COST_BENCHMARKS.Cu;
+  if (benchmark.q1Max === null || benchmark.p50Max === null || benchmark.p75Max === null) return null;
+  return {
+    id: 'S_AND_P_CO_PRODUCT_C1_CU_2024_DIAGNOSTIC',
+    metric: benchmark.metric,
+    dataYear: 2024,
+    q1Max: benchmark.q1Max,
+    p50Max: benchmark.p50Max,
+    p75Max: benchmark.p75Max,
+    unit: benchmark.unit,
+    denominatorLabel: 'paid/payable Cu',
+    sourceRole: 'RESEARCH_ONLY',
+    activationAllowed: false,
+    limitations: [
+      'exact S&P 2024 allocation revenue/price vector is not public',
+      'full current S&P C1 component boundary is not public',
+      'S&P-compatible general vintage restatement method is not verified',
+    ],
+  };
+}
+
+/** Separate contained-Cu public research distribution. Not the S&P benchmark. */
 export function buildPublicCu2024CostPositionReference(): Tier1CostReference | null {
   const curve = buildBatch6PublicCuPilotCurve();
   if (curve.status !== 'RESEARCH_CURVE_READY' || curve.q1Max === null || curve.p50Max === null || curve.p75Max === null) return null;
@@ -219,5 +287,6 @@ export function buildPublicCu2024CostPositionReference(): Tier1CostReference | n
     denominatorLabel: 'contained Cu',
     sourceRole: 'RESEARCH_ONLY',
     activationAllowed: false,
+    limitations: ['public curve is a separate contained-Cu research distribution, not the S&P paid/payable-Cu benchmark'],
   };
 }
