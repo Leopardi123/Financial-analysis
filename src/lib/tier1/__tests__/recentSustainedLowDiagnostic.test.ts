@@ -14,7 +14,8 @@ const ACTIVE_LOOKBACK_YEARS = 7;
 const ACTIVE_ROLLING_MONTHS = 6;
 const ACTIVE_SEPARATION_MONTHS = 12;
 const ACTIVE_LOW_COUNT = 3;
-const ACTIVE_STRESS_YEARS = 3;
+const STRESS_WINDOWS = [3, 5, 7, 'LOM'] as const;
+type StressWindow = typeof STRESS_WINDOWS[number];
 
 function monthDate(index: number): string {
   const date = new Date(Date.UTC(2016 + Math.floor(index / 12), index % 12, 28));
@@ -111,6 +112,16 @@ function firstProductionIndex(years: number[], productionYears: Set<number>): nu
   return index >= 0 ? index : 0;
 }
 
+function lastProductionPeriod(payableQtyByMetal: Record<string, Array<number | null>>, fallback: number): number {
+  let last = -1;
+  for (const series of Object.values(payableQtyByMetal)) {
+    for (let t = 0; t < series.length; t += 1) {
+      if (finite(series[t]) && (series[t] as number) > 0) last = Math.max(last, t);
+    }
+  }
+  return last >= 0 ? last : fallback;
+}
+
 type StressReference = { stressPrice: number; lows: Array<{ date: string; rollingAverage: number }> };
 const stressReferenceCache = new Map<string, StressReference | null>();
 
@@ -140,6 +151,7 @@ async function loadStressReference(priceKey: string): Promise<StressReference | 
 type CandidateTier = 'T1' | 'T2' | 'T3' | 'FAIL';
 type CycleDiagnosticRow = {
   symbol: string;
+  stressWindow: StressWindow;
   baseNpv: number;
   stressNpv: number;
   retention: number;
@@ -158,10 +170,10 @@ function candidateRetention(row: CycleDiagnosticRow): CandidateTier {
   return 'T3';
 }
 
-function candidateRetentionStressIrr(row: CycleDiagnosticRow): CandidateTier {
+function candidateProposed(row: CycleDiagnosticRow): CandidateTier {
   if (!(row.stressNpv > 0)) return 'FAIL';
-  if (finite(row.stressIrr) && row.retention >= 0.65 && row.stressIrr >= 0.20) return 'T1';
-  if (finite(row.stressIrr) && row.retention >= 0.35 && row.stressIrr >= 0.12) return 'T2';
+  if (finite(row.stressIrr) && row.retention >= 0.70 && row.stressIrr >= 0.20) return 'T1';
+  if (finite(row.stressIrr) && row.retention >= 0.60 && row.stressIrr >= 0.12) return 'T2';
   return 'T3';
 }
 
@@ -172,20 +184,13 @@ function candidateRetentionStressCapex(row: CycleDiagnosticRow): CandidateTier {
   return 'T3';
 }
 
-function candidateTriple(row: CycleDiagnosticRow): CandidateTier {
-  if (!(row.stressNpv > 0)) return 'FAIL';
-  if (finite(row.stressIrr) && finite(row.stressNpvOverCapex) && row.retention >= 0.65 && row.stressIrr >= 0.20 && row.stressNpvOverCapex >= 0.50) return 'T1';
-  if (finite(row.stressIrr) && finite(row.stressNpvOverCapex) && row.retention >= 0.35 && row.stressIrr >= 0.12 && row.stressNpvOverCapex >= 0.15) return 'T2';
-  return 'T3';
-}
-
 function distribution(rows: CycleDiagnosticRow[], classifier: (row: CycleDiagnosticRow) => CandidateTier): string {
   const counts: Record<CandidateTier, number> = { T1: 0, T2: 0, T3: 0, FAIL: 0 };
   for (const row of rows) counts[classifier(row)] += 1;
   return `T1=${counts.T1} T2=${counts.T2} T3=${counts.T3} FAIL=${counts.FAIL}`;
 }
 
-async function evaluateCompany(symbol: string): Promise<CycleDiagnosticRow | null> {
+async function evaluateCompany(symbol: string, stressWindow: StressWindow): Promise<CycleDiagnosticRow | null> {
   const loaded = await loadProjectsForSymbol(symbol);
   if (loaded.length === 0) return null;
   const baseProjects: Array<{ years: number[]; fcff: Array<number | null> }> = [];
@@ -205,7 +210,10 @@ async function evaluateCompany(symbol: string): Promise<CycleDiagnosticRow | nul
     const baseOutput = computeProjectEngineFullProductionV1(baseInput);
     const stressed = clone(baseInput);
     const fromT = physical.productionStartPeriod;
-    const toT = Math.min(stressed.masterN, fromT + ACTIVE_STRESS_YEARS - 1);
+    const lastProdT = lastProductionPeriod(physical.payableQtyByMetal, fromT);
+    const toT = stressWindow === 'LOM'
+      ? lastProdT
+      : Math.min(lastProdT, fromT + stressWindow - 1);
 
     for (const [metal, series] of Object.entries(stressed.spotPriceUSDByMetal)) {
       const priceKey = physical.priceKeyByMetal[metal];
@@ -252,6 +260,7 @@ async function evaluateCompany(symbol: string): Promise<CycleDiagnosticRow | nul
   const retention = stressNpv / baseNpv;
   return {
     symbol,
+    stressWindow,
     baseNpv,
     stressNpv,
     retention,
@@ -264,56 +273,70 @@ async function evaluateCompany(symbol: string): Promise<CycleDiagnosticRow | nul
   };
 }
 
-async function runUniverseCycleDiagnostic(): Promise<void> {
-  const symbolRows = await query(`SELECT DISTINCT UPPER(symbol) AS symbol FROM ${COMPANY_PROJECTS_TABLE} ORDER BY UPPER(symbol)`) as Array<{ symbol?: string }>;
-  const symbols = symbolRows.map((row) => String(row.symbol ?? '').trim().toUpperCase()).filter(Boolean);
-  const rows: CycleDiagnosticRow[] = [];
-  const unavailable: string[] = [];
-  console.log('CYCLE_TIER_UNIVERSE_DIAGNOSTIC_BEGIN');
-
-  for (const symbol of symbols) {
-    try {
-      const row = await evaluateCompany(symbol);
-      if (row) rows.push(row); else unavailable.push(symbol);
-    } catch (error) {
-      unavailable.push(`${symbol}:${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  rows.sort((a, b) => a.retention - b.retention || a.symbol.localeCompare(b.symbol));
-  for (const row of rows) {
-    console.log(
-      `CYCLE_COMPANY ${row.symbol} retention=${row.retention.toFixed(4)} drawdown=${row.drawdown.toFixed(4)} ` +
-      `baseIRR=${row.baseIrr.toFixed(4)} stressIRR=${row.stressIrr === null ? 'null' : row.stressIrr.toFixed(4)} ` +
-      `irrDropPp=${row.irrDropPp === null ? 'null' : row.irrDropPp.toFixed(2)} ` +
-      `baseNPV=${row.baseNpv.toFixed(0)} stressNPV=${row.stressNpv.toFixed(0)} ` +
-      `baseNPV_CAPEX=${row.baseNpvOverCapex === null ? 'null' : row.baseNpvOverCapex.toFixed(4)} ` +
-      `stressNPV_CAPEX=${row.stressNpvOverCapex === null ? 'null' : row.stressNpvOverCapex.toFixed(4)} ` +
-      `retOnly=${candidateRetention(row)} retStressIRR=${candidateRetentionStressIrr(row)} ` +
-      `retStressCapex=${candidateRetentionStressCapex(row)} triple=${candidateTriple(row)}`,
-    );
-  }
-
+function logWindowSummary(rows: CycleDiagnosticRow[], stressWindow: StressWindow): void {
   const retentionValues = rows.map((row) => row.retention);
-  const baseIrrValues = rows.map((row) => row.baseIrr);
   const stressIrrValues = rows.map((row) => row.stressIrr).filter((value): value is number => finite(value));
   const irrDropValues = rows.map((row) => row.irrDropPp).filter((value): value is number => finite(value));
   const stressCapexValues = rows.map((row) => row.stressNpvOverCapex).filter((value): value is number => finite(value));
-  for (const [label, values] of [
-    ['retention', retentionValues],
-    ['baseIRR', baseIrrValues],
-    ['stressIRR', stressIrrValues],
-    ['irrDropPp', irrDropValues],
-    ['stressNPV_CAPEX', stressCapexValues],
-  ] as const) {
-    console.log(`CYCLE_DISTRIBUTION ${label} p25=${percentile(values, 0.25)?.toFixed(4) ?? 'null'} p50=${percentile(values, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(values, 0.75)?.toFixed(4) ?? 'null'}`);
+  const label = stressWindow === 'LOM' ? 'LOM' : `${stressWindow}y`;
+  console.log(`CYCLE_WINDOW_DISTRIBUTION ${label} retention p25=${percentile(retentionValues, 0.25)?.toFixed(4) ?? 'null'} p50=${percentile(retentionValues, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(retentionValues, 0.75)?.toFixed(4) ?? 'null'}`);
+  console.log(`CYCLE_WINDOW_DISTRIBUTION ${label} stressIRR p25=${percentile(stressIrrValues, 0.25)?.toFixed(4) ?? 'null'} p50=${percentile(stressIrrValues, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(stressIrrValues, 0.75)?.toFixed(4) ?? 'null'}`);
+  console.log(`CYCLE_WINDOW_DISTRIBUTION ${label} irrDropPp p25=${percentile(irrDropValues, 0.25)?.toFixed(4) ?? 'null'} p50=${percentile(irrDropValues, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(irrDropValues, 0.75)?.toFixed(4) ?? 'null'}`);
+  console.log(`CYCLE_WINDOW_DISTRIBUTION ${label} stressNPV_CAPEX p25=${percentile(stressCapexValues, 0.25)?.toFixed(4) ?? 'null'} p50=${percentile(stressCapexValues, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(stressCapexValues, 0.75)?.toFixed(4) ?? 'null'}`);
+  console.log(`CYCLE_WINDOW_CANDIDATE ${label} retention_70_30 ${distribution(rows, candidateRetention)}`);
+  console.log(`CYCLE_WINDOW_CANDIDATE ${label} proposed_70_60_plus_stressIRR ${distribution(rows, candidateProposed)}`);
+  console.log(`CYCLE_WINDOW_CANDIDATE ${label} retention_plus_stressNPV_CAPEX ${distribution(rows, candidateRetentionStressCapex)}`);
+}
+
+async function runUniverseCycleDiagnostic(): Promise<void> {
+  const symbolRows = await query(`SELECT DISTINCT UPPER(symbol) AS symbol FROM ${COMPANY_PROJECTS_TABLE} ORDER BY UPPER(symbol)`) as Array<{ symbol?: string }>;
+  const symbols = symbolRows.map((row) => String(row.symbol ?? '').trim().toUpperCase()).filter(Boolean);
+  const rowsByWindow = new Map<StressWindow, CycleDiagnosticRow[]>();
+  const unavailableByWindow = new Map<StressWindow, string[]>();
+  console.log('CYCLE_DURATION_DIAGNOSTIC_BEGIN');
+
+  for (const stressWindow of STRESS_WINDOWS) {
+    const rows: CycleDiagnosticRow[] = [];
+    const unavailable: string[] = [];
+    const label = stressWindow === 'LOM' ? 'LOM' : `${stressWindow}y`;
+    console.log(`CYCLE_WINDOW_BEGIN ${label}`);
+    for (const symbol of symbols) {
+      try {
+        const row = await evaluateCompany(symbol, stressWindow);
+        if (row) rows.push(row); else unavailable.push(symbol);
+      } catch (error) {
+        unavailable.push(`${symbol}:${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    rows.sort((a, b) => a.retention - b.retention || a.symbol.localeCompare(b.symbol));
+    for (const row of rows) {
+      console.log(
+        `CYCLE_COMPANY ${label} ${row.symbol} retention=${row.retention.toFixed(4)} drawdown=${row.drawdown.toFixed(4)} ` +
+        `baseIRR=${row.baseIrr.toFixed(4)} stressIRR=${row.stressIrr === null ? 'null' : row.stressIrr.toFixed(4)} ` +
+        `irrDropPp=${row.irrDropPp === null ? 'null' : row.irrDropPp.toFixed(2)} ` +
+        `stressNPV=${row.stressNpv.toFixed(0)} stressNPV_CAPEX=${row.stressNpvOverCapex === null ? 'null' : row.stressNpvOverCapex.toFixed(4)} ` +
+        `retOnly=${candidateRetention(row)} proposed=${candidateProposed(row)} capexCombo=${candidateRetentionStressCapex(row)}`,
+      );
+    }
+    logWindowSummary(rows, stressWindow);
+    if (unavailable.length > 0) console.log(`CYCLE_WINDOW_UNAVAILABLE ${label} ${unavailable.join('|')}`);
+    console.log(`CYCLE_WINDOW_END ${label} computable=${rows.length} totalSymbols=${symbols.length}`);
+    rowsByWindow.set(stressWindow, rows);
+    unavailableByWindow.set(stressWindow, unavailable);
   }
-  console.log(`CYCLE_CANDIDATE retention_70_30 ${distribution(rows, candidateRetention)}`);
-  console.log(`CYCLE_CANDIDATE retention_plus_stressIRR ${distribution(rows, candidateRetentionStressIrr)}`);
-  console.log(`CYCLE_CANDIDATE retention_plus_stressNPV_CAPEX ${distribution(rows, candidateRetentionStressCapex)}`);
-  console.log(`CYCLE_CANDIDATE triple ${distribution(rows, candidateTriple)}`);
-  if (unavailable.length > 0) console.log(`CYCLE_UNAVAILABLE ${unavailable.join('|')}`);
-  console.log(`CYCLE_TIER_UNIVERSE_DIAGNOSTIC_END computable=${rows.length} totalSymbols=${symbols.length}`);
+
+  for (const symbol of symbols) {
+    const parts: string[] = [];
+    for (const stressWindow of STRESS_WINDOWS) {
+      const label = stressWindow === 'LOM' ? 'LOM' : `${stressWindow}y`;
+      const row = rowsByWindow.get(stressWindow)?.find((item) => item.symbol === symbol);
+      parts.push(row
+        ? `${label}:ret=${row.retention.toFixed(4)},irr=${row.stressIrr === null ? 'null' : row.stressIrr.toFixed(4)},tier=${candidateProposed(row)}`
+        : `${label}:N/A`);
+    }
+    console.log(`CYCLE_DURATION_COMPARISON ${symbol} ${parts.join(' | ')}`);
+  }
+  console.log('CYCLE_DURATION_DIAGNOSTIC_END');
 }
 
 (async function runLiveDatabaseDiagnostic() {
