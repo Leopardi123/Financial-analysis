@@ -1,4 +1,4 @@
-import './publicCuCostCurveBatch4.test.ts';
+import './publicCuCostCurveBatch6.test.ts';
 import './scale.test.ts';
 import './costAllocation.test.ts';
 import './costDefinitionContract.test.ts';

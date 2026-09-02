@@ -1,139 +1,53 @@
 # PR #516 · next-chat handoff
 
-This file is the durable handoff for continuing work on `docs/tier1-polymetallic-cost-foundation`. Always read the current PR head and this file before making changes; do not rely on stale chat hashes.
+This is the durable handoff for `docs/tier1-polymetallic-cost-foundation`. Always read current PR head and this file before changes.
 
 ## Repository / workflow
-
 - Repository: `Leopardi123/Financial-analysis`
-- PR: `#516` — `Implement product-based Tier scale policies and polymetallic cost foundation`
-- Branch: `docs/tier1-polymetallic-cost-foundation`
-- Base: `main`
-- PR must remain **draft** and unmerged unless the user explicitly says otherwise.
-- User wants **fewer Vercel deployments**. Prepare and validate a whole batch first, then make **one low-level Git branch update** (`create_blob` → `create_tree` → `create_commit` → `update_ref`) and let that single push create one preview. Use PR metadata APIs for PR body/title; do not create document-only/no-op pushes.
+- PR #516: `Implement product-based Tier scale policies and polymetallic cost foundation`
+- Branch: `docs/tier1-polymetallic-cost-foundation`; base `main`.
+- Keep PR **draft and unmerged** unless user explicitly says otherwise.
+- Minimize Vercel deployments: prepare a whole batch, then one low-level `create_blob -> create_tree -> create_commit -> update_ref` push. PR body/title updates use PR metadata APIs only. Never create no-op/document-only pushes.
 
 ## Mandatory SSOT / reconciliation rules
+Any `project_json_v3` economic change must match its technical report period-for-period: exact timeline and productionStartPeriod, CAPEX/closure/WC placement, report prices/payabilities/TC-RC/royalties/tax/FX and report-defined cash flow. Before calling JSON verified, state report table/page for prices and NPV/IRR, discount rate, NPV report vs JSON + difference and IRR report vs JSON + difference. If anything is missing: `Ej verifierad` and exact blocker. Never guess API series names/keys/content.
 
-Any future `project_json_v3` economic change must be reconciled period-for-period to the technical report: exact period count/order and construction/ramp/operations/closure placement, `productionStartPeriod`, CAPEX/closure/WC timing, report metal prices/payabilities/TC-RC/royalties/tax/FX, and report-defined after-tax/pre-tax cash flow. Before calling a Project JSON verified, state report table/page for prices and NPV/IRR, discount rate, NPV report vs JSON + difference, and IRR report vs JSON + difference. If anything is missing, state `Ej verifierad` and the exact blocker. Never guess API series names/keys/content.
+The public Cu-curve batches do **not** change Project JSON economics; existing V3 reconciliations remain authoritative.
 
-No Project JSON economic fixture is changed by the public Cu curve batches, so the existing V3 reconciliation remains authoritative.
+## Tier foundation
+- Scale is exact physical-product and price-independent; strict identities (`U != U3O8`, `W != WO3`, contained Fe != saleable iron ore).
+- Cost allocation/normalization is fail-closed and source-locked.
+- Five technical-report Cu golden bridges remain: Vizcachitas, Berg, Warintza, Arctic, Copper Creek.
+- S&P Q4-2024 remains the active external Cu reference/cross-check. Public evidence establishes C1/co-product/Paid Copper only; proprietary component/allocation semantics remain unavailable, so exact S&P compatibility stays fail-closed.
 
-## Tier architecture already implemented
+## Public Cu research contract
+Metric: `TIER_PUBLIC_CO_PRODUCT_CASH_COST_CU_USD_PER_LB_CONTAINED`.
 
-- `scale.ts`: exact physical-product scale, price-independent. Product identities are strict (`U != U3O8`, `W != WO3`, contained Fe != saleable iron-ore product).
-- Active scale thresholds: Au 300 koz/y, Ag 15 Moz/y, Cu 100 kt/y, Zn 150 kt/y, Pb 100 kt/y, Ni 40 kt/y, Pt 100 koz/y, Pd 150 koz/y, Mo 10 kt/y, U3O8 5.0 Mlb/y, WO3 2,000 t/y. Iron ore remains research-only.
-- `costAllocation.ts`: fail-closed allocation foundation.
-- `costNormalization.ts`: generic report-defined normalization kernel.
-- `costNormalizationRecipe.ts`: source-locked reference layer; recipes contain references/semantics/provenance, not duplicate economic series.
-- Runtime pre-revenue Tier executes recipes but only lets a cost reach an external benchmark when exact semantic readiness is verified.
-- Five technical-report Cu golden bridges: Vizcachitas, Berg, Warintza, Arctic and Copper Creek.
+Hard policy: RESEARCH_ONLY; `comparisonEnabled=false`; exact calendar 2024; 100% full-operation; denominator contained Cu produced; common pool mining + processing + site G&A + direct TC/RC/freight/realisation/smelter before by-product credits; exclude royalties/production tax, sustaining/deferred stripping capex, corp G&A, D&A, exploration, financing, hedges and non-routine items; allocate by gross contained-metal production value using one fixed 2024 deck. Never zero missing co-products, relabel payable/sold as contained, annualize partial periods, guess ownership, FX, prices or API keys.
 
-## S&P path
+Fixed deck: Cu 4.16 USD/lb; Au 2,386 USD/oz; Ag 28.27 USD/oz; Mo 21.30 USD/lb; Co 11.26 USD/lb; Zn 2,779.02 USD/t; Pb 2,072 USD/t. Source-locked research AUD/USD 2024 = 0.660.
 
-Public evidence proves only the high-level S&P target: Q4-2024 `cash operating costs (C1)`, co-product basis, Paid Copper. Exact current component boundary, co-product price/revenue vector, stream treatment and vintage-restatement methodology remain unavailable behind Capital IQ Pro. Keep the S&P contract fail-closed; do not promote historical SNL methodology into current S&P C1. No generic CPI/implicit FX restatement is allowed.
+## Status after Batch 6
+Batch 5 had 38 reviewed / 22 eligible / 16 partial / 1,991,842.546 t contained Cu. Batch 6 reviews four North American operations and genuinely closes the prior Mount Milligan blocker.
 
-## Public-disclosure Cu research policy
+**Mount Milligan (Canada / Centerra) becomes eligible:** 2025 Technical Report Table 1-1 source-locks 2024 on 100% production basis at 57.6 Mlb contained Cu + 171.9 koz Au. Centerra FY2024 reconciliation source-locks US$306.3m production + US$10.2m third-party smelting/refining/transport before separately reported credits = US$316.5m common pool. Fixed-deck normalized research cost = **2.0263188755887858 USD/lb contained Cu**.
 
-Research metric: `TIER_PUBLIC_CO_PRODUCT_CASH_COST_CU_USD_PER_LB_CONTAINED`.
+New partials remain fail-closed:
+- Mount Polley: net cash cost includes by-product/other revenues; absolute pre-credit pool not source-locked.
+- Red Chris: attributable 30% disclosure plus net by-product/other revenue; exact 100% physical vector + canonical pre-credit pool not jointly source-locked.
+- Robinson: payable-Cu C1 after by-product value; mine-level contained vector + absolute pre-credit pool not source-locked.
 
-Hard policy:
-- `RESEARCH_ONLY`; `comparisonEnabled=false`;
-- exact calendar-year 2024 and 100% full-operation basis;
-- denominator = contained Cu produced;
-- common pool = mining + processing/milling + site G&A/indirect + direct TC/RC/freight/realisation/smelter costs;
-- exclude issuer by-product credits, royalties/production taxes, sustaining/deferred stripping capex, corporate G&A, D&A, exploration, financing, hedges and non-routine items;
-- allocate by gross contained-metal production value using one fixed public 2024 reference deck;
-- streams/hedges/offtakes do not change physical allocation weights;
-- no missing co-product can be zeroed and no unsupported product price/quantity can be guessed;
-- quartiles are contained-Cu-production weighted;
-- reaching >=20 permits research quartiles only, never automatic Tier activation.
+Mount Milligan supersedes its old partial. Expected unique Batch6 sample: **41 reviewed / 23 eligible / 18 partial / 2,017,969.466 t contained Cu**. Weight concentration becomes approximately largest 21.66%, top3 49.11%, top5 68.67%, top10 85.08%. Builder/test recomputes weighted Q1/P50/Q3, equal-mine and leave-largest-out diagnostics. Regardless of values, `comparisonEnabled=false` is mandatory.
 
-Fixed deck: Cu 4.16 USD/lb, Au 2,386 USD/oz, Ag 28.27 USD/oz, Mo 21.30 USD/lb; Co 11.26 USD/lb; Zn 2,779.02 USD/t; Pb 2,072 USD/t. AUD conversions used in research are source-locked to 29Metals' 2024 period-average AU$:US$ 0.660; no API key/series is inferred.
-
-## Public curve status after Batch 5
-
-Files:
-- `src/lib/tier1/publicCuCostCurve.ts`
-- `src/lib/tier1/publicCuCostCurveBatch2.ts`
-- `src/lib/tier1/publicCuCostCurveBatch3.ts`
-- `src/lib/tier1/publicCuCostCurveBatch4.ts`
-- `src/lib/tier1/publicCuCostCurveBatch5.ts`
-- matching tests under `src/lib/tier1/__tests__/`
-- `docs/tier1-public-cu-cost-curve-batch5.md`
-- `docs/tier1-public-cu-cost-curve-sample-audit.md`
-
-Batch 5 adds two source-complete observations:
-- Motheo (Botswana / Sandfire): **1.654106 USD/lb contained Cu**, 49,721 t Cu + 1.929 Moz Ag, Gross C1 common pool US$203m.
-- Tritton (Australia / Aeris): **2.784715 USD/lb**, 18.6 kt Cu + 5.3 koz Au + 159 koz Ag, canonical pool A$190.4m × 0.660 = US$125.664m.
-
-Four additional rows remain deliberately partial:
-- Riotinto: exact 2024 physical Ag production not source-locked;
-- Gibraltar: exact 2024 physical Ag production not source-locked;
-- Aitik: physical Cu/Au/Ag known, but absolute pre-byproduct common pool not source-locked because Normal C1 is already net of by-metal revenue;
-- MATSA: exact contained 2024 Au production not source-locked.
-
-Unique sample: **38 reviewed, 22 eligible, 16 partial, 1,991,842.546 t contained Cu**.
-
-Production-weighted research curve remains:
-- Q1 **1.6531976163511322**
-- P50 **1.931082177131546**
-- Q3 **2.114235966665641**
-- `comparisonEnabled=false`.
-
-## Batch 5 robustness diagnostics
-
-The builder now emits diagnostics because count alone is not a readiness criterion.
-
-Weight concentration:
-- largest mine 21.94%
-- top 3 49.75%
-- top 5 69.57%
-- top 10 86.20%
-
-Geography:
-- DRC 24.18%
-- Chile 21.87%
-- Peru 21.18%
-- Zambia 20.18%
-- Australia 4.10%
-- Canada 2.56%
-- Botswana 2.50%
-- Mexico 1.88%
-- Kazakhstan 0.67%
-- Turkey 0.58%
-- Colombia 0.31%
-- DRC+Chile+Peru+Zambia = ~87.41%
-
-Operator concentration:
-- Ivanhoe/Zijin 21.94%
-- First Quantum 20.76%
-- MMG 18.45%
-- top three ~61.15%
-
-Equal-mine diagnostic Q1/P50/Q3:
-- 1.799071 / 2.094806 / 2.788146
-
-Leave-largest-out (remove Kamoa-Kakula) production-weighted:
-- Q1 1.739713
-- P50 1.940000
-- Q3 2.114236
-
-The Q1 change is material, so the curve remains **NOT ACTIVATION READY**.
+Files added/updated for Batch6:
+- `src/lib/tier1/publicCuCostCurveBatch6.ts`
+- `src/lib/tier1/__tests__/publicCuCostCurveBatch6.test.ts`
+- `src/lib/tier1/__tests__/costBenchmarkBasis.test.ts` imports Batch6 test chain
+- `docs/tier1-public-cu-cost-curve-batch6.md`
+- this handoff
 
 ## Next task
-
-Do **not** activate Tier. Continue sample broadening with clean source-complete operations specifically outside the dominant DRC/Chile/Peru/Zambia and Ivanhoe/Zijin/FQM/MMG clusters, while tightening common-pool semantics.
-
-Prefer:
-1. exact full-calendar 2024 contained Cu;
-2. complete physical economic co-product vector;
-3. absolute/decomposable pre-by-product common pool;
-4. products covered by the fixed deck or separately source-lockable public 2024 prices;
-5. underrepresented geographies/operators.
-
-Do not chase existing partials unless the exact blocker can genuinely be closed.
-
-A later activation proposal requires another sample/robustness audit. S&P remains the active external benchmark/cross-check until semantic compatibility and public-sample robustness are adequate.
+Do not activate Tier. After Batch6 preview is green, use its logged exact diagnostics in PR metadata. Then continue broadening outside DRC/Chile/Peru/Zambia and Ivanhoe/Zijin/FQM/MMG, prioritizing exact contained production, complete physical co-product vectors, decomposable absolute pre-credit pools and underrepresented operators/geographies. Do not chase partials unless the exact blocker can actually be closed.
 
 ## Validation expectation
-
-Before reporting Batch 5 complete, one Vercel preview must show Batch5 + prior public-curve tests, full Tier suite, five technical-report bridges, `project_json_v3` reconciliation suite, Compare parity, TypeScript and Vite build passing. If a build fails, fix it with a substantive corrective push only; avoid no-op/document-only deployments.
+One Batch6 preview must pass Batch2-6 public curve tests, full Tier suite, five technical-report bridges, full `project_json_v3` reconciliation suite, Compare parity, TypeScript and Vite build. If it fails, make only a substantive corrective push.
