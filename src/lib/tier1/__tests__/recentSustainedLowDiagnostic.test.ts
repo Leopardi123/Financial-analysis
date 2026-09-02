@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { query } from '../../../../api/_db.ts';
-import { ensureSchema, tables } from '../../../../api/_migrate.ts';
 import tier1PreRevenueHandler from '../../../server/routes/tier1/pre-revenue.ts';
 import { readHistoryRowsInRange } from '../../prices/db/readHistory.ts';
 import type { PriceKey } from '../../prices/keys.ts';
 import { analyzeRecentSustainedLows } from '../recentSustainedLow.ts';
+
+const COMPANY_PROJECTS_TABLE = 'company_projects';
 
 function monthDate(index: number): string {
   const date = new Date(Date.UTC(2016 + Math.floor(index / 12), index % 12, 28));
@@ -126,9 +127,8 @@ async function runTierHandler(symbol: string): Promise<any> {
 }
 
 async function runUniverseCycleDiagnostic(): Promise<void> {
-  await ensureSchema();
   const symbolRows = await query(
-    `SELECT DISTINCT UPPER(symbol) AS symbol FROM ${tables.companyProjects} ORDER BY UPPER(symbol)`,
+    `SELECT DISTINCT UPPER(symbol) AS symbol FROM ${COMPANY_PROJECTS_TABLE} ORDER BY UPPER(symbol)`,
   ) as Array<{ symbol?: string }>;
   const symbols = symbolRows.map((row) => String(row.symbol ?? '').trim().toUpperCase()).filter(Boolean);
   const rows: CycleDiagnosticRow[] = [];
