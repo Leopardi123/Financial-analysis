@@ -25,6 +25,23 @@ export type ProjectPhase1Input = {
   /** Fiscal charges after corporate income tax. */
   postTaxChargesUSD?: (number | null)[] | null;
   /**
+   * Revenue earned before commercial production that the source capitalizes
+   * against project development rather than recognizing in operating EBITDA.
+   * This is a reclassification of revenueUSD, not additional revenue.
+   */
+  capitalizedDevelopmentRevenueUSD?: (number | null)[] | null;
+  /**
+   * Dynamic runtime alternative to capitalizedDevelopmentRevenueUSD. The
+   * fraction is applied period-by-period to revenueUSD and must be within [0,1].
+   * It is mutually exclusive with capitalizedDevelopmentRevenueUSD.
+   */
+  capitalizedDevelopmentRevenueShareByPeriod?: (number | null)[] | null;
+  /**
+   * Source-defined pre-commercial/development costs capitalized outside
+   * operating EBITDA/EBIT. Positive values are cash outflows in FCFF.
+   */
+  capitalizedDevelopmentCostsUSD?: (number | null)[] | null;
+  /**
    * For V3 METAL_IN_PRODUCT revenue: directly reported payable/gross quantity
    * ratio by metal. Dimensionless, therefore safe across price-unit conversion.
    */
@@ -70,6 +87,12 @@ export type ProjectPhase1Output = {
   preTaxChargesUSD_effective?: (number | null)[];
   postTaxChargesUSD_effective?: (number | null)[];
   taxLossCarryforwardUSD_effective?: (number | null)[];
+  /** Operating revenue after any source-defined capitalized development revenue is removed. */
+  operatingRevenueUSD_effective?: (number | null)[];
+  /** Capitalized pre-commercial revenue reclassified out of EBITDA and added back only in FCFF. */
+  capitalizedDevelopmentRevenueUSD_effective?: (number | null)[];
+  /** Capitalized pre-commercial costs deducted only in FCFF. */
+  capitalizedDevelopmentCostsUSD_effective?: (number | null)[];
   /** Optional to preserve compatibility with existing typed fixtures/mocks. */
   terminalProceedsUSD_effective?: (number | null)[];
 };

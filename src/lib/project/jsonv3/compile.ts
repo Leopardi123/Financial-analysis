@@ -20,6 +20,17 @@ function assertSeries(raw: unknown, length: number, path: string, options: { non
     return value;
   });
 }
+function assertCompleteSeries(raw: unknown, length: number, path: string, options: { nonNegative?: boolean } = {}): number[] {
+  const series = assertSeries(raw, length, path, options);
+  const missing = series.flatMap((value, index) => value === null ? [index] : []);
+  if (missing.length > 0) throw new Error(`${path} must be complete for an active development scenario; null at index(es): ${missing.join(', ')}.`);
+  return series as number[];
+}
+function assertRevenueShareSeries(raw: unknown, length: number, path: string): number[] {
+  const series = assertCompleteSeries(raw, length, path, { nonNegative: true });
+  series.forEach((value, index) => { if (value > 1) throw new Error(`${path}[${index}] must be within [0,1].`); });
+  return series;
+}
 function zeroSeries(length: number): Array<number | null> { return new Array<number | null>(length).fill(0); }
 function sumStrictSeries(seriesList: Array<Array<number | null>>, length: number): Array<number | null> {
   if (seriesList.length === 0) return zeroSeries(length);
@@ -49,6 +60,10 @@ function validateComponents<T extends string>(
     ids.add(component.id);
     return { ...component, seriesUSD: assertSeries(component.seriesUSD, length, `${path}[${index}].seriesUSD`, { nonNegative: true }) };
   });
+}
+function assertSourceRef(raw: Record<string, unknown>, path: string): void {
+  if (typeof raw.sourceId !== 'string' || !raw.sourceId.trim()) throw new Error(`${path}.sourceId must be a non-empty source identifier.`);
+  if (typeof raw.pageOrTable !== 'string' || !raw.pageOrTable.trim()) throw new Error(`${path}.pageOrTable must be a non-empty source page/table reference.`);
 }
 
 export type ParseProjectJsonV3Options = {
@@ -117,6 +132,7 @@ function assertRuntimeReadyEconomicSources(raw: ProjectJsonV3): void {
   const unresolved: string[] = [];
   if (raw.economics.costModel?.mode === 'UNKNOWN') unresolved.push('economics.costModel');
   if (raw.economics.sellingModel?.mode === 'UNKNOWN') unresolved.push('economics.sellingModel');
+  if (raw.economics.developmentModel?.mode === 'UNKNOWN') unresolved.push('economics.developmentModel');
   if (raw.economics.fiscalTakeModel?.mode === 'UNKNOWN') unresolved.push('economics.fiscalTakeModel');
   if (raw.economics.taxModel?.mode === 'UNKNOWN') unresolved.push('economics.taxModel');
   if (unresolved.length > 0) throw new Error(`project_json_v3 draft placeholder(s) must be resolved from the technical report before runtime: ${unresolved.join(', ')}. UNKNOWN is not an economic assumption.`);
@@ -219,6 +235,36 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
   } else if (sellingModel.mode !== 'NONE') throw new Error('economics.sellingModel.mode must be NONE, AGGREGATE or COMPONENTS for runtime.');
 
   const scenarioLeg = options.fiscalScenario ?? options.taxScenario ?? 'runtime';
+  let capitalizedDevelopmentRevenueUSD: Array<number | null> | undefined;
+  let capitalizedDevelopmentRevenueShareByPeriod: Array<number | null> | undefined;
+  let capitalizedDevelopmentCostsUSD: Array<number | null> | undefined;
+  const developmentModel = raw.economics.developmentModel ?? { mode: 'NONE' as const };
+  if (!isRecord(developmentModel)) throw new Error('economics.developmentModel must be an object or null.');
+  if (developmentModel.mode === 'LOCKED_SERIES') {
+    if (scenarioLeg !== 'report') throw new Error('economics.developmentModel LOCKED_SERIES is report/scenario locked and cannot be reused for normal runtime without an explicit runtime proxy.');
+    assertSourceRef(developmentModel, 'economics.developmentModel');
+    capitalizedDevelopmentRevenueUSD = assertCompleteSeries(developmentModel.capitalizedRevenueUSD, length, 'economics.developmentModel.capitalizedRevenueUSD', { nonNegative: true });
+    capitalizedDevelopmentCostsUSD = assertCompleteSeries(developmentModel.capitalizedCostsUSD, length, 'economics.developmentModel.capitalizedCostsUSD', { nonNegative: true });
+  } else if (developmentModel.mode === 'REPORT_LOCKED_WITH_RUNTIME_PROXY') {
+    assertSourceRef(developmentModel, 'economics.developmentModel');
+    if (scenarioLeg === 'report') {
+      capitalizedDevelopmentRevenueUSD = assertCompleteSeries(developmentModel.reportCapitalizedRevenueUSD, length, 'economics.developmentModel.reportCapitalizedRevenueUSD', { nonNegative: true });
+      capitalizedDevelopmentCostsUSD = assertCompleteSeries(developmentModel.reportCapitalizedCostsUSD, length, 'economics.developmentModel.reportCapitalizedCostsUSD', { nonNegative: true });
+    } else {
+      if (!isRecord(developmentModel.runtime) || developmentModel.runtime.method !== 'REVENUE_SHARE') throw new Error('economics.developmentModel.runtime.method must be REVENUE_SHARE.');
+      assertSourceRef(developmentModel.runtime, 'economics.developmentModel.runtime');
+      capitalizedDevelopmentRevenueShareByPeriod = assertRevenueShareSeries(developmentModel.runtime.capitalizedRevenueShareByPeriod, length, 'economics.developmentModel.runtime.capitalizedRevenueShareByPeriod');
+      capitalizedDevelopmentCostsUSD = assertCompleteSeries(developmentModel.runtime.capitalizedCostsUSD, length, 'economics.developmentModel.runtime.capitalizedCostsUSD', { nonNegative: true });
+    }
+  } else if (developmentModel.mode !== 'NONE') throw new Error('economics.developmentModel.mode must be NONE, LOCKED_SERIES or REPORT_LOCKED_WITH_RUNTIME_PROXY for runtime.');
+
+  const developmentActive = Boolean(capitalizedDevelopmentRevenueUSD || capitalizedDevelopmentRevenueShareByPeriod || capitalizedDevelopmentCostsUSD);
+  if (developmentActive) {
+    if (raw.streamsByMetal && Object.keys(raw.streamsByMetal).length > 0) throw new Error('Capitalized development revenue is not yet representable with streams; leave runtime/report reconciliation unverified rather than guessing ordering.');
+    const nonPayable = Object.entries(raw.metals.revenueBasisByMetal).filter(([, basis]) => basis !== 'PAYABLE_DIRECT').map(([metal]) => metal);
+    if (nonPayable.length > 0) throw new Error(`Capitalized development revenue currently requires PAYABLE_DIRECT for all economic metals; unsupported metal(s): ${nonPayable.join(', ')}.`);
+  }
+
   let taxRate: number | null = null;
   let taxCashFlowUSD: Array<number | null> | undefined;
   let taxLossCarryforward = false;
@@ -318,6 +364,9 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
     target.fiscalTakeRules = fiscalTakeRules;
     target.fiscalLedgerUSD = fiscalLedgerUSD;
     target.terminalProceedsUSD = [...terminalProceedsUSD];
+    if (capitalizedDevelopmentRevenueUSD) target.capitalizedDevelopmentRevenueUSD = [...capitalizedDevelopmentRevenueUSD];
+    if (capitalizedDevelopmentRevenueShareByPeriod) target.capitalizedDevelopmentRevenueShareByPeriod = [...capitalizedDevelopmentRevenueShareByPeriod];
+    if (capitalizedDevelopmentCostsUSD) target.capitalizedDevelopmentCostsUSD = [...capitalizedDevelopmentCostsUSD];
     if (taxCashFlowUSD) { target.taxRate = null; target.taxCashFlowUSD = [...taxCashFlowUSD]; }
     if (lockedOperatingFiscal) target.royaltiesUSD = [...lockedOperatingFiscal];
     if (preTaxChargesUSD) target.preTaxChargesUSD = [...preTaxChargesUSD];
@@ -337,6 +386,8 @@ export function parseProjectJsonV3(rawUnknown: unknown, options: ParseProjectJso
     metalInProductQtyByMetal: raw.metals.metalInProductQtyByMetal ?? null,
     costModel: raw.economics.costModel,
     sellingModel: raw.economics.sellingModel,
+    developmentModel: raw.economics.developmentModel ?? { mode: 'NONE' },
+    developmentScenarioUsed: scenarioLeg,
     fiscalTakeModel: raw.economics.fiscalTakeModel,
     fiscalScenarioUsed: scenarioLeg,
     taxModel: raw.economics.taxModel,

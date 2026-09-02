@@ -1,4 +1,5 @@
 import { computeProjectAisc } from './aisc/engine.ts';
+import { resolveCapitalizedDevelopmentRevenueUSD } from './phase1.ts';
 import { computeFiscalTake } from './fiscal/engine.ts';
 import type { FiscalLedgerLine } from './fiscal/types.ts';
 import { computeNationalTake } from './nationalTake/engine.ts';
@@ -142,6 +143,14 @@ export function computeProjectEngineFullProductionV1(input: ProjectEngineFullPro
   const payabilityDeductionUSDTotal = sumSeriesStrict(Object.values(payabilityDeductionUSDByMetal), length);
   const revenueOut = computeProjectRevenue({ masterN: input.masterN, payableQtyByMetal: revenueQtyByMetal, priceUSDByMetal: input.spotPriceUSDByMetal, streamsByMetal: input.streamsByMetal });
 
+  const capitalizedDevelopmentRevenueUSD = resolveCapitalizedDevelopmentRevenueUSD(input.phase1, revenueOut.grossRevenueUSD, length);
+  const hasCapitalizedDevelopmentRevenue = capitalizedDevelopmentRevenueUSD.some((value) => finite(value) && Math.abs(value) > 1e-12);
+  if (hasCapitalizedDevelopmentRevenue && (hasStreams || hasNonPayableRevenueBasis)) {
+    throw new Error('Capitalized development revenue currently requires PAYABLE_DIRECT-equivalent revenue without streams so operating fiscal bases remain unambiguous.');
+  }
+  const operatingRevenueUSD = subtractSeries(revenueOut.grossRevenueUSD, capitalizedDevelopmentRevenueUSD, length);
+  const operatingGrossPreStreamUSD = subtractSeries(grossPreStreamUSD, capitalizedDevelopmentRevenueUSD, length);
+
   const baseSellingCostsUSD = input.phase1.sellingCostsUSD ?? zeroSeries(length);
   const sellingAfterPayability = addSeries(baseSellingCostsUSD, payabilityDeductionUSDTotal, length);
   const streamTakeUSD = subtractSeries(grossPreStreamUSD, revenueOut.grossRevenueUSD, length);
@@ -152,8 +161,8 @@ export function computeProjectEngineFullProductionV1(input: ProjectEngineFullPro
     rules: fiscalRules,
     ledgerUSD: buildFiscalLedger({
       input,
-      grossMetalValueUSD: grossPreStreamUSD,
-      revenueAfterStreamUSD: revenueOut.grossRevenueUSD,
+      grossMetalValueUSD: operatingGrossPreStreamUSD,
+      revenueAfterStreamUSD: operatingRevenueUSD,
       payabilityDeductionUSD: payabilityDeductionUSDTotal,
       baseSellingCostsUSD,
       streamTakeUSD,
@@ -182,7 +191,7 @@ export function computeProjectEngineFullProductionV1(input: ProjectEngineFullPro
     extraRoyaltiesUSD: fiscalTake?.operatingExpenseUSD ?? zeroSeries(length),
   });
   const phase2Out = computeProjectPhase2({ masterN: input.masterN, productionStartPeriod: input.phase1.productionStartPeriod, discountRate: input.phase2.discountRate, fcffUSD: nationalTakeOut.phase1.fcffUSD });
-  const aiscOut = computeProjectAisc({ masterN: input.masterN, productionStartPeriod: input.phase1.productionStartPeriod, grossRevenueUSD: revenueOut.grossRevenueUSD, auPriceUSDPerOz: input.aisc.auPriceUSDPerOz, sustainingCostUSD: nationalTakeOut.phase1.sustainingCostUSD });
+  const aiscOut = computeProjectAisc({ masterN: input.masterN, productionStartPeriod: input.phase1.productionStartPeriod, grossRevenueUSD: operatingRevenueUSD, auPriceUSDPerOz: input.aisc.auPriceUSDPerOz, sustainingCostUSD: nationalTakeOut.phase1.sustainingCostUSD });
   return {
     streams: streamsOut,
     revenue: revenueOut,

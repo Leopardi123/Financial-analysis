@@ -20,6 +20,34 @@ export type ProjectJsonV3SellingModel =
   | { mode: 'NONE' }
   | { mode: 'AGGREGATE'; sellingCostsUSD: Array<number | null> }
   | { mode: 'COMPONENTS'; components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3SellingComponentCategory>> };
+export type ProjectJsonV3DevelopmentRuntimeProxy = {
+  method: 'REVENUE_SHARE';
+  capitalizedRevenueShareByPeriod: Array<number | null>;
+  capitalizedCostsUSD: Array<number | null>;
+  sourceId: string;
+  pageOrTable: string;
+  notes?: string | null;
+};
+export type ProjectJsonV3DevelopmentModel =
+  | { mode: 'UNKNOWN' }
+  | { mode: 'NONE' }
+  | {
+      mode: 'LOCKED_SERIES';
+      capitalizedRevenueUSD: Array<number | null>;
+      capitalizedCostsUSD: Array<number | null>;
+      sourceId: string;
+      pageOrTable: string;
+      notes?: string | null;
+    }
+  | {
+      mode: 'REPORT_LOCKED_WITH_RUNTIME_PROXY';
+      reportCapitalizedRevenueUSD: Array<number | null>;
+      reportCapitalizedCostsUSD: Array<number | null>;
+      runtime: ProjectJsonV3DevelopmentRuntimeProxy;
+      sourceId: string;
+      pageOrTable: string;
+      notes?: string | null;
+    };
 export type ProjectJsonV3ReportLockedFiscalTakeItem = {
   id: string; label?: string | null; reportFiscalTakeUSD: Array<number | null>;
   placement: 'REVENUE_DEDUCTION' | 'OPERATING_EXPENSE' | 'PRE_TAX_CHARGE' | 'POST_TAX_CHARGE';
@@ -54,6 +82,7 @@ export type ProjectJsonV3ReportVerification = {
   priceDeckSeriesByKey?: Record<string, Array<number | null>> | null;
   reportNPVPostTaxUSD: number; reportIRRPostTax: number; reportNPVPreTaxUSD?: number | null; reportIRRPreTax?: number | null; toleranceRelative?: number;
   reportInitialCapexUSD?: number | null; reportSustainingCapexUSD?: number | null; reportClosureUSD?: number | null; reportClosurePeriod?: number | null;
+  reportPreproductionRevenueUSD?: number | null; reportPreproductionCostsUSD?: number | null;
   reportWorkingCapitalUnwindUSD?: number | null; reportWorkingCapitalUnwindPeriod?: number | null; reportTerminalProceedsUSD?: number | null; reportTerminalProceedsPeriod?: number | null;
   assumptionsPageOrTable?: string | null; assumptionsNotes?: string | null;
 };
@@ -69,7 +98,7 @@ export type ProjectJsonV3 = {
     revenueBasisByMetal: Record<string, ProjectJsonV3RevenueBasis>; payableQtyUnitByMetal: Record<string, QtyUnit>; priceKeyByMetal: Record<string, string>; auPriceKey: string | null;
   };
   streamsByMetal?: Record<string, StreamMVIConfig> | null;
-  economics: { costModel: ProjectJsonV3CostModel; sellingModel: ProjectJsonV3SellingModel; fiscalTakeModel: ProjectJsonV3FiscalTakeModel; taxModel: ProjectJsonV3TaxModel; depreciationUSD?: Array<number | null> | null };
+  economics: { costModel: ProjectJsonV3CostModel; sellingModel: ProjectJsonV3SellingModel; developmentModel?: ProjectJsonV3DevelopmentModel | null; fiscalTakeModel: ProjectJsonV3FiscalTakeModel; taxModel: ProjectJsonV3TaxModel; depreciationUSD?: Array<number | null> | null };
   capital: { capexUSD: Array<number | null>; sustainingCapexUSD: Array<number | null>; closureUSD: Array<number | null>; workingCapitalDeltaUSD?: Array<number | null> | null; terminalProceedsUSD?: Array<number | null> | null };
   operations?: {
     capacity: { throughputUnit: 'tpd' | 'tpa' | null; nameplateThroughput: number | null; utilizationPct?: number | null };
