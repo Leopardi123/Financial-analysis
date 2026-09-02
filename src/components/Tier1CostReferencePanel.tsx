@@ -70,7 +70,9 @@ export default function Tier1CostReferencePanel({
   primaryMetal: string | null | undefined;
   hardCostGateVerified: boolean;
 }) {
-  const benchmark = primaryMetal ? TIER1_COST_BENCHMARKS[primaryMetal] : null;
+  const benchmark = primaryMetal && primaryMetal in TIER1_COST_BENCHMARKS
+    ? TIER1_COST_BENCHMARKS[primaryMetal as keyof typeof TIER1_COST_BENCHMARKS]
+    : null;
 
   return <>
     {rows.length > 0 && <div className="tier1-modal__section">
