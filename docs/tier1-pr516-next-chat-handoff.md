@@ -1,53 +1,111 @@
 # PR #516 · next-chat handoff
 
-This is the durable handoff for `docs/tier1-polymetallic-cost-foundation`. Always read current PR head and this file before changes.
+This is the durable handoff for continuing work on `docs/tier1-polymetallic-cost-foundation`.
 
 ## Repository / workflow
+
 - Repository: `Leopardi123/Financial-analysis`
-- PR #516: `Implement product-based Tier scale policies and polymetallic cost foundation`
-- Branch: `docs/tier1-polymetallic-cost-foundation`; base `main`.
-- Keep PR **draft and unmerged** unless user explicitly says otherwise.
-- Minimize Vercel deployments: prepare a whole batch, then one low-level `create_blob -> create_tree -> create_commit -> update_ref` push. PR body/title updates use PR metadata APIs only. Never create no-op/document-only pushes.
+- PR: #516 — `Implement product-based Tier scale policies and polymetallic cost foundation`
+- Branch: `docs/tier1-polymetallic-cost-foundation`
+- Base: `main`
+- Keep PR **draft** and **unmerged** unless the user explicitly says otherwise.
+- User wants few Vercel deployments. Prepare a whole batch, then use one low-level Git update (`create_blob` → `create_tree` → `create_commit` → `update_ref`). Do not use contents writes on `main` and do not create no-op/document-only deployment pushes.
 
-## Mandatory SSOT / reconciliation rules
-Any `project_json_v3` economic change must match its technical report period-for-period: exact timeline and productionStartPeriod, CAPEX/closure/WC placement, report prices/payabilities/TC-RC/royalties/tax/FX and report-defined cash flow. Before calling JSON verified, state report table/page for prices and NPV/IRR, discount rate, NPV report vs JSON + difference and IRR report vs JSON + difference. If anything is missing: `Ej verifierad` and exact blocker. Never guess API series names/keys/content.
+## Mandatory Project JSON reconciliation
 
-The public Cu-curve batches do **not** change Project JSON economics; existing V3 reconciliations remain authoritative.
+Any Project JSON economic change must reconcile period-for-period to the technical report: exact period count/order, construction/ramp/operations/closure, `productionStartPeriod`, CAPEX/closure/WC timing, report prices/payabilities/TC-RC/royalties/tax/FX, and report-defined cash flow. Before calling JSON verified, state report table/page for prices and NPV/IRR, discount rate, NPV report vs JSON + difference, IRR report vs JSON + difference. If anything is missing, state `Ej verifierad` and the exact blocker. Never guess API series names/keys/content.
 
-## Tier foundation
-- Scale is exact physical-product and price-independent; strict identities (`U != U3O8`, `W != WO3`, contained Fe != saleable iron ore).
-- Cost allocation/normalization is fail-closed and source-locked.
-- Five technical-report Cu golden bridges remain: Vizcachitas, Berg, Warintza, Arctic, Copper Creek.
-- S&P Q4-2024 remains the active external Cu reference/cross-check. Public evidence establishes C1/co-product/Paid Copper only; proprietary component/allocation semantics remain unavailable, so exact S&P compatibility stays fail-closed.
+No Project JSON economic series has been changed by the public Cu curve work through Batch 6 or by the 2026-09-02 methodology pivot.
 
-## Public Cu research contract
-Metric: `TIER_PUBLIC_CO_PRODUCT_CASH_COST_CU_USD_PER_LB_CONTAINED`.
+## Tier architecture already in PR
 
-Hard policy: RESEARCH_ONLY; `comparisonEnabled=false`; exact calendar 2024; 100% full-operation; denominator contained Cu produced; common pool mining + processing + site G&A + direct TC/RC/freight/realisation/smelter before by-product credits; exclude royalties/production tax, sustaining/deferred stripping capex, corp G&A, D&A, exploration, financing, hedges and non-routine items; allocate by gross contained-metal production value using one fixed 2024 deck. Never zero missing co-products, relabel payable/sold as contained, annualize partial periods, guess ownership, FX, prices or API keys.
+- physical scale is product-based and price-independent;
+- exact product identities (`U != U3O8`, `W != WO3`, contained Fe != saleable iron ore);
+- active scale thresholds: Au 300 koz/y, Ag 15 Moz/y, Cu 100 kt/y, Zn 150 kt/y, Pb 100 kt/y, Ni 40 kt/y, Pt 100 koz/y, Pd 150 koz/y, Mo 10 kt/y, U3O8 5.0 Mlb/y, WO3 2,000 t/y;
+- `costAllocation.ts`, `costNormalization.ts`, `costNormalizationRecipe.ts` are fail-closed;
+- five source-locked technical-report Cu bridges: Vizcachitas, Berg, Warintza, Arctic, Copper Creek;
+- S&P public evidence remains an external reference/cross-check; proprietary C1 component/allocation semantics remain unavailable and must not be guessed.
 
-Fixed deck: Cu 4.16 USD/lb; Au 2,386 USD/oz; Ag 28.27 USD/oz; Mo 21.30 USD/lb; Co 11.26 USD/lb; Zn 2,779.02 USD/t; Pb 2,072 USD/t. Source-locked research AUD/USD 2024 = 0.660.
+## Public Cu research curve after Batch 6
 
-## Status after Batch 6
-Batch 5 had 38 reviewed / 22 eligible / 16 partial / 1,991,842.546 t contained Cu. Batch 6 reviews four North American operations and genuinely closes the prior Mount Milligan blocker.
+Research metric: `TIER_PUBLIC_CO_PRODUCT_CASH_COST_CU_USD_PER_LB_CONTAINED`.
 
-**Mount Milligan (Canada / Centerra) becomes eligible:** 2025 Technical Report Table 1-1 source-locks 2024 on 100% production basis at 57.6 Mlb contained Cu + 171.9 koz Au. Centerra FY2024 reconciliation source-locks US$306.3m production + US$10.2m third-party smelting/refining/transport before separately reported credits = US$316.5m common pool. Fixed-deck normalized research cost = **2.0263188755887858 USD/lb contained Cu**.
+Hard observation policy remains exact calendar 2024, 100% full-operation basis, contained Cu produced denominator, source-complete physical co-products, decomposable pre-by-product common pool, fixed public 2024 product-value allocation deck, no guessed quantity/price/FX/ownership, and fail-closed partials.
 
-New partials remain fail-closed:
-- Mount Polley: net cash cost includes by-product/other revenues; absolute pre-credit pool not source-locked.
-- Red Chris: attributable 30% disclosure plus net by-product/other revenue; exact 100% physical vector + canonical pre-credit pool not jointly source-locked.
-- Robinson: payable-Cu C1 after by-product value; mine-level contained vector + absolute pre-credit pool not source-locked.
+Current sample:
+- 41 reviewed;
+- 23 eligible;
+- 18 partial;
+- 2,017,969.466 t contained Cu;
+- production-weighted Q1 1.6531976163511322;
+- P50 1.9310821771315465;
+- Q3 2.114235966665641 USD/lb contained Cu;
+- largest observation 21.66%; top 3 49.11%; top 5 68.67%; top 10 85.08%;
+- equal-mine Q1/P50/Q3 1.799071 / 2.094806 / 2.788146;
+- leave-largest-out 1.739713 / 1.940000 / 2.114236;
+- `comparisonEnabled=false` / research-only.
 
-Mount Milligan supersedes its old partial. Expected unique Batch6 sample: **41 reviewed / 23 eligible / 18 partial / 2,017,969.466 t contained Cu**. Weight concentration becomes approximately largest 21.66%, top3 49.11%, top5 68.67%, top10 85.08%. Builder/test recomputes weighted Q1/P50/Q3, equal-mine and leave-largest-out diagnostics. Regardless of values, `comparisonEnabled=false` is mandatory.
+Batch 6 added Mount Milligan as source-complete: 2024 technical report historical table gives 57.6 Mlb contained Cu + 171.9 koz Au on 100% production basis; common pool US$316.5m; normalized public research cost 2.026319 USD/lb contained Cu. Mount Polley, Red Chris and Robinson remain fail-closed.
 
-Files added/updated for Batch6:
-- `src/lib/tier1/publicCuCostCurveBatch6.ts`
-- `src/lib/tier1/__tests__/publicCuCostCurveBatch6.test.ts`
-- `src/lib/tier1/__tests__/costBenchmarkBasis.test.ts` imports Batch6 test chain
-- `docs/tier1-public-cu-cost-curve-batch6.md`
-- this handoff
+## IMPORTANT METHOD PIVOT · 2026-09-02
 
-## Next task
-Do not activate Tier. After Batch6 preview is green, use its logged exact diagnostics in PR metadata. Then continue broadening outside DRC/Chile/Peru/Zambia and Ivanhoe/Zijin/FQM/MMG, prioritizing exact contained production, complete physical co-product vectors, decomposable absolute pre-credit pools and underrepresented operators/geographies. Do not chase partials unless the exact blocker can actually be closed.
+Read `docs/tier1-cost-position-method-pivot.md` before doing more cost-position work.
+
+The previous trajectory was to build an increasingly precise cost curve and eventually classify technical-report projects by exact percentile. The user challenged that approach: a C1 from a 2022/2023/2026 study is not economically identical to a 2024 actual producer C1, and rebasing the mine to our own common-year model risks measuring our yardstick rather than the mine.
+
+The binding new principle is:
+
+> **Beräkna exakt. Klassificera bara med den precision som underlaget faktiskt bär.**
+
+And:
+
+> **Normalisera definitionen, men normalisera inte ekonomin för att få projektet att passa benchmarken.**
+
+Do not “fix” the resulting apparent imprecision later. It is intentional.
+
+### What this means
+
+Keep exact semantic/source normalization. Preserve the project/report cost exactly. Carry `costBaseYear` and `costEvidenceClass` separately. Do not CPI-adjust, FX-rebase, invent a common-year C1, or create an arbitrary vintage uncertainty band.
+
+New module: `src/lib/tier1/costPosition.ts`.
+
+Evidence classes:
+- `ACTUAL_OPERATION`
+- `FS_ESTIMATE`
+- `PFS_ESTIMATE`
+- `PEA_ESTIMATE`
+- `OTHER_ESTIMATE`
+- `UNKNOWN`
+
+The new layer returns the unadjusted raw relation to a reference curve:
+- `BELOW_Q1_REFERENCE`
+- `Q1_TO_P50_REFERENCE`
+- `P50_TO_Q3_REFERENCE`
+- `ABOVE_Q3_REFERENCE`
+
+Comparability is explicit:
+- `DIRECT_REFERENCE`
+- `REFERENCE_ONLY`
+- `NOT_COMPARABLE`
+
+The module always returns `adjustedCost=null`, `adjustmentApplied=false`, `hardTier=null`.
+
+`buildPublicCu2024CostPositionReference()` exposes the current Batch-6 public curve as `RESEARCH_ONLY`, `activationAllowed=false`. A Crean-Hill-like 2026 PFS may therefore show that an unadjusted project cost is below the 2024 Q1 reference, but it must remain `REFERENCE_ONLY`; it is not rebased to 2024 and does not become Cost Tier 1.
+
+### Why this pivot exists
+
+Technical-study estimates vs operating actuals, cost vintage, energy/labour/reagent/freight/TC-RC regimes and geography can move costs independently of underlying mine quality. Exact arithmetic does not imply exact classification. The public curve is now primarily a definitions-controlled reference distribution, not a promise of a precise universal percentile.
+
+### What would justify stronger classification later
+
+Do empirical work first: year-to-year cost-position movement for the same operating mines, and where possible study-estimate vs later actual cost errors. Only then may a robust-low-cost distance/tolerance be proposed. Do not invent ±x% in advance.
+
+## Next task after this pivot
+
+Do not immediately resume Batch 7 sampling. First validate the new method layer and then inspect where existing Tier/runtime cost logic still implicitly treats technical-study costs as hard percentile evidence. Any change to active gates should be fail-closed and explicit; do not silently weaken or strengthen current Tier classifications.
+
+After the method is integrated safely, continue sample broadening only where it improves reference quality (underrepresented geographies/operators, clean common-pool semantics). The goal is no longer to accumulate observations just to create more decimal precision.
 
 ## Validation expectation
-One Batch6 preview must pass Batch2-6 public curve tests, full Tier suite, five technical-report bridges, full `project_json_v3` reconciliation suite, Compare parity, TypeScript and Vite build. If it fails, make only a substantive corrective push.
+
+Any method-pivot commit must run through one Vercel preview and pass the Tier test chain, including the new cost-position regression, prior Batch2–Batch6 regressions, five technical-report bridges, project_json_v3 reconciliation, Compare parity, TypeScript and Vite production build. PR remains draft/unmerged.
