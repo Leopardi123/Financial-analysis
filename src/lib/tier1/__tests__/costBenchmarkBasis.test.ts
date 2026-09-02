@@ -1,3 +1,14 @@
+import './publicCuCostCurveBatch6.test.ts';
+import './scale.test.ts';
+import './costAllocation.test.ts';
+import './costDefinitionContract.test.ts';
+import './costNormalization.test.ts';
+import './costNormalizationReportFixtures.test.ts';
+import './costVintagePolicy.test.ts';
+import './vizcachitasCostBridge.test.ts';
+import './bergCostBridge.test.ts';
+import './arcticCostBridge.test.ts';
+import './copperCreekCostBridge.test.ts';
 import assert from 'node:assert/strict';
 import {
   TIER1_COST_BENCHMARKS,
@@ -26,9 +37,6 @@ assert.equal(TIER1_COST_BENCHMARKS.Au.sourcePageOrTable, 'slide 27');
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q2 1 228–1 501'));
 assert.ok(TIER1_COST_BENCHMARKS.Au.notes.includes('Q3 1 501–1 840'));
 
-// Silver now uses the verified public 2025 S&P-modelled co-product curve from
-// Pan American. Percentiles are explicit best-estimate visual read-offs, with
-// read-off uncertainty retained as diagnostic context rather than a hard guard.
 assert.equal(TIER1_COST_BENCHMARKS.Ag.comparisonEnabled, true);
 assert.equal(TIER1_COST_BENCHMARKS.Ag.metric, 'AISC_AG_CO_PRODUCT_USD_PER_TOZ');
 assert.equal(TIER1_COST_BENCHMARKS.Ag.basisId, 'S_AND_P_CO_PRODUCT_AISC_AG');

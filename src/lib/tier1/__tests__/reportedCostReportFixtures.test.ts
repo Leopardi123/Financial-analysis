@@ -1,3 +1,4 @@
+import './warintzaCostBridge.test.ts';
 import assert from 'node:assert/strict';
 import { extractReportedCostEvidence, extractReportedCostEvidenceCandidates } from '../reportedCost.ts';
 import { assessReportedCostBenchmarkCompatibility } from '../reportedCostCompatibility.ts';
@@ -64,10 +65,10 @@ const berg = {
         reportedLabel: 'C1 cost – by-product basis',
         value: -0.17,
         unit: 'USD/lb',
-        definitionNotes: 'PFS Table 22-3 footnote 1: mine + mill + G&A + off-site costs + royalties less by-product credits. Table labels denominator US$/lb Cu; payable-vs-produced is not made explicit in the cost-table label.',
+        definitionNotes: 'PFS Table 22-3 footnote 1: mine + mill + G&A + off-site costs + royalties less by-product credits. Table 22-4 annual identities reproduce the published C1 rows using payable Cu, so the denominator is source-verified as payable primary metal.',
         primaryMetal: 'Cu',
         basis: 'net_by_product',
-        denominator: 'other',
+        denominator: 'payable_primary_metal',
         period: { kind: 'LOM' },
         byProductTreatment: 'credited',
         royaltyTreatment: 'included',
@@ -75,7 +76,7 @@ const berg = {
         costBaseYear: 2026,
         quality: 'reported_exact',
         sourceId: 'berg-pfs-2026',
-        pageOrTable: 'Table 22-3, pp.322-323',
+        pageOrTable: 'Table 22-3, pp.320-321; Table 22-4, pp.322-324',
       },
       {
         metric: 'C1_CU_USD_PER_LB',
@@ -95,7 +96,7 @@ const berg = {
         costBaseYear: 2026,
         quality: 'reported_exact',
         sourceId: 'berg-pfs-2026',
-        pageOrTable: 'Table 22-3, pp.322-323',
+        pageOrTable: 'Table 22-3, pp.320-321; Table 22-4, pp.322-324',
       },
     ],
   },
@@ -105,6 +106,7 @@ const bergCandidates = extractReportedCostEvidenceCandidates(berg, 'C1_CU_USD_PE
 assert.equal(bergCandidates.length, 2);
 assert.equal(bergCandidates[0].value, -0.17);
 assert.equal(bergCandidates[0].basis, 'net_by_product');
+assert.equal(bergCandidates[0].denominator, 'payable_primary_metal');
 assert.equal(bergCandidates[1].value, 1.95);
 assert.equal(bergCandidates[1].basis, 'co_product');
 assert.equal(bergCandidates[1].denominator, 'metal_equivalent');
@@ -119,5 +121,44 @@ const bergByProductCompatibility = assessReportedCostBenchmarkCompatibility({ ev
 assert.equal(bergByProductCompatibility.status, 'NOT_COMPARABLE');
 const bergCoProductCompatibility = assessReportedCostBenchmarkCompatibility({ evidence: bergCandidates[1], benchmark: TIER1_COST_BENCHMARKS.Cu });
 assert.equal(bergCoProductCompatibility.status, 'INSUFFICIENT_DEFINITION');
+
+const warintza = {
+  economicsBreakdown: {
+    reportedCostMetrics: [
+      {
+        metric: 'C1_CU_USD_PER_LB',
+        reportedLabel: 'C1 Cash cost',
+        value: 1.01,
+        unit: 'USD/lb',
+        definitionNotes: 'PFS Table 22.4: mining + processing + G&A + Cu/Mo TCRCs + royalties + streaming less Au/Ag/Mo by-product credits, expressed per payable Cu lb. Royal Gold stream economics are part of the reported definition.',
+        primaryMetal: 'Cu',
+        basis: 'net_by_product',
+        denominator: 'payable_primary_metal',
+        period: { kind: 'LOM' },
+        byProductTreatment: 'credited',
+        royaltyTreatment: 'included',
+        offSiteTreatment: 'included',
+        costBaseYear: null,
+        quality: 'reported_exact',
+        sourceId: 'warintza-pfs-2025',
+        pageOrTable: 'Table 22.4 p.345; Section 22.1.4 p.344',
+      },
+    ],
+  },
+};
+
+const warintzaEvidence = extractReportedCostEvidence(warintza, 'C1_CU_USD_PER_LB');
+assert.equal(warintzaEvidence.status, 'AVAILABLE');
+assert.equal(warintzaEvidence.value, 1.01);
+assert.equal(warintzaEvidence.basis, 'net_by_product');
+assert.equal(warintzaEvidence.denominator, 'payable_primary_metal');
+assert.equal(warintzaEvidence.byProductTreatment, 'credited');
+assert.equal(warintzaEvidence.royaltyTreatment, 'included');
+assert.equal(warintzaEvidence.offSiteTreatment, 'included');
+assert.equal(warintzaEvidence.costBaseYear, null);
+assert.equal(
+  assessReportedCostBenchmarkCompatibility({ evidence: warintzaEvidence, benchmark: TIER1_COST_BENCHMARKS.Cu }).status,
+  'NOT_COMPARABLE',
+);
 
 console.log('reportedCostReportFixtures.test.ts passed');

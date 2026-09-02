@@ -1,0 +1,77 @@
+/* Tier cost diagnostic hierarchy. UI-only: no cost/Tier calculation semantics live here. */
+.tier1-cost-card {
+  border: 1px solid rgba(20, 35, 32, 0.2);
+  background: rgba(255, 255, 255, 0.3);
+  padding: 12px;
+}
+
+.tier1-cost-card + .tier1-cost-card {
+  margin-top: 10px;
+}
+
+.tier1-cost-card__headline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.tier1-cost-card__headline > div {
+  min-width: 0;
+  border-left: 2px solid rgba(20, 35, 32, 0.18);
+  padding-left: 8px;
+}
+
+.tier1-cost-card__headline span {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+  opacity: 0.58;
+}
+
+.tier1-cost-card__headline strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.tier1-cost-card details,
+.tier1-reference-card details {
+  margin-top: 8px;
+  border-top: 1px solid rgba(20, 35, 32, 0.14);
+  padding-top: 8px;
+}
+
+.tier1-cost-card summary,
+.tier1-reference-card summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.tier1-reference-card {
+  border: 1px solid rgba(20, 35, 32, 0.24);
+  background: rgba(255, 255, 255, 0.24);
+  padding: 12px;
+}
+
+.tier1-reference-card__status {
+  margin: 0 0 10px;
+  border-left: 3px solid rgba(20, 35, 32, 0.4);
+  padding: 7px 9px;
+  background: rgba(255, 255, 255, 0.32);
+  line-height: 1.4;
+}
+
+.tier1-reference-separation-note {
+  margin-top: 10px !important;
+  padding: 8px 9px;
+  border: 1px dashed rgba(20, 35, 32, 0.24);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 620px) {
+  .tier1-cost-card__headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

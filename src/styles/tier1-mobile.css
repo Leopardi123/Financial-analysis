@@ -1,0 +1,89 @@
+/* Mobile readability overrides for the Tier · Pre Revenue modal.
+   Kept separate so the diagnostic layout can evolve without touching Tier logic. */
+
+.tier1-modal,
+.tier1-modal__header,
+.tier1-modal__section,
+.tier1-modal__gate,
+.tier1-modal__facts,
+.tier1-modal__facts > div,
+.tier1-modal__summary > div {
+  min-width: 0;
+}
+
+.tier1-modal__facts dd,
+.tier1-modal__facts dt,
+.tier1-modal__gate-reason,
+.tier1-modal__classification,
+.tier1-modal__section p,
+.tier1-modal__section li,
+.tier1-modal__summary strong {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+@media (max-width: 760px) {
+  .tier1-modal__backdrop {
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+  }
+
+  .tier1-modal {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .tier1-modal__facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .tier1-modal__facts > div {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    align-items: start;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 0;
+  }
+
+  .tier1-modal__facts dd {
+    min-width: 0;
+    text-align: right;
+  }
+
+  .tier1-modal__gate-head {
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 5px 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .tier1-modal {
+    padding: 14px;
+  }
+
+  .tier1-modal__facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .tier1-modal__facts dd {
+    text-align: left;
+    line-height: 1.35;
+  }
+
+  .tier1-modal__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tier1-modal__gate {
+    padding: 10px;
+  }
+
+  .tier1-modal__section h4 {
+    overflow-wrap: anywhere;
+  }
+}

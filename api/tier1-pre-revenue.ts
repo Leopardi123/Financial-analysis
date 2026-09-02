@@ -1,13 +1,22 @@
 import preRevenueHandler from '../src/server/routes/tier1/pre-revenue.ts';
 import { loadProjectsForSymbol } from '../src/lib/api/loadProjectsForSymbol.ts';
 import { parseProjectJsonV1 } from '../src/lib/project/jsonv1/parse.ts';
+import { isProjectJsonV3 } from '../src/lib/project/jsonv3/compile.ts';
 import { resolveProjectPricesToEngineInput } from '../src/lib/project/jsonv1/resolvePrices.ts';
 import { computeProjectEngineFullProductionV1 } from '../src/lib/project/engineFullProductionV1.ts';
 import { computeIrr } from '../src/lib/metrics/lista3.ts';
 import { TIER1_COST_BENCHMARKS, type Tier1Metal } from '../src/lib/tier1/config.ts';
-import { assessCapitalReturns, classifyTier } from '../src/lib/tier1/preRevenue.ts';
+import { assessCapitalReturns, assessCost, classifyTier } from '../src/lib/tier1/preRevenue.ts';
 import { selectConservativeProjectIrr, type ProjectIrrObservation } from '../src/lib/tier1/projectIrr.ts';
 import { extractReportedCostEvidenceCandidates } from '../src/lib/tier1/reportedCost.ts';
+import { runTier1CostNormalizationRecipes } from '../src/lib/tier1/costNormalizationRecipe.ts';
+import { reconstructSourceLockedCuCoProductC1 } from '../src/lib/tier1/costCoProductReconstruction.ts';
+import {
+  assessCostPositionAgainstReference,
+  assessSAndPCuRawReferenceCompatibility,
+  buildSAndPCu2024CostPositionReference,
+  technicalReportCostEvidenceClass,
+} from '../src/lib/tier1/costPosition.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
 function finite(value: unknown): value is number {
@@ -122,6 +131,165 @@ async function collectReportedCostEvidence(symbol: string, primaryMetal: Tier1Me
   return details;
 }
 
+async function applySourceLockedCostRecipes(args: {
+  loaded: Awaited<ReturnType<typeof loadProjectsForSymbol>>;
+  assessment: any;
+}): Promise<void> {
+  const { loaded, assessment } = args;
+  const batches: Array<{
+    projectId: string;
+    raw: any;
+    result: Awaited<ReturnType<typeof runTier1CostNormalizationRecipes>>;
+  }> = [];
+
+  for (const project of loaded) {
+    if (!isProjectJsonV3(project.rawJson)) continue;
+    const result = await runTier1CostNormalizationRecipes(project.rawJson);
+    batches.push({ projectId: project.projectId, raw: project.rawJson, result });
+  }
+
+  if (batches.length === 0) return;
+  assessment.support = assessment.support ?? {};
+  assessment.support.costNormalizationRecipes = batches.map(({ projectId, result }) => ({ projectId, result }));
+  assessment.diagnostics = Array.isArray(assessment.diagnostics) ? assessment.diagnostics : [];
+
+  for (const batch of batches) {
+    assessment.diagnostics.push(`Kostnadsnormalisering ${batch.projectId}: ${batch.result.reason}`);
+    for (const run of batch.result.runs) {
+      if (run.normalized.status !== 'NORMALIZED') {
+        assessment.diagnostics.push(`Kostnadsnormalisering ${batch.projectId}/${run.recipeId}: ${run.normalized.reason}`);
+      } else if (run.benchmarkReadiness?.status === 'NOT_VERIFIED') {
+        assessment.diagnostics.push(`Kostnadsbenchmark ${batch.projectId}/${run.recipeId}: Ej verifierad · ${run.benchmarkReadiness.blockers.join(', ')}.`);
+      }
+    }
+  }
+
+  if (assessment.primaryMetal === 'Cu') {
+    const reference = buildSAndPCu2024CostPositionReference();
+    if (reference) {
+      const costPositionEvidence: any[] = [];
+      for (const batch of batches) {
+        for (const run of batch.result.runs) {
+          if (run.normalized.status !== 'NORMALIZED') continue;
+          const sourceId = batch.result.reportSourceId;
+          const coProduct = await reconstructSourceLockedCuCoProductC1({
+            raw: batch.raw,
+            recipeId: run.recipeId,
+            normalized: run.normalized,
+          });
+
+          let measuredMetric = run.normalized.metric;
+          let measuredValue = run.normalized.value;
+          let measuredUnit = run.normalized.unit;
+          let measuredCostBaseYear = run.normalized.costBaseYear;
+          let semanticCompatibility = assessSAndPCuRawReferenceCompatibility(run.normalized);
+          let measurementRole: 'REPORT_DEFINED' | 'RECONSTRUCTED_CO_PRODUCT' = 'REPORT_DEFINED';
+          let reasonPrefix = '';
+
+          if (coProduct.status === 'RECONSTRUCTED') {
+            measuredMetric = coProduct.metric;
+            measuredValue = coProduct.value;
+            measuredUnit = coProduct.unit;
+            measuredCostBaseYear = coProduct.costBaseYear;
+            measurementRole = 'RECONSTRUCTED_CO_PRODUCT';
+            semanticCompatibility = { status: 'COMPATIBLE_FOR_RAW_REFERENCE', blockers: [] };
+            reasonPrefix = `${coProduct.reason} Kvarvarande metodbegränsningar: ${coProduct.limitations.join('; ')}. `;
+            assessment.diagnostics.push(
+              `Co-product reconstruction ${batch.projectId}/${run.recipeId}: ${coProduct.value.toFixed(4)} USD/lb payable Cu · ${coProduct.allocationRevenueBasis} · source=${run.normalized.value.toFixed(4)} ${run.normalized.metric}.`,
+            );
+          }
+
+          const position = assessCostPositionAgainstReference({
+            measuredMetric,
+            value: measuredValue,
+            unit: measuredUnit,
+            costBaseYear: measuredCostBaseYear,
+            costEvidenceClass: technicalReportCostEvidenceClass(sourceId),
+            semanticCompatibility,
+            reference,
+          });
+          costPositionEvidence.push({
+            projectId: batch.projectId,
+            recipeId: run.recipeId,
+            reportSourceId: sourceId,
+            benchmarkReadiness: run.benchmarkReadiness,
+            measurementRole,
+            sourceMeasurement: {
+              metric: run.normalized.metric,
+              value: run.normalized.value,
+              unit: run.normalized.unit,
+              basis: run.normalized.basis,
+            },
+            coProductReconstruction: coProduct,
+            reference: {
+              id: reference.id,
+              metric: reference.metric,
+              dataYear: reference.dataYear,
+              q1Max: reference.q1Max,
+              p50Max: reference.p50Max,
+              p75Max: reference.p75Max,
+              unit: reference.unit,
+              denominatorLabel: reference.denominatorLabel,
+              sourceRole: reference.sourceRole,
+              activationAllowed: reference.activationAllowed,
+            },
+            ...position,
+            reason: `${reasonPrefix}${position.reason}`,
+          });
+        }
+      }
+      assessment.support.costPositionReference = reference;
+      assessment.support.costPositionEvidence = costPositionEvidence;
+
+      const reconstructed = costPositionEvidence.filter((row) => row.measurementRole === 'RECONSTRUCTED_CO_PRODUCT');
+      if (assessment.gates.cost?.status === 'NOT_VERIFIED' && reconstructed.length === 1) {
+        const row = reconstructed[0];
+        const source = row.sourceMeasurement;
+        const reconstruction = row.coProductReconstruction;
+        assessment.gates.cost.reason = `Rapportdefinierad ${source.metric} har rekonstruerats till ${row.measuredCost.toFixed(3)} USD/lb payable Cu på co-product-basis (${reconstruction.allocationRevenueBasis}). Rå S&P-position: ${row.rawReferencePosition}. Hard Cost Tier förblir Ej verifierad eftersom den exakta S&P 2024-allokeringsvektorn/component boundary/vintage-metoden${reconstruction.reportSourceId === 'warintza-pfs-2025' ? ' och streambehandlingen' : ''} inte är verifierade.`;
+      }
+
+      for (const row of costPositionEvidence) {
+        assessment.diagnostics.push(
+          `Cost position ${row.projectId}/${row.recipeId}: role=${row.measurementRole} · ${row.comparability} · ${row.rawReferencePosition} · semanticBlockers=[${row.semanticBlockers.join(', ')}] · ${row.reason} Påverkar inte Tier-gaten.`,
+        );
+      }
+    }
+  }
+
+  if (assessment.primaryMetal !== 'Cu') return;
+  const eligible = batches.flatMap((batch) => batch.result.runs.flatMap((run) => (
+    run.normalized.status === 'NORMALIZED'
+      && run.normalized.metric === TIER1_COST_BENCHMARKS.Cu.metric
+      && run.benchmarkReadiness?.status === 'VERIFIED'
+      ? [{ projectId: batch.projectId, recipeId: run.recipeId, normalized: run.normalized }]
+      : []
+  )));
+
+  if (eligible.length > 1) {
+    assessment.diagnostics.push(`Kostnad Cu: ${eligible.length} benchmark-kompatibla source-locked recipes hittades. Ingen väljs implicit; Cost Tier förblir oförändrad.`);
+    return;
+  }
+  if (eligible.length !== 1) return;
+
+  const candidate = eligible[0];
+  const costGate = assessCost({
+    primaryMetal: 'Cu',
+    primaryMetalRevenueShare: finite(assessment.primaryMetalRevenueShare) ? assessment.primaryMetalRevenueShare : null,
+    costMetricValues: { C1_CU_USD_PER_LB: candidate.normalized.value },
+    nowUtc: new Date().toISOString(),
+  });
+  assessment.gates.cost = costGate;
+  assessment.support.costMetric = 'C1_CU_USD_PER_LB';
+  assessment.support.costMetricValue = candidate.normalized.value;
+  assessment.support.costMetricSource = {
+    kind: 'SOURCE_LOCKED_NORMALIZATION_RECIPE',
+    projectId: candidate.projectId,
+    recipeId: candidate.recipeId,
+  };
+  assessment.diagnostics.push(`Kostnad Cu: source-locked recipe ${candidate.projectId}/${candidate.recipeId} passerade benchmark-readiness och matades till canonical Cost Tier-gate.`);
+}
+
 export default async function handler(req: any, res: any): Promise<void> {
   let capturedStatus = 200;
   let capturedBody: any = null;
@@ -144,8 +312,6 @@ export default async function handler(req: any, res: any): Promise<void> {
     try {
       const loaded = await loadProjectsForSymbol(symbol);
 
-      // Policy-only multi-project cap. Every observation is still calculated from
-      // the same canonical Project parser/engine used elsewhere.
       if (loaded.length > 1) {
         const observations = await computeProjectIrrObservations(symbol);
         const selection = selectConservativeProjectIrr(observations);
@@ -179,8 +345,6 @@ export default async function handler(req: any, res: any): Promise<void> {
         }
       }
 
-      // Reported C1/AISC is now evidence/checkpoint only. It is deliberately not
-      // passed to assessCostAgainstBenchmark and cannot replace canonical Project economics.
       if (assessment.primaryMetal) {
         const evidence = await collectReportedCostEvidence(symbol, assessment.primaryMetal as Tier1Metal);
         assessment.support = assessment.support ?? {};
@@ -190,6 +354,8 @@ export default async function handler(req: any, res: any): Promise<void> {
           assessment.diagnostics.push('Kostnad: rapporterade C1/AISC-värden visas endast som checkpoints; Tier-cost kommer från canonical Project-ekonomi och får inte override:as av rapportmåttet.');
         }
       }
+
+      await applySourceLockedCostRecipes({ loaded, assessment });
 
       const cyclePriceDisplay = await buildTierCyclePriceDisplay(
         symbol,

@@ -5,10 +5,16 @@ import type { StreamMVIConfig } from '../streams/types.ts';
 export type ProjectJsonV3CostComponentCategory = 'mining' | 'processing' | 'site_ga' | 'other_site_opex';
 export type ProjectJsonV3SellingComponentCategory = 'treatment_charge' | 'refining_charge' | 'transport' | 'insurance' | 'marketing' | 'other_offsite';
 export type ProjectJsonV3SeriesComponent<TCategory extends string> = { id: string; label?: string | null; category: TCategory; seriesUSD: Array<number | null>; sourceId?: string | null; pageOrTable?: string | null };
+export type ProjectJsonV3CostAllocation =
+  | { mode: 'MIXED_REVENUE_WEIGHTED' }
+  | { mode: 'DIRECT_TO_METAL'; metal: string };
+export type ProjectJsonV3CostComponent = ProjectJsonV3SeriesComponent<ProjectJsonV3CostComponentCategory> & {
+  allocation?: ProjectJsonV3CostAllocation | null;
+};
 export type ProjectJsonV3CostModel =
   | { mode: 'UNKNOWN' }
   | { mode: 'AGGREGATE'; operatingCostsUSD: Array<number | null>; siteGandA_USD?: Array<number | null> | null }
-  | { mode: 'COMPONENTS'; components: Array<ProjectJsonV3SeriesComponent<ProjectJsonV3CostComponentCategory>> };
+  | { mode: 'COMPONENTS'; components: Array<ProjectJsonV3CostComponent> };
 export type ProjectJsonV3SellingModel =
   | { mode: 'UNKNOWN' }
   | { mode: 'NONE' }
