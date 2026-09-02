@@ -1,4 +1,4 @@
-import './publicCuCostCurve.test.ts';
+import './publicCuCostCurveBatch2.test.ts';
 import assert from 'node:assert/strict';
 import {
   assessNormalizedCuC1BenchmarkReadiness,
