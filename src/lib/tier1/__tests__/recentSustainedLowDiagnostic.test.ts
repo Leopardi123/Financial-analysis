@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { query } from '../../../../api/_db.ts';
+import { ensureSchema, tables } from '../../../../api/_migrate.ts';
+import tier1PreRevenueHandler from '../../../server/routes/tier1/pre-revenue.ts';
 import { readHistoryRowsInRange } from '../../prices/db/readHistory.ts';
 import type { PriceKey } from '../../prices/keys.ts';
 import { analyzeRecentSustainedLows } from '../recentSustainedLow.ts';
@@ -43,10 +46,157 @@ const SERIES = [
 
 const LOOKBACK_YEARS = [5, 6, 7, 8, 9, 10] as const;
 
+function finite(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 function dateYearsAgo(to: string, yearsAgo: number): string {
   const date = new Date(`${to}T00:00:00Z`);
   date.setUTCFullYear(date.getUTCFullYear() - yearsAgo);
   return date.toISOString().slice(0, 10);
+}
+
+function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = (sorted.length - 1) * p;
+  const lo = Math.floor(index);
+  const hi = Math.ceil(index);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (index - lo);
+}
+
+type CandidateTier = 'T1' | 'T2' | 'T3' | 'FAIL';
+
+type CycleDiagnosticRow = {
+  symbol: string;
+  baseNpv: number;
+  stressNpv: number;
+  retention: number;
+  drawdown: number;
+  baseIrr: number;
+  baseNpvOverCapex: number | null;
+  stressNpvOverCapex: number | null;
+  currentCycleStatus: string;
+};
+
+function candidateRetention(row: CycleDiagnosticRow): CandidateTier {
+  if (!(row.stressNpv > 0)) return 'FAIL';
+  if (row.retention >= 0.70) return 'T1';
+  if (row.retention >= 0.30) return 'T2';
+  return 'T3';
+}
+
+function candidateRetentionIrr(row: CycleDiagnosticRow): CandidateTier {
+  if (!(row.stressNpv > 0)) return 'FAIL';
+  if (row.retention >= 0.70 && row.baseIrr >= 0.25) return 'T1';
+  if (row.retention >= 0.40 && row.baseIrr >= 0.20) return 'T2';
+  return 'T3';
+}
+
+function candidateRetentionStressCapex(row: CycleDiagnosticRow): CandidateTier {
+  if (!(row.stressNpv > 0)) return 'FAIL';
+  if (finite(row.stressNpvOverCapex) && row.retention >= 0.65 && row.stressNpvOverCapex >= 0.50) return 'T1';
+  if (finite(row.stressNpvOverCapex) && row.retention >= 0.35 && row.stressNpvOverCapex >= 0.15) return 'T2';
+  return 'T3';
+}
+
+function distribution(rows: CycleDiagnosticRow[], classifier: (row: CycleDiagnosticRow) => CandidateTier): string {
+  const counts: Record<CandidateTier, number> = { T1: 0, T2: 0, T3: 0, FAIL: 0 };
+  for (const row of rows) counts[classifier(row)] += 1;
+  return `T1=${counts.T1} T2=${counts.T2} T3=${counts.T3} FAIL=${counts.FAIL}`;
+}
+
+async function runTierHandler(symbol: string): Promise<any> {
+  let payload: any = null;
+  let statusCode = 200;
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(body: unknown) {
+      payload = body;
+      return this;
+    },
+  };
+  await tier1PreRevenueHandler({ method: 'GET', query: { symbol } }, res);
+  if (statusCode >= 400) throw new Error(`${symbol}: HTTP ${statusCode}`);
+  return payload;
+}
+
+async function runUniverseCycleDiagnostic(): Promise<void> {
+  await ensureSchema();
+  const symbolRows = await query(
+    `SELECT DISTINCT UPPER(symbol) AS symbol FROM ${tables.companyProjects} ORDER BY UPPER(symbol)`,
+  ) as Array<{ symbol?: string }>;
+  const symbols = symbolRows.map((row) => String(row.symbol ?? '').trim().toUpperCase()).filter(Boolean);
+  const rows: CycleDiagnosticRow[] = [];
+  const unavailable: string[] = [];
+
+  console.log('CYCLE_TIER_UNIVERSE_DIAGNOSTIC_BEGIN');
+  for (const symbol of symbols) {
+    try {
+      const body = await runTierHandler(symbol);
+      const assessment = body?.assessment;
+      const support = assessment?.support;
+      const baseNpv = support?.tierBaseNpv10Usd;
+      const stressNpv = support?.cycleNpv10Usd;
+      const baseIrr = support?.tierBaseIrr;
+      const baseNpvOverCapex = support?.tierBaseNpvOverInitialCapex;
+      if (!finite(baseNpv) || !(baseNpv > 0) || !finite(stressNpv) || !finite(baseIrr)) {
+        unavailable.push(`${symbol}:${assessment?.status ?? 'NO_ASSESSMENT'}`);
+        continue;
+      }
+      const retention = stressNpv / baseNpv;
+      const stressNpvOverCapex = finite(baseNpvOverCapex) ? retention * baseNpvOverCapex : null;
+      rows.push({
+        symbol,
+        baseNpv,
+        stressNpv,
+        retention,
+        drawdown: 1 - retention,
+        baseIrr,
+        baseNpvOverCapex: finite(baseNpvOverCapex) ? baseNpvOverCapex : null,
+        stressNpvOverCapex,
+        currentCycleStatus: assessment?.gates?.cycle?.status ?? 'UNKNOWN',
+      });
+    } catch (error) {
+      unavailable.push(`${symbol}:ERROR:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  rows.sort((a, b) => a.retention - b.retention || a.symbol.localeCompare(b.symbol));
+  for (const row of rows) {
+    console.log(
+      `CYCLE_COMPANY ${row.symbol} retention=${row.retention.toFixed(4)} drawdown=${row.drawdown.toFixed(4)} ` +
+      `baseIRR=${row.baseIrr.toFixed(4)} baseNPV=${row.baseNpv.toFixed(0)} stressNPV=${row.stressNpv.toFixed(0)} ` +
+      `baseNPV_CAPEX=${row.baseNpvOverCapex === null ? 'null' : row.baseNpvOverCapex.toFixed(4)} ` +
+      `stressNPV_CAPEX=${row.stressNpvOverCapex === null ? 'null' : row.stressNpvOverCapex.toFixed(4)} ` +
+      `current=${row.currentCycleStatus} retOnly=${candidateRetention(row)} retIRR=${candidateRetentionIrr(row)} retStressCapex=${candidateRetentionStressCapex(row)}`,
+    );
+  }
+
+  const retentionValues = rows.map((row) => row.retention);
+  const irrValues = rows.map((row) => row.baseIrr);
+  const stressCapexValues = rows.map((row) => row.stressNpvOverCapex).filter((value): value is number => finite(value));
+  console.log(
+    `CYCLE_DISTRIBUTION retention p25=${percentile(retentionValues, 0.25)?.toFixed(4) ?? 'null'} ` +
+    `p50=${percentile(retentionValues, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(retentionValues, 0.75)?.toFixed(4) ?? 'null'}`,
+  );
+  console.log(
+    `CYCLE_DISTRIBUTION baseIRR p25=${percentile(irrValues, 0.25)?.toFixed(4) ?? 'null'} ` +
+    `p50=${percentile(irrValues, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(irrValues, 0.75)?.toFixed(4) ?? 'null'}`,
+  );
+  console.log(
+    `CYCLE_DISTRIBUTION stressNPV_CAPEX p25=${percentile(stressCapexValues, 0.25)?.toFixed(4) ?? 'null'} ` +
+    `p50=${percentile(stressCapexValues, 0.50)?.toFixed(4) ?? 'null'} p75=${percentile(stressCapexValues, 0.75)?.toFixed(4) ?? 'null'}`,
+  );
+  console.log(`CYCLE_CANDIDATE retention_70_30 ${distribution(rows, candidateRetention)}`);
+  console.log(`CYCLE_CANDIDATE retention_plus_baseIRR ${distribution(rows, candidateRetentionIrr)}`);
+  console.log(`CYCLE_CANDIDATE retention_plus_stressNPV_CAPEX ${distribution(rows, candidateRetentionStressCapex)}`);
+  if (unavailable.length > 0) console.log(`CYCLE_UNAVAILABLE ${unavailable.join('|')}`);
+  console.log(`CYCLE_TIER_UNIVERSE_DIAGNOSTIC_END computable=${rows.length} totalSymbols=${symbols.length}`);
 }
 
 (async function runLiveDatabaseDiagnostic() {
@@ -71,6 +221,7 @@ function dateYearsAgo(to: string, yearsAgo: number): string {
     }
   }
   console.log('RECENT_LOW_LIVE_DIAGNOSTIC_END');
+  await runUniverseCycleDiagnostic();
   console.log('recentSustainedLowDiagnostic.test.ts passed');
 })().catch((error) => {
   console.error(error);
