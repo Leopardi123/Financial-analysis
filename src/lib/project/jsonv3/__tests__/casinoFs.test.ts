@@ -58,7 +58,7 @@ async function runReportEngine(raw: ProjectJsonV3) {
   const raw = CASINO_FS_V3;
   assert(raw.time.masterN === 35, 'Table 22-6 must map 36 relative periods to masterN=35');
   assert(raw.time.productionStartPeriod === 2, 'Heap-leach payable metal first appears in Year -2 / t=2');
-  assert(raw.time.nameplateCapacityPeriod === 4, 'Commercial concentrator Year 1 must be nameplate period t=4');
+  assert(raw.time.nameplateCapacityPeriod === 5, 'First concentrator year at or above nominal 43.8 Mt/y is report Year 2 / t=5');
   assert(CASINO_REPORT_PERIODS.join(',') === '-4,-3,-2,-1,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32', 'Report period labels must be preserved exactly');
   assert(raw.time.runtimePlacement == null, 'Do not reuse the stale 2022 absolute execution schedule as current 2026 runtime guidance');
 
@@ -90,6 +90,7 @@ async function runReportEngine(raw: ProjectJsonV3) {
   const stress = CASINO_FS_INFLATION_STRESS_V3;
   assert(stress.verification == null, 'Inflation stress is user-defined and must not claim report reconciliation');
   assert(stress.time.runtimePlacement == null, 'Stress case must not invent a current calendar placement');
+  assert(stress.time.nameplateCapacityPeriod === raw.time.nameplateCapacityPeriod && stress.time.nameplateCapacityPeriod === 5, 'Stress case must preserve the corrected baseline nameplate period');
   scaledSeries(stress.capital.capexUSD, raw.capital.capexUSD, 1.5, 'initial CAPEX');
   scaledSeries(stress.capital.sustainingCapexUSD, raw.capital.sustainingCapexUSD, 1.5, 'sustaining CAPEX');
   assert(Array.isArray(stress.economics.depreciationUSD) && Array.isArray(raw.economics.depreciationUSD), 'Stress depreciation must remain source-based');
