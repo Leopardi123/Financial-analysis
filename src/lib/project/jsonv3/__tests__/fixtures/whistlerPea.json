@@ -1,0 +1,87 @@
+{
+  "version": "project_json_v3",
+  "meta": {
+    "projectId": "whistler-pea-2026-golden",
+    "projectName": "Whistler Gold-Copper Project",
+    "currency": "USD",
+    "notes": "U.S. GoldMining / GoldMining 2026 PEA golden fixture. Built from the intact Whistler NI 43-101 PEA on Google Drive; the duplicate file named US_GoldMining_Whistler_NI43-101_PEA_2026.pdf is structurally corrupt and was not used. Calendar placement is user-defined with first production in 2034; report-relative periods and economics remain unchanged."
+  },
+  "time": {
+    "masterN": 16,
+    "productionStartPeriod": 2,
+    "nameplateCapacityPeriod": 3,
+    "reportPeriodLabels": ["-2", "-1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+    "phaseByPeriod": ["construction", "construction", "ramp_up", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "closure"],
+    "runtimePlacement": {
+      "constructionStart": {"year": 2032, "sourceId": "user-production-start-2034", "pageOrTable": "User instruction: production start 2034", "asOfDate": "2026-09-03", "notes": "Derived from the PEA's two-year construction and commissioning period."},
+      "productionStart": {"year": 2034, "sourceId": "user-production-start-2034", "pageOrTable": "User instruction: production start 2034", "asOfDate": "2026-09-03"},
+      "nameplateCapacity": {"year": 2035, "sourceId": "user-production-start-2034", "pageOrTable": "Table 22-4 p.276: Year 2 is the first full 14.6 Mt processed year", "asOfDate": "2026-09-03", "notes": "User production-start anchor plus report-relative first full annual processing period."},
+      "notes": "User-defined calendar placement. Relative report periods are fixed: -2, -1, then production Years 1-15. Replace all anchors together if later verified company guidance changes the schedule."
+    }
+  },
+  "metals": {
+    "payableQtyByMetal": {
+      "Cu": [0,0,43600000,56900000,52100000,39700000,40200000,41800000,42300000,40600000,37900000,33800000,28300000,36100000,31800000,28400000,14500000],
+      "Au": [0,0,222500,251400,289100,119700,195400,249900,263000,131800,202700,121700,64100,133200,169000,139000,35200],
+      "Ag": [0,0,546000,661000,528000,390000,410000,471000,531000,487000,389000,414000,425000,392000,329000,390000,234000]
+    },
+    "metalInProductQtyByMetal": null,
+    "revenueBasisByMetal": {"Cu":"PAYABLE_DIRECT","Au":"PAYABLE_DIRECT","Ag":"PAYABLE_DIRECT"},
+    "payableQtyUnitByMetal": {"Cu":"lb","Au":"toz","Ag":"toz"},
+    "priceKeyByMetal": {"Cu":"CU_USD_LB","Au":"XAU_USD_TOZ","Ag":"XAG_USD_TOZ"},
+    "auPriceKey": "XAU_USD_TOZ"
+  },
+  "streamsByMetal": null,
+  "economics": {
+    "costModel": {"mode":"COMPONENTS","components":[
+      {"id":"mining","label":"Mining Costs (operating periods only; pre-production capitalized mining OPEX is in initial CAPEX)","category":"mining","seriesUSD":[0,0,81100000,91700000,106300000,147600000,152700000,171200000,158600000,128800000,126100000,155200000,134000000,98700000,63300000,50300000,11000000],"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-4 p.277"},
+      {"id":"processing","label":"Processing Costs","category":"processing","seriesUSD":[0,0,141700000,160300000,160300000,160300000,160200000,160300000,160300000,160200000,160300000,160300000,160300000,160300000,160300000,160300000,100900000],"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-4 p.277"},
+      {"id":"site_ga","label":"G&A","category":"site_ga","seriesUSD":[0,0,23300000,27400000,27400000,27400000,27400000,27400000,27400000,27400000,27400000,27400000,27400000,27400000,27400000,27400000,17200000],"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-4 p.277"}
+    ]},
+    "sellingModel": {"mode":"COMPONENTS","components":[
+      {"id":"concentrate_transport","label":"Concentrate Transport Costs","category":"transport","seriesUSD":[0,0,14300000,18700000,17100000,13000000,13200000,13800000,13900000,13300000,12400000,11100000,9300000,11900000,10400000,9300000,4800000],"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-4 p.277"},
+      {"id":"concentrate_treatment","label":"Concentrate Treatment Costs","category":"treatment_charge","seriesUSD":[0,0,5400000,7000000,6400000,4900000,4900000,5100000,5200000,5000000,4700000,4100000,3500000,4400000,3900000,3500000,1800000],"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-4 p.277"},
+      {"id":"concentrate_refining","label":"Concentrate Refining Charges","category":"refining_charge","seriesUSD":[0,0,3800000,4800000,4600000,3200000,3500000,3700000,3800000,3300000,3300000,2800000,2200000,3000000,2800000,2500000,1200000],"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-4 p.277"},
+      {"id":"dore_transport_refining","label":"Doré Transport and Refining Charges","category":"other_offsite","seriesUSD":[0,0,200000,300000,300000,100000,200000,300000,300000,200000,200000,100000,100000,100000,200000,200000,100000],"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-4 p.277"}
+    ]},
+    "fiscalTakeModel": {"mode":"RULES","items":[],"reportLockedItems":[
+      {"id":"project_nsr_royalty","label":"3.0% project NSR royalty","reportFiscalTakeUSD":[0,0,27100000,31600000,34500000,16700000,24000000,29500000,30900000,18000000,24400000,16200000,10000000,17500000,20400000,17200000,5400000],"placement":"REVENUE_DEDUCTION","runtimeProxyRule":{"id":"project_nsr_royalty_runtime","label":"3.0% project NSR royalty runtime proxy","placement":"REVENUE_DEDUCTION","base":{"line":"NET_SMELTER_RETURN"},"rate":{"type":"FIXED","rate":0.03},"start_t":2,"end_t":16,"sourceId":"whistler-pea-2026","pageOrTable":"Section 22.3.5 p.272"},"sourceId":"whistler-pea-2026","pageOrTable":"Section 22.3.5 p.272; Table 22-4 pp.276-277","notes":"Report leg uses the annual royalty row exactly. Runtime proxy applies the disclosed 3.0% NSR to canonical net smelter return."}
+    ]},
+    "taxModel": {"mode":"REPORT_LOCKED_WITH_RUNTIME_PROXY","reportTaxCashFlowUSD":[0,-1000000,-12000000,-61000000,-118000000,-21000000,-80000000,-119000000,-133000000,-67000000,-100000000,-50000000,-15000000,-47000000,-89000000,-75000000,-14000000],"runtime":{"method":"NOMINAL_RATE_WITH_LOSS_CARRYFORWARD","taxRate":0.28426},"notes":"REPORT: annual aggregate Taxes Payable from Table 22-4, including the report tax model's U.S. federal/state income tax, Alaska Mining License, Alaska Production Royalty and Matanuska-Susitna Borough property-tax effects. RUNTIME: source-backed headline corporate-income-tax proxy only: 21% U.S. federal plus Alaska's 9.4% top corporate rate after federal deductibility = 28.426%, with loss carryforward. The PEA-specific FDII, bonus depreciation, unit-of-production depreciation, percentage depletion, Alaska mining-license/production-royalty and property-tax mechanics are not guessed into runtime; report reconciliation always uses the locked report series."},
+    "depreciationUSD": null
+  },
+  "capital": {
+    "capexUSD":[295500000,982900000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    "sustainingCapexUSD":[0,0,52400000,51600000,59500000,125900000,44200000,1800000,7500000,22500000,6900000,4800000,2600000,1000000,300000,0,0],
+    "closureUSD":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,98700000],
+    "workingCapitalDeltaUSD": null,
+    "terminalProceedsUSD": null
+  },
+  "operations": {"capacity":{"throughputUnit":"tpd","nameplateThroughput":40000,"utilizationPct":null},"oreMilledTonnes":[0,0,12400000,14600000,14600000,14600000,14600000,14600000,14600000,14600000,14600000,14600000,14600000,14600000,14600000,14600000,9169000],"oreMinedTonnes":[0,5335000,15565000,20724000,14418000,15655000,22533000,18092000,17098000,15199000,14645000,6753000,6108000,15561000,14920000,8761000,0],"oreTonnageUnit":"tonne"},
+  "verification": {
+    "report": {
+      "sourceId":"whistler-pea-2026",
+      "npvIrrPageOrTable":"Section 22.4 p.272 and Table 22-3 pp.274-275",
+      "pricesPageOrTable":"Section 22.3.1 pp.270-271 and Table 22-4 p.276",
+      "periodsPageOrTable":"Table 22-4 pp.276-277 (columns -2, -1, 1...15 mapped directly to relative t=0...16)",
+      "discountRate":0.05,
+      "discountConvention":"mid_year",
+      "priceDeckByKey":{"CU_USD_LB":4.5,"XAU_USD_TOZ":3200,"XAG_USD_TOZ":37.5},
+      "reportNPVPostTaxUSD":2038800000,
+      "reportIRRPostTax":0.33,
+      "reportNPVPreTaxUSD":2688200000,
+      "reportIRRPreTax":0.38,
+      "toleranceRelative":0.02,
+      "reportInitialCapexUSD":1278600000,
+      "reportSustainingCapexUSD":381100000,
+      "reportClosureUSD":98700000,
+      "reportClosurePeriod":16,
+      "assumptionsPageOrTable":"Sections 22.2-22.4 pp.270-272; Tables 22-1 to 22-4 pp.272, 274-277; Table 21-1 p.257",
+      "assumptionsNotes":"100% project basis and 100% equity funding; two-year construction/commissioning; 14.6-year mine life; constant Q4 2025 US dollars with no inflation/escalation; Cu US$4.50/lb, Au US$3,200/oz, Ag US$37.50/oz; 3.0% project NSR after assumed pre-construction royalty negotiations/buydowns; all cash flows discounted to the start of construction using mid-period discounting; products sold in year produced; working-capital assumptions AR 0 days / inventory 30 days / AP 30 days; closure US$98.7m and no salvage. Table 22-4 publishes no separate working-capital cash-flow row, and its pre-tax FCFF reconciles from EBITDA less CAPEX/closure within rounding, so no unreported working-capital balancing series is invented."
+    },
+    "reportedCostCheckpoints":[
+      {"metric":"CASH_COST_AU_USD_PER_OZ","value":861,"unit":"USD/oz Au","period":{"kind":"LOM"},"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-3 p.275; Table 22-4 p.277","definitionNotes":"PEA total cash cost on a by-product basis."},
+      {"metric":"AISC_AU_USD_PER_OZ","value":1046,"unit":"USD/oz Au","period":{"kind":"LOM"},"sourceId":"whistler-pea-2026","pageOrTable":"Table 22-3 p.275; Table 22-4 p.277","definitionNotes":"PEA all-in sustaining cost on a by-product basis."}
+    ]
+  }
+}
