@@ -1,0 +1,88 @@
+{
+  "version": "project_json_v3",
+  "meta": {
+    "projectId": "porcupine-complex-pea-2025-golden",
+    "projectName": "Porcupine Complex",
+    "currency": "USD",
+    "notes": "NI 43-101 PEA report-reconciliation fixture in real Q4 2024 USD on a 100% basis. The economic model begins in 2025 while the complex is already producing. Payable gold is derived period by period from reported gross revenue divided by the report gold-price curve, preserving revenue without a balancing item. Rounded annual cash-flow rows are modeled directly; non-cash cost-of-sales inventory adjustments and reclamation accretion are excluded. No invented balances or royalty allocations are used."
+  },
+  "time": {
+    "masterN": 23,
+    "productionStartPeriod": 0,
+    "nameplateCapacityPeriod": 3,
+    "reportPeriodLabels": ["2025","2026","2027","2028","2029","2030","2031","2032","2033","2034","2035","2036","2037","2038","2039","2040","2041","2042","2043","2044","2045","2046","2047","2048-2068"],
+    "phaseByPeriod": ["operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","operations","closure"],
+    "runtimePlacement": {
+      "productionStart": {"year":2025,"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-3 pp.22-5 to 22-7","asOfDate":"2025-01-13","notes":"The operation is already producing; 2025 is the first year of the report economic model, not a greenfield start date."},
+      "nameplateCapacity": {"year":2028,"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-3 pp.22-5 to 22-7","asOfDate":"2025-01-13","notes":"First report year with 4.3 Mt milled."},
+      "notes": "Report calendar retained exactly. productionStartPeriod=0 derives already-producing status without shifting the report timeline."
+    }
+  },
+  "metals": {
+    "payableQtyByMetal": {
+      "Au": [222049.6894409938,259259.25925925927,270414.4443988502,300465.11627906974,320000,334418.6046511628,337674.4186046512,334418.6046511628,276744.18604651163,218139.53488372092,168372.09302325582,163720.93023255814,174418.60465116278,134418.60465116278,133953.48837209302,164651.16279069767,168372.09302325582,140000,170697.67441860465,181395.3488372093,203720.93023255814,148837.2093023256,92558.13953488372,0]
+    },
+    "metalInProductQtyByMetal": null,
+    "revenueBasisByMetal": {"Au":"PAYABLE_DIRECT"},
+    "payableQtyUnitByMetal": {"Au":"toz"},
+    "priceKeyByMetal": {"Au":"XAU_USD_TOZ"},
+    "auPriceKey": "XAU_USD_TOZ"
+  },
+  "streamsByMetal": null,
+  "economics": {
+    "costModel": {
+      "mode": "COMPONENTS",
+      "components": [
+        {"id":"mine","label":"Mining costs","category":"mining","seriesUSD":[197000000,219000000,227000000,227000000,220000000,212000000,202000000,192000000,141000000,112000000,77000000,82000000,87000000,95000000,86000000,84000000,82000000,79000000,85000000,76000000,73000000,46000000,17000000,0],"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-3 pp.22-5 to 22-7"},
+        {"id":"processing","label":"Processing costs","category":"processing","seriesUSD":[52000000,54000000,67000000,67000000,67000000,67000000,67000000,67000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,66000000,75000000,0],"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-3 pp.22-5 to 22-7"},
+        {"id":"site_ga","label":"Site G&A","category":"site_ga","seriesUSD":[34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,34000000,0],"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-3 pp.22-5 to 22-7"}
+      ]
+    },
+    "sellingModel": {"mode":"AGGREGATE","sellingCostsUSD":[200000,200000,200000,200000,200000,200000,200000,200000,200000,200000,100000,100000,100000,100000,100000,100000,100000,100000,100000,100000,100000,100000,100000,0]},
+    "fiscalTakeModel": {
+      "mode":"RULES",
+      "items":[],
+      "reportLockedItems":[
+        {"id":"royalties","label":"Royalties","reportFiscalTakeUSD":[36000000,38000000,37000000,35000000,37000000,40000000,39000000,35000000,28000000,21000000,16000000,16000000,17000000,13000000,11000000,9000000,9000000,7000000,9000000,9000000,10000000,8000000,5000000,0],"placement":"REVENUE_DEDUCTION","runtimeProxyRule":{"id":"royalties_runtime","label":"LOM average gross-revenue royalty proxy","placement":"REVENUE_DEDUCTION","base":{"line":"GROSS_METAL_VALUE"},"rate":{"type":"FIXED","rate":0.0445},"start_t":0,"end_t":22,"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-2 p.22-4 and Table 22-3 pp.22-5 to 22-7","notes":"Runtime scenario proxy only: rounded LOM royalty divided by rounded LOM gross revenue. Report reconciliation always uses the exact annual report series."},"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-3 pp.22-5 to 22-7","notes":"Exact rounded annual report royalty series; no allocation among underlying royalty agreements is guessed."},
+        {"id":"ontario_mining_tax","label":"Ontario mining tax","reportFiscalTakeUSD":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"placement":"PRE_TAX_CHARGE","runtimeProxyRule":{"id":"ontario_mining_tax_runtime","label":"Ontario mining-tax runtime proxy","placement":"PRE_TAX_CHARGE","base":{"line":"EBITDA_BEFORE_FISCAL","floorAtZero":true},"rate":{"type":"FIXED","rate":0.10},"start_t":0,"end_t":22,"sourceId":"porcupine-pea-2025","pageOrTable":"Section 22.4 p.22-3","notes":"Simplified runtime proxy for the disclosed 10% rate. Report leg is zero because exact annual mining tax is combined with income tax in reportTaxCashFlowUSD for report-defined pre-tax reconciliation."},"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-3 pp.22-5 to 22-7"}
+      ]
+    },
+    "taxModel": {"mode":"REPORT_LOCKED_WITH_RUNTIME_PROXY","reportTaxCashFlowUSD":[-59000000,-48000000,-42000000,-44000000,-62000000,-71000000,-83000000,-94000000,-80000000,-54000000,-34000000,-28000000,-34000000,-4000000,-3000000,-17000000,-28000000,-13000000,-31000000,-46000000,-67000000,-34000000,14000000,13000000],"runtime":{"method":"NOMINAL_RATE_WITH_LOSS_CARRYFORWARD","taxRate":0.25},"notes":"REPORT: exact rounded annual Ontario mining tax plus income-tax cash rows, combined so report-defined pre-tax cash flow adds back all taxes. RUNTIME: simplified disclosed combined federal/Ontario corporate income-tax rate with loss carryforward; Ontario mining tax is a separate fiscal proxy. Detailed pools and allowances are not guessed."},
+    "depreciationUSD": null
+  },
+  "capital": {
+    "capexUSD":[95000000,33000000,9000000,9000000,16000000,29000000,29000000,21000000,12000000,15000000,19000000,11000000,7000000,7000000,0,0,0,0,0,0,0,0,0,0],
+    "sustainingCapexUSD":[118000000,149000000,126000000,80000000,93000000,97000000,56000000,35000000,30000000,23000000,28000000,37000000,46000000,50000000,52000000,59000000,57000000,56000000,60000000,47000000,34000000,19000000,0,0],
+    "closureUSD":[26000000,33000000,29000000,27000000,17000000,22000000,18000000,14000000,11000000,9000000,7000000,18000000,16000000,28000000,19000000,18000000,8000000,8000000,9000000,8000000,4000000,10000000,3000000,361000000],
+    "workingCapitalDeltaUSD":[-7000000,0,-1000000,0,2000000,1000000,1000000,1000000,1000000,-1000000,0,-1000000,0,-3000000,1000000,2000000,0,-1000000,1000000,1000000,2000000,-1000000,-2000000,5000000],
+    "terminalProceedsUSD":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  },
+  "operations": {"capacity":{"throughputUnit":"tpa","nameplateThroughput":4300000,"utilizationPct":null},"oreMilledTonnes":[2000000,3100000,4100000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4300000,4100000,0],"oreTonnageUnit":"tonne"},
+  "verification": {
+    "report": {
+      "sourceId":"porcupine-pea-2025",
+      "npvIrrPageOrTable":"Section 22.5 and Table 22-2 p.22-4",
+      "pricesPageOrTable":"Table 19-1 p.19-2; Table 22-3 pp.22-5 to 22-7",
+      "periodsPageOrTable":"Table 22-3 pp.22-5 to 22-7 (calendar years 2025-2047 plus aggregate closure 2048-2068 mapped directly to t=0...23)",
+      "discountRate":0.05,
+      "discountConvention":"period_end",
+      "priceDeckSeriesByKey":{"XAU_USD_TOZ":[2576,2484,2437,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150,2150]},
+      "reportNPVPostTaxUSD":1239000000,
+      "reportIRRPostTax":null,
+      "irrApplicability":{"status":"not_applicable","reason":"The PEA states that IRR and payback are not relevant because there is no initial investment before production and positive cash flow.","sourceId":"porcupine-pea-2025","pageOrTable":"Section 22.5 p.22-4"},
+      "reportNPVPreTaxUSD":1874000000,
+      "reportIRRPreTax":null,
+      "toleranceRelative":0.02,
+      "reportInitialCapexUSD":311000000,
+      "reportSustainingCapexUSD":1352000000,
+      "reportClosureUSD":722000000,
+      "reportTerminalProceedsUSD":0,
+      "assumptionsPageOrTable":"Sections 22.1-22.5 pp.22-1 to 22-4; Tables 22-2 and 22-3 pp.22-4 to 22-7",
+      "assumptionsNotes":"100% project basis; valuation date January 1, 2025; real Q4 2024 USD; 1 CAD = 0.75 USD; all gold sold in year produced; report gold-price curve through 2027 and US$2,150/oz thereafter. The published NPV is reproduced by leaving the first 2025 model cash flow at t=0; applying a t=0.5 offset does not reproduce Table 22-2. Annual values are rounded to US$1m except treatment/refining charges. The report explicitly treats IRR and payback as not relevant for this already-producing operation."
+    },
+    "reportedCostCheckpoints":[
+      {"metric":"CASH_COST_AU_USD_PER_OZ","value":1152,"unit":"USD/oz Au","period":{"kind":"LOM"},"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-2 p.22-4","definitionNotes":"Report LOM cash cost per payable ounce."},
+      {"metric":"AISC_AU_USD_PER_OZ","value":1504,"unit":"USD/oz Au","period":{"kind":"LOM"},"sourceId":"porcupine-pea-2025","pageOrTable":"Table 22-2 p.22-4","definitionNotes":"Report LOM all-in sustaining cost per payable ounce."}
+    ]
+  }
+}
