@@ -1082,6 +1082,7 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
 
   const lista3 = result.snapshot.corporate?.lista3Metrics;
   assert.ok(lista3);
+  assert.equal(lista3?.Forward_Capital_Efficiency, null, 'FCE must be N/A for a portfolio that has not started production at valuation');
   assert.ok(Array.isArray(result.diagnostics.meta.corporateLista3Debug?.series.fcfUSD_total));
   assert.ok(Array.isArray(result.diagnostics.meta.corporateLista3Debug?.series.capexUSD_total));
   assert.ok([
@@ -1121,6 +1122,23 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
   assert.ok(debugMetric);
   assert.equal(typeof debugMetric?.output?.computedValuePreview !== 'undefined', true);
   assert.equal(typeof debugMetric?.output?.storedValue !== 'undefined', true);
+});
+
+test('corporate capital-return display switches from IRR to FCE for an already-producing portfolio', async () => {
+  const body = await loadFixture();
+  const currentYear = new Date().getUTCFullYear();
+  setFirstModelYear(body, currentYear - 3);
+  body.valuationYear = currentYear;
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const lista3 = result.snapshot.corporate?.lista3Metrics;
+  assert.equal(lista3?.IRR, null, 'IRR must display N/A when production already exists at valuation');
+  assert.equal(typeof lista3?.Forward_Capital_Efficiency, 'number');
+  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.Forward_Capital_Efficiency;
+  assert.equal(debug?.intermediates?.applicability, 'APPLICABLE');
+  assert.equal(typeof debug?.intermediates?.futureCapitalPvUSD, 'number');
 });
 
 

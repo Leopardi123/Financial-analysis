@@ -23,7 +23,7 @@ export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   reason: string;
 } {
   if (gates.capitalReturns.status === 'FAIL' && gates.capitalReturns.tier === null) {
-    return { status: 'NOT_QUALIFIED', reason: 'After-tax IRR ligger under miniminivån 15 %. Cost Quartile är N/A och räknas inte.' };
+    return { status: 'NOT_QUALIFIED', reason: 'Kapitalavkastningen ligger under det valda måttets miniminivå. Cost Quartile är N/A och räknas inte.' };
   }
   if (gates.cycle.status === 'FAIL' && gates.cycle.tier === null) {
     return { status: 'NOT_QUALIFIED', reason: 'Projektet klarar inte den 7-åriga survival-stressen med positiv NPV10. Cost Quartile är N/A och räknas inte.' };
