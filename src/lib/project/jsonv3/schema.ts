@@ -47,12 +47,18 @@ export type ProjectJsonV3ReportedCostCheckpoint = {
   sourceId: string; pageOrTable: string; definitionNotes?: string | null;
 };
 export type ProjectJsonV3DiscountConvention = 'period_end' | 'mid_year' | 'period_end_from_model_start';
+export type ProjectJsonV3IrrApplicability = {
+  status: 'not_applicable';
+  reason: string;
+  sourceId: string;
+  pageOrTable: string;
+};
 export type ProjectJsonV3ReportVerification = {
   sourceId: string; npvIrrPageOrTable: string; pricesPageOrTable: string; periodsPageOrTable?: string | null;
   discountRate: number; discountConvention: ProjectJsonV3DiscountConvention;
   priceDeckByKey: Record<string, number>;
   priceDeckSeriesByKey?: Record<string, Array<number | null>> | null;
-  reportNPVPostTaxUSD: number; reportIRRPostTax: number; reportNPVPreTaxUSD?: number | null; reportIRRPreTax?: number | null; toleranceRelative?: number;
+  reportNPVPostTaxUSD: number; reportIRRPostTax?: number | null; irrApplicability?: ProjectJsonV3IrrApplicability | null; reportNPVPreTaxUSD?: number | null; reportIRRPreTax?: number | null; toleranceRelative?: number;
   reportInitialCapexUSD?: number | null; reportSustainingCapexUSD?: number | null; reportClosureUSD?: number | null; reportClosurePeriod?: number | null;
   reportWorkingCapitalUnwindUSD?: number | null; reportWorkingCapitalUnwindPeriod?: number | null; reportTerminalProceedsUSD?: number | null; reportTerminalProceedsPeriod?: number | null;
   assumptionsPageOrTable?: string | null; assumptionsNotes?: string | null;
