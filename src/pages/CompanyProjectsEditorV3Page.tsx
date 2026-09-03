@@ -10,6 +10,7 @@ import {
 import { copyText } from '../lib/client/clipboard.ts';
 import { parseProjectJsonV1 } from '../lib/project/jsonv1/parse.ts';
 import { buildProjectJsonV3Template } from '../lib/project/jsonv3/template.ts';
+import { isAlreadyProducingProjectJsonV3 } from '../lib/project/jsonv3/productionStatus.ts';
 import '../styles/company-project-editor.css';
 
 function parseSymbol(pathname: string): string {
@@ -60,6 +61,7 @@ export default function CompanyProjectsEditorV3Page() {
   const [evidenceProject, setEvidenceProject] = useState<CompanyProjectSummary | null>(null);
 
   const validation = useMemo(() => rawText.trim() ? validateRaw(rawText) : null, [rawText]);
+  const alreadyProducing = useMemo(() => validation?.ok && isAlreadyProducingProjectJsonV3(validation.raw), [validation]);
 
   async function refresh(nextSelectedId?: string): Promise<void> {
     if (!symbol) return;
@@ -207,7 +209,7 @@ export default function CompanyProjectsEditorV3Page() {
         <h1>Projects for {symbol || '—'} · project_json_v3</h1>
         <a href="/">Back to dashboard</a>
       </header>
-      <p className="save-meta">V3 is the canonical single-source format. Saving means schema-valid only. A project is “Verifierad” only after the same Project engine reproduces the report NPV/IRR at the report price deck within tolerance.</p>
+      <p className="save-meta">V3 is the canonical single-source format. Saving means schema-valid only. A project is “Verifierad” only after the same Project engine reproduces the report NPV and applicable IRR at the report price deck within tolerance. A non-applicable report IRR requires explicit source evidence.</p>
       <div className="project-editor-layout">
         <aside className="project-list-panel">
           <div className="project-list-header"><h2>V3 projects</h2><button type="button" onClick={newV3}>New V3</button></div>
@@ -236,6 +238,14 @@ export default function CompanyProjectsEditorV3Page() {
           <div className="field-grid">
             <label><span>project_id</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={!isNew && Boolean(selectedId)} /></label>
             <label><span>project_name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} /></label>
+            <div className="checkbox-field">
+              <span>Production status</span>
+              <label className="checkbox-inline">
+                <input type="checkbox" checked={alreadyProducing} readOnly />
+                <span>Already producing (in production at the first model period)</span>
+              </label>
+              <small>Derived from time.productionStartPeriod=0. The report timeline remains authoritative and is not shifted by this indicator.</small>
+            </div>
           </div>
           {error && <p className="status error">{error}</p>}
           {status && <p className="status ok">{status}</p>}

@@ -14,7 +14,7 @@ export type ProjectV3ReconciliationResult = {
   reportNPVPostTaxUSD: number;
   modelNPVPostTaxUSD: number | null;
   npvRelativeDifference: number | null;
-  reportIRRPostTax: number;
+  reportIRRPostTax: number | null;
   modelIRRPostTax: number | null;
   irrRelativeDifference: number | null;
   reportNPVPreTaxUSD: number | null;
@@ -138,7 +138,20 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
   const report = raw.verification?.report;
   if (!report) throw new Error('project_json_v3 verification.report is required for report reconciliation.');
   if (!finite(report.discountRate) || report.discountRate <= 0 || report.discountRate > 0.25) throw new Error('verification.report.discountRate must be within (0, 0.25].');
-  if (!finite(report.reportNPVPostTaxUSD) || !finite(report.reportIRRPostTax)) throw new Error('verification.report requires finite reportNPVPostTaxUSD and reportIRRPostTax.');
+  if (!finite(report.reportNPVPostTaxUSD)) throw new Error('verification.report requires finite reportNPVPostTaxUSD.');
+  const reportIrr = report.reportIRRPostTax ?? null;
+  const irrApplicability = report.irrApplicability ?? null;
+  if (reportIrr !== null && !finite(reportIrr)) throw new Error('verification.report.reportIRRPostTax must be finite or null.');
+  if (reportIrr === null) {
+    if (!irrApplicability || irrApplicability.status !== 'not_applicable'
+      || typeof irrApplicability.reason !== 'string' || !irrApplicability.reason.trim()
+      || typeof irrApplicability.sourceId !== 'string' || !irrApplicability.sourceId.trim()
+      || typeof irrApplicability.pageOrTable !== 'string' || !irrApplicability.pageOrTable.trim()) {
+      throw new Error('verification.report requires finite reportIRRPostTax or source-backed irrApplicability=not_applicable with reason, sourceId and pageOrTable.');
+    }
+  } else if (irrApplicability !== null) {
+    throw new Error('verification.report.irrApplicability must be null or omitted when reportIRRPostTax is finite.');
+  }
   if (report.reportNPVPreTaxUSD != null && !finite(report.reportNPVPreTaxUSD)) throw new Error('verification.report.reportNPVPreTaxUSD must be finite or null.');
   if (report.reportIRRPreTax != null && !finite(report.reportIRRPreTax)) throw new Error('verification.report.reportIRRPreTax must be finite or null.');
   const tolerance = finite(report.toleranceRelative) ? report.toleranceRelative : 0.02;
@@ -171,11 +184,15 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
 
   const fcff = output?.phase1.fcffUSD ?? [];
   const modelNPV = output ? npv(fcff, report.discountRate, report.discountConvention) : null;
-  const modelIRR = output && fcff.every(finite) ? computeIrr(fcff, report.discountRate).selectedRoot : null;
+  const modelIRR = reportIrr !== null && output && fcff.every(finite) ? computeIrr(fcff, report.discountRate).selectedRoot : null;
   const npvDiff = relativeDifference(modelNPV, report.reportNPVPostTaxUSD);
-  const irrDiff = relativeDifference(modelIRR, report.reportIRRPostTax);
+  const irrDiff = reportIrr === null ? null : relativeDifference(modelIRR, reportIrr);
   hardChecks.push({ check: 'npv_reconciliation', status: finite(npvDiff) && Math.abs(npvDiff) <= tolerance ? 'PASS' : 'FAIL', detail: `report=${report.reportNPVPostTaxUSD}; model=${modelNPV ?? 'null'}; relDiff=${npvDiff ?? 'null'}; tolerance=${tolerance}` });
-  hardChecks.push({ check: 'irr_reconciliation', status: finite(irrDiff) && Math.abs(irrDiff) <= tolerance ? 'PASS' : 'FAIL', detail: `report=${report.reportIRRPostTax}; model=${modelIRR ?? 'null'}; relDiff=${irrDiff ?? 'null'}; tolerance=${tolerance}` });
+  if (reportIrr === null) {
+    hardChecks.push({ check: 'irr_not_applicable_evidence', status: 'PASS', detail: `source=${irrApplicability?.sourceId}; pageOrTable=${irrApplicability?.pageOrTable}; reason=${irrApplicability?.reason}` });
+  } else {
+    hardChecks.push({ check: 'irr_reconciliation', status: finite(irrDiff) && Math.abs(irrDiff) <= tolerance ? 'PASS' : 'FAIL', detail: `report=${reportIrr}; model=${modelIRR ?? 'null'}; relDiff=${irrDiff ?? 'null'}; tolerance=${tolerance}` });
+  }
 
   let modelNPVPreTax: number | null = null;
   let modelIRRPreTax: number | null = null;
@@ -208,7 +225,7 @@ export async function reconcileProjectJsonV3ToReport(raw: ProjectJsonV3): Promis
     reportNPVPostTaxUSD: report.reportNPVPostTaxUSD,
     modelNPVPostTaxUSD: modelNPV,
     npvRelativeDifference: npvDiff,
-    reportIRRPostTax: report.reportIRRPostTax,
+    reportIRRPostTax: reportIrr,
     modelIRRPostTax: modelIRR,
     irrRelativeDifference: irrDiff,
     reportNPVPreTaxUSD: reportNPVPreTax,

@@ -57,7 +57,7 @@ The most important rules are:
 
 `reconcileProjectJsonV3ToReport()` parses the same V3 economics used by runtime but allows the calendar placement to be absent. It hard-checks relative period structure, report price keys, supplied CAPEX/closure/WC/terminal checkpoints, resolves the exact report deck, runs `computeProjectEngineFullProductionV1`, and computes NPV/IRR from that engine FCFF.
 
-`VERIFIED` requires every hard check plus NPV/IRR tolerance to pass. No report-FCFF array and no runtime calendar date can make a project appear reconciled without the Project engine itself reproducing the report economics.
+`VERIFIED` requires every hard check plus NPV tolerance and, when the report publishes it, IRR tolerance to pass. IRR may be omitted only when the report explicitly states that it is not applicable and `irrApplicability` preserves the reason, source and page/table. No report-FCFF array and no runtime calendar date can make a project appear reconciled without the Project engine itself reproducing the report economics.
 
 ## Project / Corporate / Compare Stocks Pre revenue
 

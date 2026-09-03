@@ -36,7 +36,7 @@ export function buildProjectJsonV3Template(): ProjectJsonV3 & Record<string, unk
       '27. sustainingCapexUSD, closureUSD, workingCapitalDeltaUSD and terminalProceedsUSD must be placed in the same RELATIVE periods as the report. Do not move terminal/closure/WC items to make NPV match.',
       '28. If the report provides only a LOM average and no defensible annual schedule, do not fabricate an annual series by interpolation. Use a truthful supported representation or leave the item unverified.',
       '29. operations is physical evidence used by Project and Tier. Populate only what the report supports; units must be explicit. Physical chains are controls, not automatic replacements for directly reported commercial quantities.',
-      '30. verification.report is a checkpoint contract, not a second cash-flow model. Store exact report price deck, discount rate/convention, report NPV/IRR and hard-check totals/source pages. Never store parallel report FCFF arrays.',
+      '30. verification.report is a checkpoint contract, not a second cash-flow model. Store exact report price deck, discount rate/convention, report NPV/IRR and hard-check totals/source pages. If a producing/brownfield report explicitly states that IRR is not applicable, set reportIRRPostTax=null and provide source-backed irrApplicability with status=not_applicable, reason, sourceId and pageOrTable. Never invent an IRR and never store parallel report FCFF arrays.',
       '31. Report reconciliation selects the SAME Project engine and same relative economic arrays. In hybrid tax/fiscal mode it selects report-locked cash-flow legs; normal Project/Corporate/Compare Stocks runtime selects the explicitly identified simplified dynamic proxies.',
       '32. reportedCostCheckpoints contains report C1/AISC checkpoints only. These values never override Project/Corporate economics; they test reconstructed metrics and benchmark compatibility.',
       '33. Schema-valid/runnable is not VERIFIED. VERIFIED requires exact relative period mapping, report assumptions/prices, CAPEX/closure/WC/terminal checks and same-engine NPV/IRR within the stated tolerance (normally 1-2% relative). If any hard check is missing, status is Ej verifierad.'
@@ -72,7 +72,7 @@ export function buildProjectJsonV3Template(): ProjectJsonV3 & Record<string, unk
       'Assumption lock: exact report price keys/deck, payable/payability, TC/RC, fiscal takes, tax and other material assumptions; no invented FX.',
       'Tax runtime readiness: report tax is reconciled exactly when published, and a simple documented dynamic runtime tax proxy is present. Complex tax is not a reason to leave runtime tax UNKNOWN.',
       'Same-engine calculation: run normal Project engine on unchanged relative series with report deck/discount convention and report-locked tax/fiscal legs where hybrid models are used.',
-      'NPV/IRR control: report vs model within stated tolerance, normally 1-2% relative.',
+      'NPV/IRR control: report vs model within stated tolerance, normally 1-2% relative. IRR may be skipped only when the report explicitly says it is not applicable and irrApplicability preserves that evidence.',
       'If any hard check cannot be verified, status is Ej verifierad and missing evidence must be stated.'
     ],
     _mapping_examples: {
