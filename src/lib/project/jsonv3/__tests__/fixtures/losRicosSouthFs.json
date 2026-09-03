@@ -387,7 +387,7 @@
       "pricesPageOrTable": "Section 22.2 pp.483-484; Tables 22.2 and 22.5",
       "periodsPageOrTable": "Table 22.5 p.488 (columns -2, -1, 1...15 mapped to relative t=0...16)",
       "discountRate": 0.05,
-      "discountConvention": "period_end_from_model_start",
+      "discountConvention": "period_end",
       "priceDeckByKey": {
         "XAG_USD_TOZ": 26.8,
         "XAU_USD_TOZ": 2330,
