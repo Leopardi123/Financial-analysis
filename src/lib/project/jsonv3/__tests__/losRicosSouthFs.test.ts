@@ -10,7 +10,7 @@ function finite(value: unknown): value is number { return typeof value === 'numb
 function sum(series: Array<number | null> | readonly number[]): number { return series.reduce<number>((total, value) => total + (finite(value) ? value : 0), 0); }
 function maxAbsDiff(actual: Array<number | null>, expected: readonly number[]): number {
   assert(actual.length === expected.length, `Series length mismatch actual=${actual.length} expected=${expected.length}`);
-  return actual.reduce((max, value, t) => { assert(finite(value), `Expected finite FCFF at t=${t}`); return Math.max(max, Math.abs(value - expected[t])); }, 0);
+  return actual.reduce<number>((max, value, t) => { assert(finite(value), `Expected finite FCFF at t=${t}`); return Math.max(max, Math.abs(value - expected[t])); }, 0);
 }
 async function runReportEngine(raw: ProjectJsonV3) {
   const report = raw.verification?.report; assert(report, 'Los Ricos South requires verification.report');
