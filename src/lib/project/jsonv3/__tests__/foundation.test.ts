@@ -6,6 +6,7 @@ import { validateSnapshotRequest } from '../../../api/validateSnapshotRequest.ts
 import { reconcileProjectJsonV3ToReport } from '../reconciliation.ts';
 import { buildProjectJsonV3Template } from '../template.ts';
 import { parseProjectJsonV3 } from '../compile.ts';
+import { isAlreadyProducingProjectJsonV3 } from '../productionStatus.ts';
 import type { ProjectJsonV3 } from '../schema.ts';
 
 function assert(condition: unknown, message: string): void { if (!condition) throw new Error(message); }
@@ -101,6 +102,11 @@ async function engineAtReportDeck(raw: ProjectJsonV3, taxScenario: 'runtime' | '
   assertThrows(() => parseProjectJsonV1(blank), /draft placeholder\(s\) must be resolved/, 'Blank V3 must fail closed');
 
   const raw = fixture();
+  assert(!isAlreadyProducingProjectJsonV3(raw), 'A future project must not be marked already producing');
+  const producingStatus = clone(raw);
+  producingStatus.time.productionStartPeriod = 0;
+  producingStatus.time.phaseByPeriod = ['operations', 'operations', 'operations', 'closure'];
+  assert(isAlreadyProducingProjectJsonV3(producingStatus), 'productionStartPeriod=0 must derive already-producing status');
   const parsed = parseProjectJsonV1(raw);
   assert(parsed.engineInputWithoutPrices.yearsByPeriod.join(',') === '2028,2029,2030,2031', 'Three consistent anchors must map the relative axis');
   near((parsed.engineInputWithoutPrices.phase1 as any).operatingCostsUSD[1], 600000);
@@ -188,6 +194,25 @@ async function engineAtReportDeck(raw: ProjectJsonV3, taxScenario: 'runtime' | '
   const reconciled = await reconcileProjectJsonV3ToReport(reportFixture);
   assert(reconciled.status === 'VERIFIED', `Expected calendar-independent VERIFIED reconciliation: ${JSON.stringify(reconciled.hardChecks)}`);
   assert(reconciled.hardChecks.some((check) => check.check === 'initial_capex' && check.status === 'PASS'), 'Initial CAPEX must include report-defined capex in the production-start period');
+
+  const irrNotApplicable = clone(reportFixture);
+  irrNotApplicable.verification!.report!.reportIRRPostTax = null;
+  irrNotApplicable.verification!.report!.irrApplicability = {
+    status: 'not_applicable',
+    reason: 'The producing operation has no initial investment before production and cash flow.',
+    sourceId: 'fixture-report',
+    pageOrTable: 'Section 22.5',
+  };
+  const reconciledWithoutIrr = await reconcileProjectJsonV3ToReport(irrNotApplicable);
+  assert(reconciledWithoutIrr.status === 'VERIFIED', `Source-backed non-applicable IRR must not block NPV verification: ${JSON.stringify(reconciledWithoutIrr.hardChecks)}`);
+  assert(reconciledWithoutIrr.reportIRRPostTax === null && reconciledWithoutIrr.modelIRRPostTax === null && reconciledWithoutIrr.irrRelativeDifference === null, 'Non-applicable IRR must remain null throughout reconciliation');
+  assert(reconciledWithoutIrr.hardChecks.some((check) => check.check === 'irr_not_applicable_evidence' && check.status === 'PASS'), 'Non-applicable IRR evidence must be a visible hard check');
+
+  const unsupportedMissingIrr = clone(reportFixture);
+  unsupportedMissingIrr.verification!.report!.reportIRRPostTax = null;
+  let missingIrrError: unknown;
+  try { await reconcileProjectJsonV3ToReport(unsupportedMissingIrr); } catch (caught) { missingIrrError = caught; }
+  assert(missingIrrError instanceof Error && /source-backed irrApplicability/.test(missingIrrError.message), 'Missing report IRR must fail closed without source-backed not-applicable evidence');
 
   const staleCalendarAxis = fixture() as any;
   staleCalendarAxis.time.periodEndDatesUtc = ['2028-12-31', '2029-12-31', '2030-12-31', '2031-12-31'];
