@@ -1,0 +1,414 @@
+{
+  "version": "project_json_v3",
+  "meta": {
+    "projectId": "new-polaris-fs-2025-golden",
+    "projectName": "New Polaris Gold Project",
+    "currency": "USD",
+    "notes": "Importable V3 JSON reconstructed from the New Polaris FS 2025. Table 22-2 CAD cash flows are converted to canonical USD using the report assumption 1 CAD = 0.725 USD. No verified company production-start guidance was available, so runtime placement uses the required 2030 fallback."
+  },
+  "time": {
+    "masterN": 13,
+    "productionStartPeriod": 2,
+    "nameplateCapacityPeriod": 3,
+    "reportPeriodLabels": [
+      "-2",
+      "-1",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12"
+    ],
+    "phaseByPeriod": [
+      "construction",
+      "construction",
+      "ramp_up",
+      "operations",
+      "operations",
+      "operations",
+      "operations",
+      "operations",
+      "operations",
+      "operations",
+      "operations",
+      "closure",
+      "closure",
+      "closure"
+    ],
+    "runtimePlacement": {
+      "constructionStart": {
+        "year": 2028,
+        "sourceId": "runtime-fallback-policy-2030",
+        "pageOrTable": "User-defined fallback: production start 2030 when company guidance is unavailable",
+        "asOfDate": "2026-09-02",
+        "notes": "Derived from the two-year construction sequence preceding fallback production start 2030."
+      },
+      "productionStart": {
+        "year": 2030,
+        "sourceId": "runtime-fallback-policy-2030",
+        "pageOrTable": "User-defined fallback: production start 2030 when company guidance is unavailable",
+        "asOfDate": "2026-09-02"
+      },
+      "nameplateCapacity": {
+        "year": 2031,
+        "sourceId": "runtime-fallback-policy-2030",
+        "pageOrTable": "User-defined fallback: production start 2030 when company guidance is unavailable",
+        "asOfDate": "2026-09-02",
+        "notes": "Derived from report Year 2 / relative t=3 as the first full annual production period."
+      },
+      "notes": "Fallback runtime placement. Replace all three anchors if later company guidance provides a different schedule."
+    }
+  },
+  "metals": {
+    "payableQtyByMetal": {
+      "Au": [
+        0,
+        0,
+        59042,
+        97802,
+        93473,
+        87330,
+        94013,
+        82686,
+        92211,
+        87449,
+        14463,
+        0,
+        0,
+        0
+      ]
+    },
+    "metalInProductQtyByMetal": null,
+    "revenueBasisByMetal": {
+      "Au": "PAYABLE_DIRECT"
+    },
+    "payableQtyUnitByMetal": {
+      "Au": "toz"
+    },
+    "priceKeyByMetal": {
+      "Au": "XAU_USD_TOZ"
+    },
+    "auPriceKey": "XAU_USD_TOZ"
+  },
+  "streamsByMetal": null,
+  "economics": {
+    "costModel": {
+      "mode": "COMPONENTS",
+      "components": [
+        {
+          "id": "mine",
+          "label": "Mine operating costs",
+          "category": "mining",
+          "seriesUSD": [
+            0,
+            0,
+            13122500,
+            40165000,
+            38787500,
+            37120000,
+            38497500,
+            36322500,
+            34365000,
+            31682500,
+            7830000,
+            0,
+            0,
+            0
+          ],
+          "sourceId": "new-polaris-fs-2025",
+          "pageOrTable": "Table 22-2 p.264"
+        },
+        {
+          "id": "mill",
+          "label": "Mill processing costs",
+          "category": "processing",
+          "seriesUSD": [
+            0,
+            0,
+            13267500,
+            16240000,
+            16457500,
+            16457500,
+            16457500,
+            16457500,
+            16457500,
+            15805000,
+            4785000,
+            0,
+            0,
+            0
+          ],
+          "sourceId": "new-polaris-fs-2025",
+          "pageOrTable": "Table 22-2 p.264"
+        },
+        {
+          "id": "ga",
+          "label": "G&A costs",
+          "category": "site_ga",
+          "seriesUSD": [
+            0,
+            0,
+            16457500,
+            16457500,
+            16457500,
+            16457500,
+            16457500,
+            16457500,
+            16457500,
+            16457500,
+            6815000,
+            0,
+            0,
+            0
+          ],
+          "sourceId": "new-polaris-fs-2025",
+          "pageOrTable": "Table 22-2 p.264"
+        },
+        {
+          "id": "preproduction_opex",
+          "label": "Pre-production OPEX",
+          "category": "other_site_opex",
+          "seriesUSD": [
+            0,
+            72500,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sourceId": "new-polaris-fs-2025",
+          "pageOrTable": "Table 22-2 p.264"
+        }
+      ]
+    },
+    "sellingModel": {
+      "mode": "COMPONENTS",
+      "components": [
+        {
+          "id": "freight_marketing",
+          "label": "Total freight and marketing charge",
+          "category": "other_offsite",
+          "seriesUSD": [
+            0,
+            0,
+            9352500,
+            18415000,
+            19720000,
+            21895000,
+            21315000,
+            20662500,
+            22040000,
+            21097500,
+            3770000,
+            0,
+            0,
+            0
+          ],
+          "sourceId": "new-polaris-fs-2025",
+          "pageOrTable": "Table 22-2 p.264"
+        }
+      ]
+    },
+    "fiscalTakeModel": {
+      "mode": "NONE"
+    },
+    "taxModel": {
+      "mode": "REPORT_LOCKED_WITH_RUNTIME_PROXY",
+      "reportTaxCashFlowUSD": [
+        0,
+        0,
+        -1885000,
+        -3045000,
+        -26245000,
+        -34510000,
+        -44370000,
+        -37047500,
+        -46400000,
+        -46037500,
+        -9062500,
+        0,
+        0,
+        0
+      ],
+      "runtime": {
+        "method": "NOMINAL_RATE_WITH_LOSS_CARRYFORWARD",
+        "taxRate": 0.27
+      },
+      "notes": "REPORT: rounded annual unlevered cash-tax series from Table 22-2, converted at 1 CAD = 0.725 USD. RUNTIME: disclosed 27% corporate income-tax rate with loss carryforward. BC Mineral Tax and the opening C$6.8m tax loss are not guessed into the runtime proxy."
+    },
+    "depreciationUSD": null
+  },
+  "capital": {
+    "capexUSD": [
+      92147500,
+      89392500,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "sustainingCapexUSD": [
+      0,
+      0,
+      38642500,
+      46617500,
+      14355000,
+      14935000,
+      15805000,
+      14862500,
+      13630000,
+      4205000,
+      72500,
+      0,
+      0,
+      0
+    ],
+    "closureUSD": [
+      0,
+      725000,
+      725000,
+      725000,
+      725000,
+      7467500,
+      4495000,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "workingCapitalDeltaUSD": [
+      0,
+      0,
+      17762500,
+      580000,
+      362500,
+      -870000,
+      -1087500,
+      -217500,
+      3480000,
+      -4060000,
+      -15877500,
+      0,
+      0,
+      0
+    ],
+    "terminalProceedsUSD": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      13847500,
+      0,
+      0,
+      0
+    ]
+  },
+  "operations": {
+    "capacity": {
+      "throughputUnit": "tpd",
+      "nameplateThroughput": 1000,
+      "utilizationPct": null
+    },
+    "oreMilledTonnes": [
+      0,
+      0,
+      237781,
+      365998,
+      365999,
+      364898,
+      366000,
+      365994,
+      365997,
+      335930,
+      61575,
+      0,
+      0,
+      0
+    ],
+    "oreTonnageUnit": "tonne"
+  },
+  "verification": {
+    "report": {
+      "sourceId": "new-polaris-fs-2025",
+      "npvIrrPageOrTable": "Section 22.4 and Tables 22-1 to 22-2 pp.263-264",
+      "pricesPageOrTable": "Section 22.2 p.261; Tables 22-1 to 22-2 pp.263-264",
+      "periodsPageOrTable": "Table 22-2 p.264 (report columns -2, -1, 1...12 mapped directly to relative t=0...13)",
+      "discountRate": 0.05,
+      "discountConvention": "mid_year",
+      "priceDeckByKey": {
+        "XAU_USD_TOZ": 2500
+      },
+      "reportNPVPostTaxUSD": 308125000,
+      "reportIRRPostTax": 0.309,
+      "reportNPVPreTaxUSD": 482850000,
+      "reportIRRPreTax": 0.3842,
+      "toleranceRelative": 0.02,
+      "reportInitialCapexUSD": 181540000,
+      "reportSustainingCapexUSD": 163125000,
+      "reportClosureUSD": 14862500,
+      "reportClosurePeriod": 6,
+      "reportWorkingCapitalUnwindUSD": 15877500,
+      "reportWorkingCapitalUnwindPeriod": 10,
+      "reportTerminalProceedsUSD": 13847500,
+      "reportTerminalProceedsPeriod": 10,
+      "assumptionsPageOrTable": "Sections 22.2-22.4 pp.261-264; Tables 22-1 and 22-2",
+      "assumptionsNotes": "100% project basis, unlevered and 100% equity funded, real 2025 dollars, two-year construction, mine life 8.3 years, full production by Q2 of the first operating year, all product sold in the year produced, constant US$2,500/oz gold, no inflation/escalation, cash flows discounted to the start of project execution, and 1 CAD = 0.725 USD. Section 22.3.4 explicitly includes no royalty in the economics because Canagold challenges the historic net-profit interest. Annual rows are rounded; no balancing entries are introduced."
+    },
+    "reportedCostCheckpoints": [
+      {
+        "metric": "CASH_COST_AU_USD_PER_OZ",
+        "value": 998,
+        "unit": "USD/oz Au",
+        "period": {
+          "kind": "LOM"
+        },
+        "sourceId": "new-polaris-fs-2025",
+        "pageOrTable": "Table 22-1 p.263; Table 22-2 p.264",
+        "definitionNotes": "Report definition: mining, processing, mine-level G&A, off-site charges and royalties. The economic model includes no royalties."
+      },
+      {
+        "metric": "AISC_AU_USD_PER_OZ",
+        "value": 1248,
+        "unit": "USD/oz Au",
+        "period": {
+          "kind": "LOM"
+        },
+        "sourceId": "new-polaris-fs-2025",
+        "pageOrTable": "Table 22-1 p.263; Table 22-2 p.264",
+        "definitionNotes": "Report definition: total cash cost plus sustaining CAPEX and closure CAPEX."
+      }
+    ]
+  }
+}
