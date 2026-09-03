@@ -26,6 +26,7 @@ import {
   type Tier1Gate,
   type Tier1PreRevenueAssessment,
 } from '../../../lib/tier1/preRevenue.ts';
+import { assessForwardCapitalEfficiency, computeForwardCapitalEfficiency } from '../../../lib/tier1/forwardCapitalEfficiency.ts';
 
 const LB_PER_TONNE = 2204.6226218487757;
 
@@ -97,6 +98,20 @@ function aggregateFcffByYear(projects: Array<{ yearsByPeriod: number[]; fcff: Ar
   return { years, fcff: years.map((year) => byYear.get(year) ?? 0) };
 }
 
+function aggregateSeriesByYear(projects: Array<{ yearsByPeriod: number[]; series: Array<number | null> }>, years: number[]): Array<number | null> | null {
+  const byYear = new Map<number, number>();
+  for (const project of projects) {
+    if (project.series.length !== project.yearsByPeriod.length) return null;
+    for (let t = 0; t < project.yearsByPeriod.length; t += 1) {
+      const value = project.series[t];
+      if (!finite(value)) return null;
+      const year = project.yearsByPeriod[t];
+      byYear.set(year, (byYear.get(year) ?? 0) + value);
+    }
+  }
+  return years.map((year) => byYear.get(year) ?? 0);
+}
+
 function firstProductionIndex(years: number[], productionYears: Set<number>): number {
   const found = years.findIndex((year) => productionYears.has(year));
   return found >= 0 ? found : 0;
@@ -115,7 +130,7 @@ function unavailableAssessment(diagnostics: string[]): Tier1PreRevenueAssessment
     gates: { lom: unavailable, scale: unavailable, cost: unavailable, cycle: unavailable, capitalReturns: unavailable },
     support: {
       tierBasePriceMode: 'SPOT', tierBasePriceAsOfUtc: new Date().toISOString(),
-      tierBaseNpv10Usd: null, tierBaseIrr: null, tierBaseNpvOverInitialCapex: null,
+      tierBaseNpv10Usd: null, tierBaseIrr: null, tierBaseFce: null, tierBaseFutureCapitalPvUsd: null, capitalReturnsMetric: null, tierBaseNpvOverInitialCapex: null,
       cycleNpv10Usd: null, cycleDurationProductionPeriods: TIER1_CYCLE_POLICY.classificationStressYears,
       cycleMultipliersByMetal: {}, cycleMethod: null,
     },
@@ -339,6 +354,9 @@ export default async function handler(req: any, res: any): Promise<void> {
         tierBasePriceAsOfUtc,
         tierBaseNpv10Usd: null,
         tierBaseIrr: null,
+        tierBaseFce: null,
+        tierBaseFutureCapitalPvUsd: null,
+        capitalReturnsMetric: null,
         tierBaseNpvOverInitialCapex: null,
         cycleNpv10Usd: null,
         cycleDurationProductionPeriods: TIER1_CYCLE_POLICY.classificationStressYears,
@@ -390,7 +408,28 @@ export default async function handler(req: any, res: any): Promise<void> {
     diagnostics.push(...cyclePolicy.diagnostics);
     diagnostics.push(`Cykelresistens aktiv policy: ${cyclePolicy.method} Corporate projectCount=${cyclePolicy.projectCount}.`);
 
-    const capitalReturnsGate = assessCapitalReturns(basePhase2?.irr ?? null);
+    const producingAtFirstCorporatePeriod = baseCorporate !== null
+      && productionYears.has(baseCorporate.years[0]);
+    const futureCapitalByYear = baseCorporate === null ? null : aggregateSeriesByYear(
+      preparedProjects.map((project) => ({
+        yearsByPeriod: project.yearsByPeriod,
+        series: project.baseOutput.capexUSD_used.map((capex, t) => {
+          const sustaining = project.baseInput.phase1.sustainingCapexUSD[t];
+          const closure = project.baseInput.phase1.reclamationUSD[t];
+          return finite(capex) && finite(sustaining) && finite(closure) ? capex + sustaining + closure : null;
+        }),
+      })),
+      baseCorporate.years,
+    );
+    const fce = producingAtFirstCorporatePeriod && baseCorporate !== null && futureCapitalByYear !== null
+      ? computeForwardCapitalEfficiency({ fcffUSD: baseCorporate.fcff, futureCapitalUSD: futureCapitalByYear, discountRate: 0.10 })
+      : { value: null, npvUSD: null, futureCapitalPvUSD: null, reason: 'FCE är N/A när portföljen inte producerar i första aggregerade modellperioden.' };
+    const capitalReturnsGate = producingAtFirstCorporatePeriod
+      ? assessForwardCapitalEfficiency(fce.value)
+      : assessCapitalReturns(basePhase2?.irr ?? null);
+    diagnostics.push(producingAtFirstCorporatePeriod
+      ? `Kapitalavkastning: FCE vid spot används eftersom portföljen producerar i första aggregerade perioden; NPV10=${String(fce.npvUSD)} / PV framtida total-CAPEX inklusive sustaining och closure=${String(fce.futureCapitalPvUSD)}.`
+      : 'Kapitalavkastning: after-tax IRR vid spot används; FCE är N/A eftersom portföljen inte producerar i första aggregerade perioden.');
     const costMetricValues: Partial<Record<Tier1CostMetric, number>> = {};
     const auAisc = auEqDenominatorOz > 0 ? sustainingCostUsd / auEqDenominatorOz : null;
     if (finite(auAisc)) costMetricValues.AISC_AU_USD_PER_TOZ = auAisc;
@@ -419,7 +458,10 @@ export default async function handler(req: any, res: any): Promise<void> {
       tierBasePriceMode: 'SPOT' as const,
       tierBasePriceAsOfUtc,
       tierBaseNpv10Usd: basePhase2?.npvToday_USD ?? null,
-      tierBaseIrr: basePhase2?.irr ?? null,
+      tierBaseIrr: producingAtFirstCorporatePeriod ? null : basePhase2?.irr ?? null,
+      tierBaseFce: producingAtFirstCorporatePeriod ? fce.value : null,
+      tierBaseFutureCapitalPvUsd: producingAtFirstCorporatePeriod ? fce.futureCapitalPvUSD : null,
+      capitalReturnsMetric: producingAtFirstCorporatePeriod ? 'FCE' as const : 'IRR' as const,
       tierBaseNpvOverInitialCapex: initialCapexUsd > 0 && finite(basePhase2?.npvToday_USD)
         ? (basePhase2!.npvToday_USD as number) / initialCapexUsd
         : null,

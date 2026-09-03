@@ -41,6 +41,9 @@ export type Tier1PreRevenueAssessment = {
     tierBasePriceAsOfUtc: string | null;
     tierBaseNpv10Usd: number | null;
     tierBaseIrr: number | null;
+    tierBaseFce?: number | null;
+    tierBaseFutureCapitalPvUsd?: number | null;
+    capitalReturnsMetric?: 'IRR' | 'FCE' | null;
     tierBaseNpvOverInitialCapex: number | null;
     cycleNpv10Usd: number | null;
     cycleDurationProductionPeriods: number;

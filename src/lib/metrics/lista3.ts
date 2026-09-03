@@ -3,6 +3,7 @@ export type Lista3Metrics = {
   Payback_real_years: number | null;
   ROI_10Y_pct: number | null;
   IRR: number | null;
+  Forward_Capital_Efficiency?: number | null;
   AISC_LOM?: number | null;
   BreakEven_AuEq?: number | null;
   CAPEX_per_Annual_AuEq?: number | null;

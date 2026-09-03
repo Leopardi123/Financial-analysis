@@ -207,6 +207,7 @@ function formatDiscountRateTag(rateInput: string): string {
 function resolveProjectMetricLabel(metricKey: string, discountRateTag: string): string {
   const npvLabel = `NPV${discountRateTag}`;
   const metricLabels: Record<string, string> = {
+    Forward_Capital_Efficiency: `FCE · NPV${discountRateTag}/framtida kapital`,
     NPV_Target: npvLabel,
     NPV_perShare: `${npvLabel}/aktie`,
     NAV_Target: "NAV",
@@ -3166,6 +3167,7 @@ Capital Available: ${availableLabel}`,
       Payback_real_years?: number | null;
       ROI_10Y_pct?: number | null;
       IRR?: number | null;
+      Forward_Capital_Efficiency?: number | null;
       LOM_avg_EBIT_ROCE?: number | null;
       LOM_discounted_EBIT_ROCE?: number | null;
       Corporate_ROIC?: number | null;
@@ -3198,6 +3200,7 @@ Capital Available: ${availableLabel}`,
           "Missing corporate.lista3Metrics.ROI_10Y_pct",
         ),
         IRR: toMetricValue(corporateLista3.IRR, "Missing corporate.lista3Metrics.IRR"),
+        Forward_Capital_Efficiency: toMetricValue(corporateLista3.Forward_Capital_Efficiency, "N/A: endast för portföljer med produktion vid värderingsåret"),
         LOM_avg_EBIT_ROCE: toMetricValue(corporateLista3.LOM_avg_EBIT_ROCE, "Missing corporate.lista3Metrics.LOM_avg_EBIT_ROCE"),
         LOM_discounted_EBIT_ROCE: toMetricValue(corporateLista3.LOM_discounted_EBIT_ROCE, "Missing corporate.lista3Metrics.LOM_discounted_EBIT_ROCE"),
         Corporate_ROIC: toMetricValue(corporateLista3.Corporate_ROIC, "Missing corporate.lista3Metrics.Corporate_ROIC"),
@@ -3271,6 +3274,7 @@ Capital Available: ${availableLabel}`,
     "Payback_approx",
     "Payback_real",
     "IRR",
+    "Forward_Capital_Efficiency",
     "ROI_10Y",
     "LOM_avg_EBIT_ROCE",
     "LOM_discounted_EBIT_ROCE",
@@ -3287,6 +3291,7 @@ Capital Available: ${availableLabel}`,
     Payback_approx: "|Initial_CAPEX_USD| / AnnualAvg_FCFF_USD",
     Payback_real: "cumulative FCFF from tp until payback; linear interpolation",
     IRR: "IRR(fcfUSD_total[0..masterN])",
+    Forward_Capital_Efficiency: "NPV / PV(total CAPEX inklusive sustaining + closure)",
     ROI_10Y: "Σ FCFF(t=tp..tp+9) / |Initial_CAPEX_USD|",
     LOM_avg_EBIT_ROCE: "Average EBIT(tp..masterN) / |Initial_CAPEX_USD|",
     LOM_discounted_EBIT_ROCE: "Σ EBIT(t)*df_now(t) / |Initial_CAPEX_USD|",
@@ -5892,6 +5897,7 @@ Capital Available: ${availableLabel}`,
                                 if ((sectionKey as string) === "list3") {
                                   if (key === "ROI_10Y") return formatMetricValue(value, "multiple", lockedTargetCurrency);
                                   if (key === "IRR") return formatIrrMetricValue(value);
+                                  if (key === "Forward_Capital_Efficiency") return value.value === null ? "n/a" : `${(value.value * 100).toFixed(1)} %`;
                                   if (key.includes("Payback")) return formatMetricValue(value, "decimal", lockedTargetCurrency);
                                   if (key === "AISC_LOM" || key === "BreakEven_AuEq" || key === "CAPEX_per_Annual_AuEq") return formatMetricValue(value, "decimal", lockedTargetCurrency);
                                   if (key === "LOM_avg_EBIT_ROCE" || key === "LOM_discounted_EBIT_ROCE") {
@@ -5970,6 +5976,7 @@ Capital Available: ${availableLabel}`,
                                 if (sectionKey === "list3") {
                                   if (key === "ROI_10Y") return formatMetricValue(value, "multiple", lockedTargetCurrency);
                                   if (key === "IRR") return formatIrrMetricValue(value);
+                                  if (key === "Forward_Capital_Efficiency") return value.value === null ? "n/a" : `${(value.value * 100).toFixed(1)} %`;
                                   if (key.includes("Payback")) return formatMetricValue(value, "decimal", lockedTargetCurrency);
                                   if (key === "AISC_LOM" || key === "BreakEven_AuEq" || key === "CAPEX_per_Annual_AuEq") return formatMetricValue(value, "decimal", lockedTargetCurrency);
                                   if (key === "LOM_avg_EBIT_ROCE" || key === "LOM_discounted_EBIT_ROCE") {
