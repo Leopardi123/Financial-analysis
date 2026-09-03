@@ -60,7 +60,12 @@ async function runReportEngine(raw: ProjectJsonV3) {
   assert(raw.time.productionStartPeriod === 2, 'Heap-leach payable metal first appears in Year -2 / t=2');
   assert(raw.time.nameplateCapacityPeriod === 5, 'First concentrator year at or above nominal 43.8 Mt/y is report Year 2 / t=5');
   assert(CASINO_REPORT_PERIODS.join(',') === '-4,-3,-2,-1,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32', 'Report period labels must be preserved exactly');
-  assert(raw.time.runtimePlacement == null, 'Do not reuse the stale 2022 absolute execution schedule as current 2026 runtime guidance');
+
+  const placement = raw.time.runtimePlacement;
+  assert(placement?.constructionStart?.year === 2031, 'User-shifted Casino construction start must be 2031');
+  assert(placement?.productionStart?.year === 2033, 'User-set Casino first production must be 2033');
+  assert(placement?.nameplateCapacity?.year === 2036, 'Casino first nameplate-capacity year must shift consistently to 2036');
+  parseProjectJsonV3(raw, { requireRuntimePlacement: true, taxScenario: 'runtime', fiscalScenario: 'runtime' });
 
   assert(raw.metals.priceKeyByMetal.Cu === 'CU_USD_LB', 'Cu must use verified canonical key');
   assert(raw.metals.priceKeyByMetal.Au === 'XAU_USD_TOZ', 'Au must use verified canonical key');
@@ -89,7 +94,9 @@ async function runReportEngine(raw: ProjectJsonV3) {
 
   const stress = CASINO_FS_INFLATION_STRESS_V3;
   assert(stress.verification == null, 'Inflation stress is user-defined and must not claim report reconciliation');
-  assert(stress.time.runtimePlacement == null, 'Stress case must not invent a current calendar placement');
+  assert(stress.time.runtimePlacement?.constructionStart?.year === 2031, 'Stress construction start must match baseline 2031');
+  assert(stress.time.runtimePlacement?.productionStart?.year === 2033, 'Stress production start must match baseline 2033');
+  assert(stress.time.runtimePlacement?.nameplateCapacity?.year === 2036, 'Stress nameplate year must match baseline 2036');
   assert(stress.time.nameplateCapacityPeriod === raw.time.nameplateCapacityPeriod && stress.time.nameplateCapacityPeriod === 5, 'Stress case must preserve the corrected baseline nameplate period');
   scaledSeries(stress.capital.capexUSD, raw.capital.capexUSD, 1.5, 'initial CAPEX');
   scaledSeries(stress.capital.sustainingCapexUSD, raw.capital.sustainingCapexUSD, 1.5, 'sustaining CAPEX');
@@ -104,7 +111,7 @@ async function runReportEngine(raw: ProjectJsonV3) {
   sameSeries(stress.capital.workingCapitalDeltaUSD, raw.capital.workingCapitalDeltaUSD, 'working capital');
   sameSeries(stress.capital.terminalProceedsUSD, raw.capital.terminalProceedsUSD, 'terminal proceeds');
 
-  const parsedStress = parseProjectJsonV3(stress, { requireRuntimePlacement: false, taxScenario: 'runtime', fiscalScenario: 'runtime' });
+  const parsedStress = parseProjectJsonV3(stress, { requireRuntimePlacement: true, taxScenario: 'runtime', fiscalScenario: 'runtime' });
   assert(parsedStress.engineInputWithoutPrices.phase1.taxRate === 0.27, 'Stress runtime must use 27% flat corporate tax proxy');
-  console.log(`Casino FS V3 VERIFIED | maxFCFFdiff post=${postTaxMaxDiff} pre=${preTaxMaxDiff} | NPV post=${reconciliation.npvRelativeDifference} pre=${reconciliation.npvPreTaxRelativeDifference} | IRR post=${reconciliation.irrRelativeDifference} pre=${reconciliation.irrPreTaxRelativeDifference}`);
+  console.log(`Casino FS V3 VERIFIED | maxFCFFdiff post=${postTaxMaxDiff} pre=${preTaxMaxDiff} | NPV post=${reconciliation.npvRelativeDifference} pre=${reconciliation.npvPreTaxRelativeDifference} | IRR post=${reconciliation.irrRelativeDifference} pre=${reconciliation.irrPreTaxRelativeDifference} | runtime production=2033`);
 })();
