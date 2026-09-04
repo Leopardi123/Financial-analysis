@@ -1,0 +1,46 @@
+name: One-time sync producer DCF scalar
+
+on:
+  push:
+    branches:
+      - fix/producer-next-project-irr-clean
+    paths:
+      - .github/workflows/one-time-sync-producer-dcf-scalar.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/producer-next-project-irr-clean
+          fetch-depth: 0
+      - name: Patch producer DCF snapshot scalar
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/snapshot/runCorporateSnapshot.ts')
+          text = path.read_text()
+          needle = """    snapshot.canonicalValuationTimeline = corporateCanonicalTimeline;\n    snapshot.projectStartMilestones = projectStartMilestones;\n    const canonicalChartRows = selectTimelineChartSeries(corporateCanonicalTimeline);\n"""
+          replacement = """    snapshot.canonicalValuationTimeline = corporateCanonicalTimeline;\n    snapshot.projectStartMilestones = projectStartMilestones;\n    // For an already-producing portfolio, the Corporate DCF present-value scalar\n    // must include every actual FCFF from the valuation year up to the next project\n    // start exactly once. The canonical today row is the full rolling Corporate DCF;\n    // using only the next-start residual would cut out the interim producing FCFF.\n    if (hasProducingProjectAtValuation) {\n      const corporateToday = corporateCanonicalTimeline.periods[corporateCanonicalTimeline.todayPeriod] ?? null;\n      snapshot.DCF_prodStart_present_USD = corporateToday?.dcfAtPeriodUSD ?? null;\n      snapshot.DCF_prodStart_present_perShare_USD =\n        corporateToday?.dcfAtPeriodUSD !== null\n        && corporateToday?.dcfAtPeriodUSD !== undefined\n        && typeof shares_post_financing_fd_effective === 'number'\n        && Number.isFinite(shares_post_financing_fd_effective)\n        && shares_post_financing_fd_effective > 0\n          ? corporateToday.dcfAtPeriodUSD / shares_post_financing_fd_effective\n          : null;\n      snapshot.DCF_prodStart_present_TargetCurrency = corporateToday?.dcfAtPeriodTarget ?? null;\n      snapshot.DCF_prodStart_present_perShare_TargetCurrency = corporateToday?.dcfPerShareTarget ?? null;\n    }\n    const canonicalChartRows = selectTimelineChartSeries(corporateCanonicalTimeline);\n"""
+          if text.count(needle) != 1:
+              raise SystemExit(f'Expected exactly one snapshot/canonical timeline anchor, found {text.count(needle)}')
+          path.write_text(text.replace(needle, replacement))
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet -- src/lib/snapshot/runCorporateSnapshot.ts; then
+            echo 'No patch needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/snapshot/runCorporateSnapshot.ts
+          git commit -m 'Sync producer DCF snapshot scalar with canonical today DCF'
+          git push origin HEAD:fix/producer-next-project-irr-clean
