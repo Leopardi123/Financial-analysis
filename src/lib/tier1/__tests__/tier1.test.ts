@@ -6,18 +6,6 @@ import './cycleExactPolicyAudit.test.ts';
 import './tier1LegacySnapshot.test.ts';
 import assert from 'node:assert/strict';
 import { assessCost, classifyTier, TIER1_COST_QUARTILE_INACTIVE_REASON, type Tier1Gate } from '../preRevenue.ts';
-import { assessForwardCapitalEfficiency, computeForwardCapitalEfficiency } from '../forwardCapitalEfficiency.ts';
-
-const fce = computeForwardCapitalEfficiency({ fcffUSD: [50, 80, 70], futureCapitalUSD: [100, 20, 10], discountRate: 0.10 });
-assert.equal(typeof fce.value, 'number');
-assert.equal(typeof fce.futureCapitalPvUSD, 'number');
-assert.equal(assessForwardCapitalEfficiency(0.70).tier, 1);
-assert.equal(assessForwardCapitalEfficiency(0.50).tier, 2);
-assert.equal(assessForwardCapitalEfficiency(0.25).tier, 3);
-assert.equal(assessForwardCapitalEfficiency(0.249).tier, null);
-assert.equal(computeForwardCapitalEfficiency({ fcffUSD: [1], futureCapitalUSD: [0], discountRate: 0.10 }).value, null);
-assert.equal(computeForwardCapitalEfficiency({ fcffUSD: [1], futureCapitalUSD: [-1], discountRate: 0.10 }).value, null);
-
 const inactiveCost = assessCost({
   primaryMetal: 'Cu',
   primaryMetalRevenueShare: 1,
