@@ -1306,14 +1306,31 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     long: {
       price: (string | number | Date | null)[][] | null;
       volume: (string | number | Date | null)[][] | null;
+      goldPrice: (string | number | Date | null)[][] | null;
     } | null;
     short: {
       price: (string | number | Date | null)[][] | null;
       volume: (string | number | Date | null)[][] | null;
+      goldPrice: (string | number | Date | null)[][] | null;
+    } | null;
+    goldDebug?: {
+      marketCurrency?: string | null;
+      goldSeriesBase?: string | null;
+      goldSeriesUsed?: string | null;
+      fxSeriesUsed?: string | null;
+      formula?: string | null;
+      samples?: Array<{ date: string; sharePrice: number; goldPerOzTargetCurrency: number; priceInGoldOz: number }>;
+      dropped?: {
+        missingGoldOrShare?: string[];
+        missingFxForGoldDate?: string[];
+      };
+      fallbackUsed?: boolean;
     } | null;
   } | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceError, setPriceError] = useState<string | null>(null);
+  const [priceHistoryPanelIndex, setPriceHistoryPanelIndex] = useState(0);
+  const priceHistoryCarouselRef = useRef<HTMLDivElement | null>(null);
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
@@ -1463,14 +1480,17 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
               ? {
                 price: normalizeDateSeries(longPayload.price),
                 volume: normalizeDateSeries(longPayload.volume),
+                goldPrice: normalizeDateSeries(longPayload.goldPrice),
               }
               : null,
             short: shortPayload
               ? {
                 price: normalizeDateSeries(shortPayload.price),
                 volume: normalizeDateSeries(shortPayload.volume),
+                goldPrice: normalizeDateSeries(shortPayload.goldPrice),
               }
               : null,
+            goldDebug: payload.goldDebug ?? null,
           });
           if (!longPayload && !shortPayload) {
             setPriceData(null);
@@ -2115,6 +2135,15 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     () => combinePriceAndVolumeSeries(priceData?.short?.price ?? null, priceData?.short?.volume ?? null, true),
     [priceData?.short?.price, priceData?.short?.volume],
   );
+  const longGoldPriceData = useMemo(() => priceData?.long?.goldPrice ?? null, [priceData?.long?.goldPrice]);
+  const shortGoldPriceData = useMemo(() => priceData?.short?.goldPrice ?? null, [priceData?.short?.goldPrice]);
+
+  useEffect(() => {
+    setPriceHistoryPanelIndex(0);
+    if (priceHistoryCarouselRef.current) {
+      priceHistoryCarouselRef.current.scrollTo({ left: 0, behavior: "auto" });
+    }
+  }, [ticker]);
 
   const longVolumeSummary = useMemo(() => summarizeChartSeries(priceData?.long?.volume ?? null), [priceData?.long?.volume]);
   const shortVolumeSummary = useMemo(() => summarizeChartSeries(priceData?.short?.volume ?? null), [priceData?.short?.volume]);
@@ -2134,6 +2163,15 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       },
     });
   }, [combinedLongPriceVolumeData, combinedShortPriceVolumeData, debugEnabled, longVolumeSummary, shortVolumeSummary, ticker]);
+
+  const onPriceHistoryScroll = () => {
+    const container = priceHistoryCarouselRef.current;
+    if (!container) return;
+    const width = container.clientWidth;
+    if (!width) return;
+    const nextIndex = Math.round(container.scrollLeft / width);
+    setPriceHistoryPanelIndex(Math.max(0, Math.min(3, nextIndex)));
+  };
 
   const lineBehindBars = {
     seriesType: "bars",
@@ -2949,6 +2987,8 @@ Capital Available: ${availableLabel}`,
   const unitMetaByTitle: Record<string, ChartUnitMeta> = {
     "Aktieprishistoria": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
     "Aktieprishistoria (kort)": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
+    "Aktiepris i oz guld, lång": { unitLabel: "oz guld/aktie", unitKind: "unknown", yAxisTitle: "oz guld/aktie" },
+    "Aktiepris i oz guld, kort": { unitLabel: "oz guld/aktie", unitKind: "unknown", yAxisTitle: "oz guld/aktie" },
     "Volume": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
     "Volume (kort)": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
     "Revenue": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
@@ -4867,68 +4907,157 @@ Capital Available: ${availableLabel}`,
                 {!priceLoading && !priceError && priceData && !longVolumeData && !shortVolumeData && (
                   <p className="status empty">Volume data saknas för vald period.</p>
                 )}
-                <div className="chartcontainerdoublecolumn single-stock-price-charts">
-                  <ReportedChart reportedChartContext={reportedChartContext}
-                    fiscalYearEndMonth={fiscalYearEndMonth}
-                    chartType="ComboChart"
-                    title="Aktieprishistoria"
-                    data={combinedLongPriceVolumeData}
-                    height={260}
-                    options={{
-                      ...priceChartOptions,
-                      colors: [
-                        PRICE_SERIES_COLORS.close,
-                        PRICE_SERIES_COLORS.sma200,
-                        PRICE_SERIES_COLORS.sma50,
-                        "#7a7a7a",
-                      ],
-                      seriesType: "line",
-                      series: {
-                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        3: { type: "bars", targetAxisIndex: 1 },
-                      },
-                      vAxes: {
-                        0: { title: marketCurrency },
-                        1: { title: "shares", format: "short" },
-                      },
-                      bar: { groupWidth: "45%" },
-                    }}
-                    y2AxisTitle="shares"
-                  />
-                  <ReportedChart reportedChartContext={reportedChartContext}
-                    fiscalYearEndMonth={fiscalYearEndMonth}
-                    chartType="ComboChart"
-                    title="Aktieprishistoria (kort)"
-                    data={combinedShortPriceVolumeData}
-                    height={260}
-                    options={{
-                      ...priceChartOptions,
-                      colors: [
-                        PRICE_SERIES_COLORS.close,
-                        PRICE_SERIES_COLORS.sma200,
-                        PRICE_SERIES_COLORS.sma50,
-                        PRICE_SERIES_COLORS.sma20,
-                        "#7a7a7a",
-                      ],
-                      seriesType: "line",
-                      series: {
-                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        3: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        4: { type: "bars", targetAxisIndex: 1 },
-                      },
-                      vAxes: {
-                        0: { title: marketCurrency },
-                        1: { title: "shares", format: "short" },
-                      },
-                      bar: { groupWidth: "45%" },
-                    }}
-                    y2AxisTitle="shares"
-                  />
+                <div className="single-stock-price-swipe-shell">
+                  <div
+                    className="single-stock-price-swipe-track"
+                    ref={priceHistoryCarouselRef}
+                    onScroll={onPriceHistoryScroll}
+                    role="region"
+                    aria-label="Swipebara prispaneler"
+                  >
+                    <div className="single-stock-price-swipe-panel">
+                      <ReportedChart reportedChartContext={reportedChartContext}
+                        fiscalYearEndMonth={fiscalYearEndMonth}
+                        chartType="ComboChart"
+                        title="Aktieprishistoria (kort)"
+                        data={combinedShortPriceVolumeData}
+                        height={260}
+                        options={{
+                          ...priceChartOptions,
+                          colors: [
+                            PRICE_SERIES_COLORS.close,
+                            PRICE_SERIES_COLORS.sma200,
+                            PRICE_SERIES_COLORS.sma50,
+                            PRICE_SERIES_COLORS.sma20,
+                            "#7a7a7a",
+                          ],
+                          seriesType: "line",
+                          series: {
+                            0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                            1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                            2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                            3: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                            4: { type: "bars", targetAxisIndex: 1 },
+                          },
+                          vAxes: {
+                            0: { title: marketCurrency },
+                            1: { title: "shares", format: "short" },
+                          },
+                          bar: { groupWidth: "45%" },
+                        }}
+                        y2AxisTitle="shares"
+                      />
+                    </div>
+                    <div className="single-stock-price-swipe-panel">
+                      <ReportedChart reportedChartContext={reportedChartContext}
+                        fiscalYearEndMonth={fiscalYearEndMonth}
+                        chartType="ComboChart"
+                        title="Aktieprishistoria"
+                        data={combinedLongPriceVolumeData}
+                        height={260}
+                        options={{
+                          ...priceChartOptions,
+                          colors: [
+                            PRICE_SERIES_COLORS.close,
+                            PRICE_SERIES_COLORS.sma200,
+                            PRICE_SERIES_COLORS.sma50,
+                            "#7a7a7a",
+                          ],
+                          seriesType: "line",
+                          series: {
+                            0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                            1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                            2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                            3: { type: "bars", targetAxisIndex: 1 },
+                          },
+                          vAxes: {
+                            0: { title: marketCurrency },
+                            1: { title: "shares", format: "short" },
+                          },
+                          bar: { groupWidth: "45%" },
+                        }}
+                        y2AxisTitle="shares"
+                      />
+                    </div>
+                    <div className="single-stock-price-swipe-panel">
+                      <ReportedChart reportedChartContext={reportedChartContext}
+                        fiscalYearEndMonth={fiscalYearEndMonth}
+                        chartType="LineChart"
+                        title="Aktiepris i oz guld, kort"
+                        data={shortGoldPriceData}
+                        height={260}
+                        options={{
+                          ...priceChartOptions,
+                          colors: [
+                            PRICE_SERIES_COLORS.close,
+                            PRICE_SERIES_COLORS.sma200,
+                            PRICE_SERIES_COLORS.sma50,
+                            PRICE_SERIES_COLORS.sma20,
+                          ],
+                          vAxis: { title: "oz guld/aktie" },
+                        }}
+                      />
+                    </div>
+                    <div className="single-stock-price-swipe-panel">
+                      <ReportedChart reportedChartContext={reportedChartContext}
+                        fiscalYearEndMonth={fiscalYearEndMonth}
+                        chartType="LineChart"
+                        title="Aktiepris i oz guld, lång"
+                        data={longGoldPriceData}
+                        height={260}
+                        options={{
+                          ...priceChartOptions,
+                          colors: [
+                            PRICE_SERIES_COLORS.close,
+                            PRICE_SERIES_COLORS.sma200,
+                            PRICE_SERIES_COLORS.sma50,
+                            PRICE_SERIES_COLORS.sma20,
+                          ],
+                          vAxis: { title: "oz guld/aktie" },
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="single-stock-price-swipe-dots" aria-hidden>
+                    {[0, 1, 2, 3].map((index) => (
+                      <span key={`price-history-dot-${index}`} className={index === priceHistoryPanelIndex ? "is-active" : ""} />
+                    ))}
+                  </div>
                 </div>
+                {debugEnabled && priceData?.goldDebug && (
+                  <details className="single-stock-price-debug">
+                    <summary>Price history / gold debug</summary>
+                    <div><strong>Aktievaluta:</strong> {priceData.goldDebug.marketCurrency ?? marketCurrency}</div>
+                    <div><strong>Guldserie:</strong> {priceData.goldDebug.goldSeriesUsed ?? "n/a"} (base: {priceData.goldDebug.goldSeriesBase ?? "n/a"})</div>
+                    <div><strong>FX-serie:</strong> {priceData.goldDebug.fxSeriesUsed ?? "none (USD-base)"}</div>
+                    <div><strong>Formel:</strong> {priceData.goldDebug.formula ?? "n/a"}</div>
+                    <div><strong>Fallback använt:</strong> {String(Boolean(priceData.goldDebug.fallbackUsed))}</div>
+                    <div><strong>Droppade datum (saknad guld/aktiepunkt):</strong> {(priceData.goldDebug.dropped?.missingGoldOrShare ?? []).slice(0, 10).join(", ") || "none"}</div>
+                    <div><strong>Droppade datum (saknad FX):</strong> {(priceData.goldDebug.dropped?.missingFxForGoldDate ?? []).slice(0, 10).join(", ") || "none"}</div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Datum</th>
+                            <th>Share price</th>
+                            <th>Gold price (same ccy / oz)</th>
+                            <th>Price in gold oz</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(priceData.goldDebug.samples ?? []).map((sample) => (
+                            <tr key={`gold-debug-${sample.date}`}>
+                              <td>{sample.date}</td>
+                              <td>{sample.sharePrice.toFixed(4)}</td>
+                              <td>{sample.goldPerOzTargetCurrency.toFixed(4)}</td>
+                              <td>{sample.priceInGoldOz.toFixed(6)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                )}
               </section>
             </div>
           </div>
