@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runCorporateSnapshotPipeline } from '../runCorporateSnapshot.ts';
-import { selectValuationChart, selectValuationChartDisplayRange } from '../../valuation/canonicalValuationTimeline.ts';
+import {
+  selectCanonicalValuationMetrics,
+  selectValuationChart,
+  selectValuationChartDisplayRange,
+} from '../../valuation/canonicalValuationTimeline.ts';
 
 async function loadFixture(): Promise<Record<string, unknown>> {
   const fixturePath = path.resolve('scripts/fixtures/snapshot-requests/abra_minimal.json');
@@ -38,6 +42,15 @@ function cloneProject(source: Record<string, unknown>, projectId: string): Recor
   const meta = raw.meta as Record<string, unknown>;
   meta.projectId = projectId;
   return project;
+}
+
+function assertApprox(actual: unknown, expected: unknown, message: string, tolerance = 1e-8): void {
+  assert.equal(typeof actual, 'number', `${message}: actual must be numeric`);
+  assert.equal(typeof expected, 'number', `${message}: expected must be numeric`);
+  const a = actual as number;
+  const e = expected as number;
+  const scale = Math.max(1, Math.abs(a), Math.abs(e));
+  assert.ok(Math.abs(a - e) <= tolerance * scale, `${message}: actual=${a} expected=${e}`);
 }
 
 async function run(): Promise<void> {
@@ -79,6 +92,7 @@ async function run(): Promise<void> {
       assert.equal(milestones.length, 0, 'historical production start must not remain a current valuation milestone');
       assert.equal(selection.selectedStartPeriod, timeline.todayPeriod, 'producer without a future project must anchor chart DCF at today');
       assert.equal(display.points[0]?.calendarYear, currentYear, 'producer chart must start at the valuation year');
+      assertApprox(selection.today.high, timeline.periods[timeline.todayPeriod].dcfPerShareTarget, 'producer without future project must show full rolling Corporate DCF at today');
     }
   }
 
@@ -168,12 +182,41 @@ async function run(): Promise<void> {
       assert.equal(today.npvAtPeriodTarget, snapshot.NPV_today_TargetCurrency, 'NPV must be anchored at valuation year');
       assert.equal(today.navAtPeriodTarget, snapshot.NAV_today_TargetCurrency, 'NAV must be anchored at valuation year');
 
-      const shares = snapshot.financing?.shares_post_financing;
-      const dcfPresent = snapshot.DCF_prodStart_present_TargetCurrency;
-      if (typeof shares === 'number' && Number.isFinite(shares) && typeof dcfPresent === 'number' && Number.isFinite(dcfPresent)) {
-        assert.equal(typeof selection.today.high, 'number');
-        assert.ok(Math.abs((selection.today.high as number) * shares - dcfPresent) < 1e-5, 'DCF present-value display must use the same valuation-year anchor as snapshot DCF');
+      const startPeriod = selection.selectedStartPeriod;
+      assert.equal(typeof startPeriod, 'number', 'producer with a future project must expose a future production-start milestone');
+      assert.ok((startPeriod as number) > timeline.todayPeriod, 'selected producer milestone must be after today');
+      const start = timeline.periods[startPeriod as number];
+      assert.ok(start, 'selected future milestone must exist in canonical timeline');
+
+      let interimPresentUsd = 0;
+      for (const period of timeline.periods.slice(timeline.todayPeriod, startPeriod as number)) {
+        assert.equal(typeof period.fcffUSD, 'number', `interim FCFF ${period.calendarYear} must be numeric`);
+        assert.equal(typeof period.discountFactorFromToday, 'number', `discount factor ${period.calendarYear} must be numeric`);
+        interimPresentUsd += (period.fcffUSD as number) * (period.discountFactorFromToday as number);
       }
+      assert.equal(typeof start.dcfAtPeriodUSD, 'number', 'future residual DCF must be numeric');
+      assert.equal(typeof start.discountFactorFromToday, 'number', 'future start discount factor must be numeric');
+      const residualPresentUsd = (start.dcfAtPeriodUSD as number) * (start.discountFactorFromToday as number);
+      assertApprox(
+        today.dcfAtPeriodUSD,
+        interimPresentUsd + residualPresentUsd,
+        'producer DCF today must equal interim actual FCFF PV plus future-start residual PV exactly once',
+      );
+      assertApprox(selection.today.high, today.dcfPerShareTarget, 'producer chart today must show full rolling Corporate DCF rather than only future residual PV');
+
+      assertApprox(start.npvAtPeriodTarget, start.dcfAtPeriodTarget, 'active-producer future NPV must not subtract already-dated construction CAPEX a second time');
+      assertApprox(
+        start.navAtPeriodTarget,
+        (start.dcfAtPeriodTarget as number) + (start.netCashTarget as number),
+        'active-producer future NAV must equal residual DCF plus canonical net cash without duplicate historic CAPEX',
+      );
+
+      const canonical = selectCanonicalValuationMetrics(timeline);
+      assert.equal(canonical.npvStart, null, 'historical producer start must not leak into canonical Corporate NPV-start scalar');
+      assert.equal(canonical.navStart, null, 'historical producer start must not leak into canonical Corporate NAV-start scalar');
+      assert.equal(canonical.dcfStart, null, 'historical producer start must not leak into canonical Corporate DCF-start scalar');
+      assertApprox(canonical.npvToday, today.npvAtPeriodTarget, 'canonical Corporate NPV today must remain anchored at valuation year');
+      assertApprox(canonical.navToday, today.navAtPeriodTarget, 'canonical Corporate NAV today must remain anchored at valuation year');
     }
   }
 
