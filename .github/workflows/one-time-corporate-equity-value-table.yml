@@ -66,8 +66,10 @@ jobs:
           test "$patched_snapshot_status" = "$(cat /tmp/main-snapshot-status.txt)"
           diff -u /tmp/main-chart-failure.txt /tmp/patched-chart-failure.txt
           test "$patched_chart_status" = "$(cat /tmp/main-chart-status.txt)"
-      - name: Run production build
-        run: npm run build
+      - name: Compile production bundle
+        run: |
+          npx tsc -b
+          npx vite build
       - name: Commit implementation and remove one-time tooling
         run: |
           rm -f .github/workflows/one-time-corporate-equity-value-table.yml
