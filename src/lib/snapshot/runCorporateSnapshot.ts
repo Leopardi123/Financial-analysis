@@ -3574,6 +3574,24 @@ export async function runCorporateSnapshotPipeline(args: {
     );
     snapshot.canonicalValuationTimeline = corporateCanonicalTimeline;
     snapshot.projectStartMilestones = projectStartMilestones;
+    // For an already-producing portfolio, the Corporate DCF present-value scalar
+    // must include every actual FCFF from the valuation year up to the next project
+    // start exactly once. The canonical today row is the full rolling Corporate DCF;
+    // using only the next-start residual would cut out the interim producing FCFF.
+    if (hasProducingProjectAtValuation) {
+      const corporateToday = corporateCanonicalTimeline.periods[corporateCanonicalTimeline.todayPeriod] ?? null;
+      snapshot.DCF_prodStart_present_USD = corporateToday?.dcfAtPeriodUSD ?? null;
+      snapshot.DCF_prodStart_present_perShare_USD =
+        corporateToday?.dcfAtPeriodUSD !== null
+        && corporateToday?.dcfAtPeriodUSD !== undefined
+        && typeof shares_post_financing_fd_effective === 'number'
+        && Number.isFinite(shares_post_financing_fd_effective)
+        && shares_post_financing_fd_effective > 0
+          ? corporateToday.dcfAtPeriodUSD / shares_post_financing_fd_effective
+          : null;
+      snapshot.DCF_prodStart_present_TargetCurrency = corporateToday?.dcfAtPeriodTarget ?? null;
+      snapshot.DCF_prodStart_present_perShare_TargetCurrency = corporateToday?.dcfPerShareTarget ?? null;
+    }
     const canonicalChartRows = selectTimelineChartSeries(corporateCanonicalTimeline);
     const chartFlows = {
       dcfProdstartPresentPerShareSeries: corporateCanonicalTimeline.periods.map((row) => row.dcfPresentValueTodayPerShareTarget),
