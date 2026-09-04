@@ -1,0 +1,112 @@
+name: Finalize producer IRR regressions
+
+on:
+  push:
+    branches:
+      - fix/producer-next-project-irr-clean
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message, '[regressions-finalized]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/producer-next-project-irr-clean
+          fetch-depth: 0
+      - name: Add producer IRR regressions to prebuild
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          test_path = Path('src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts')
+          text = test_path.read_text()
+
+          block = r'''
+
+test('producer selects only the future project with the earliest construction start', async () => {
+  const body = await loadFixture();
+  const currentYear = new Date().getUTCFullYear();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const source = projects[0];
+
+  const early = structuredClone(source);
+  early.projectId = 'ABRA_NEXT_EARLY';
+  ((early.rawJson as Record<string, unknown>).meta as Record<string, unknown>).projectId = 'ABRA_NEXT_EARLY';
+  const late = structuredClone(source);
+  late.projectId = 'ABRA_NEXT_LATE';
+  ((late.rawJson as Record<string, unknown>).meta as Record<string, unknown>).projectId = 'ABRA_NEXT_LATE';
+  projects.push(early, late);
+
+  setFirstModelYear(body, currentYear - 3, 0);
+  setFirstModelYear(body, currentYear + 1, 1);
+  setFirstModelYear(body, currentYear + 3, 2);
+  body.valuationYear = currentYear;
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.IRR;
+  assert.equal(debug?.intermediates?.method, 'NEXT_PROJECT_IRR');
+  assert.deepEqual(debug?.intermediates?.selectedProjectIds, ['ABRA_NEXT_EARLY']);
+  assert.equal(debug?.intermediates?.constructionStartYear, currentYear + 1);
+  assert.equal(typeof result.snapshot.corporate?.lista3Metrics?.IRR, 'number');
+});
+
+test('producer aggregates future projects tied at the earliest construction start', async () => {
+  const body = await loadFixture();
+  const currentYear = new Date().getUTCFullYear();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const source = projects[0];
+
+  const tiedA = structuredClone(source);
+  tiedA.projectId = 'ABRA_NEXT_TIED_A';
+  ((tiedA.rawJson as Record<string, unknown>).meta as Record<string, unknown>).projectId = 'ABRA_NEXT_TIED_A';
+  const tiedB = structuredClone(source);
+  tiedB.projectId = 'ABRA_NEXT_TIED_B';
+  ((tiedB.rawJson as Record<string, unknown>).meta as Record<string, unknown>).projectId = 'ABRA_NEXT_TIED_B';
+  projects.push(tiedA, tiedB);
+
+  setFirstModelYear(body, currentYear - 3, 0);
+  setFirstModelYear(body, currentYear + 1, 1);
+  setFirstModelYear(body, currentYear + 1, 2);
+  body.valuationYear = currentYear;
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.IRR;
+  assert.equal(debug?.intermediates?.method, 'NEXT_PROJECT_IRR');
+  assert.deepEqual(debug?.intermediates?.selectedProjectIds, ['ABRA_NEXT_TIED_A', 'ABRA_NEXT_TIED_B']);
+  assert.equal(debug?.intermediates?.constructionStartYear, currentYear + 1);
+  assert.equal(typeof result.snapshot.corporate?.lista3Metrics?.IRR, 'number');
+});
+'''
+          marker = "test('producer selects only the future project with the earliest construction start'"
+          if marker not in text:
+              test_path.write_text(text + block)
+
+          pkg_path = Path('package.json')
+          pkg = json.loads(pkg_path.read_text())
+          command = 'node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts'
+          current = pkg['scripts']['test:pre-revenue-corporate']
+          if command not in current:
+              pkg['scripts']['test:pre-revenue-corporate'] = current + ' && ' + command
+              pkg_path.write_text(json.dumps(pkg, indent=2, ensure_ascii=False) + '\n')
+          PY
+          rm .github/workflows/finalize-producer-irr-regressions.yml
+      - name: Commit finalized regressions
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m '[regressions-finalized] Cover producer-only next-project IRR'
+          git push origin HEAD:fix/producer-next-project-irr-clean
