@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   fix:
-    if: ${{ !contains(github.event.head_commit.message, '[current-year-anchor-fixed]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
