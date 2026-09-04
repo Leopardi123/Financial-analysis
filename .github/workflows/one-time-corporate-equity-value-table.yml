@@ -40,7 +40,24 @@ jobs:
           echo "Main chart status: $(cat /tmp/main-chart-status.txt)"
           cat /tmp/main-chart-failure.txt
       - name: Apply isolated Corporate equity value patch
-        run: python scripts/one-time-corporate-equity-value-table.py
+        shell: bash
+        run: |
+          python scripts/one-time-corporate-equity-value-table.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/SingleStockDashboard.tsx')
+          text = p.read_text()
+          old = "  const corporateEquityValue = corporateSnapshotData?.corporateEquityValue ?? null;"
+          new = """  const corporateEquityValue = (corporateSnapshotData as {
+    corporateEquityValue?: {
+      current?: { valueTargetCurrency: number | null } | null;
+      productionStarts?: Array<{ year: number; valueTargetCurrency: number | null }>;
+    } | null;
+  } | null)?.corporateEquityValue ?? null;"""
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one Corporate equity value declaration, found {text.count(old)}')
+          p.write_text(text.replace(old, new, 1))
+          PY
       - name: Run targeted equity-value regressions
         run: |
           node --experimental-strip-types src/lib/corporate/valuation/__tests__/corporateEquityValue.test.ts
