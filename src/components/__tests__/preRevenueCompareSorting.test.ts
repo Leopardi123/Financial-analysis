@@ -73,4 +73,6 @@ const missing = metrics({ pNavPostFinancing: null });
 assert.ok(comparePreRevenueMetricValues(missing, lowPNav, 'pNav', 'Au', 'asc') > 0, 'missing values must sort last in ascending investment order');
 assert.ok(comparePreRevenueMetricValues(missing, lowPNav, 'pNav', 'Au', 'desc') > 0, 'missing values must sort last even after direction toggle');
 
+await import('../../lib/snapshot/__tests__/producerNextProjectIrr.prebuild.test.ts');
+
 console.log('preRevenueCompareSorting.test.ts passed');

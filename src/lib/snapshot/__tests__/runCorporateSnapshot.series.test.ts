@@ -1082,7 +1082,6 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
 
   const lista3 = result.snapshot.corporate?.lista3Metrics;
   assert.ok(lista3);
-  assert.equal(lista3?.Forward_Capital_Efficiency, null, 'FCE must be N/A for a portfolio that has not started production at valuation');
   assert.ok(Array.isArray(result.diagnostics.meta.corporateLista3Debug?.series.fcfUSD_total));
   assert.ok(Array.isArray(result.diagnostics.meta.corporateLista3Debug?.series.capexUSD_total));
   assert.ok([
@@ -1124,7 +1123,7 @@ test('corporate lista3 metrics are populated from corporate aggregates', async (
   assert.equal(typeof debugMetric?.output?.storedValue !== 'undefined', true);
 });
 
-test('corporate capital-return display switches from IRR to FCE for an already-producing portfolio', async () => {
+test('corporate capital-return display is N/A for an already-producing portfolio without a future project', async () => {
   const body = await loadFixture();
   const currentYear = new Date().getUTCFullYear();
   setFirstModelYear(body, currentYear - 3);
@@ -1134,11 +1133,36 @@ test('corporate capital-return display switches from IRR to FCE for an already-p
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const lista3 = result.snapshot.corporate?.lista3Metrics;
-  assert.equal(lista3?.IRR, null, 'IRR must display N/A when production already exists at valuation');
-  assert.equal(typeof lista3?.Forward_Capital_Efficiency, 'number');
-  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.Forward_Capital_Efficiency;
-  assert.equal(debug?.intermediates?.applicability, 'APPLICABLE');
-  assert.equal(typeof debug?.intermediates?.futureCapitalPvUSD, 'number');
+  assert.equal(lista3?.IRR, null, 'IRR must display N/A when production already exists and no future construction project exists');
+  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.IRR;
+  assert.equal(debug?.intermediates?.method, 'NEXT_PROJECT_IRR');
+  assert.deepEqual(debug?.intermediates?.selectedProjectIds, []);
+});
+
+test('corporate IRR uses the next construction project when another project already produces', async () => {
+  const body = await loadFixture();
+  const currentYear = new Date().getUTCFullYear();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const futureProject = structuredClone(projects[0]);
+  futureProject.projectId = 'ABRA_NEXT_BUILD';
+  const futureRaw = futureProject.rawJson as Record<string, unknown>;
+  (futureRaw.meta as Record<string, unknown>).projectId = 'ABRA_NEXT_BUILD';
+  projects.push(futureProject);
+
+  setFirstModelYear(body, currentYear - 3, 0);
+  setFirstModelYear(body, currentYear + 1, 1);
+  body.valuationYear = currentYear;
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false, debug: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const lista3 = result.snapshot.corporate?.lista3Metrics;
+  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.IRR;
+  assert.equal(typeof lista3?.IRR, 'number');
+  assert.equal(debug?.intermediates?.method, 'NEXT_PROJECT_IRR');
+  assert.deepEqual(debug?.intermediates?.selectedProjectIds, ['ABRA_NEXT_BUILD']);
+  assert.equal(debug?.intermediates?.constructionStartYear, currentYear + 1);
 });
 
 
@@ -1350,4 +1374,23 @@ test('rebased valuation applies net cash once and discounts the first future mil
   const years = Number(marker?.yearLabelUsed) - 2026;
   const expectedPresent = (marker?.lista2Metrics?.DCF_prodStart_exCapex_TargetCurrency as number) / (1.1 ** years);
   assert.ok(Math.abs((result.snapshot.DCF_prodStart_present_TargetCurrency as number) - expectedPresent) < 1e-6);
+});
+
+
+test('pre-revenue multi-project portfolio keeps canonical corporate IRR', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const secondProject = structuredClone(projects[0]);
+  secondProject.projectId = 'ABRA_SECOND_PRE_REVENUE';
+  projects.push(secondProject);
+  body.valuationYear = new Date().getUTCFullYear();
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const irr = result.snapshot.corporate?.lista3Metrics?.IRR;
+  assert.equal(typeof irr, 'number');
+  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.IRR;
+  assert.notEqual(debug?.intermediates?.method, 'NEXT_PROJECT_IRR');
 });

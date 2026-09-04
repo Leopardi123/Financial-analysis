@@ -178,6 +178,9 @@ export function buildValuationTimeline(args: {
   const todayPeriod = resolvedTodayPeriod;
   const projectStartPeriod = (args.projectStartPeriod ?? 0) + prefixCount;
   const productionStartPeriod = args.productionStartPeriod === null ? null : args.productionStartPeriod + prefixCount;
+  const hasActiveCorporateProduction = args.scope === 'corporate'
+    && productionStartPeriod !== null
+    && productionStartPeriod <= todayPeriod;
   const offset = args.todayPeriod === undefined && args.valuationYear === undefined && Number.isInteger(args.valuationPeriodOffset)
     ? args.valuationPeriodOffset as number
     : 0;
@@ -203,9 +206,15 @@ export function buildValuationTimeline(args: {
     const dcfUSD = rate === null || remaining.some((value) => !finite(value)) ? null :
       (remaining as number[]).reduce((sum, value, tailIndex) => sum + value / ((1 + rate) ** tailIndex), 0);
     const initialCapex = initialCapexBefore(periodIndex);
+    // For an already-producing Corporate portfolio, every current/future build cost
+    // is already represented once in the dated Corporate FCFF series. At a later
+    // valuation date that historical CAPEX is sunk, so subtracting it again from
+    // the remaining DCF would double count the same cash outflow.
     const npvUSD = periodIndex === todayPeriod
       ? multiply(dcfUSD, discountFactor)
-      : dcfUSD !== null && initialCapex !== null ? dcfUSD - initialCapex : null;
+      : hasActiveCorporateProduction && periodIndex > todayPeriod
+        ? dcfUSD
+        : dcfUSD !== null && initialCapex !== null ? dcfUSD - initialCapex : null;
     const dcfTarget = multiply(dcfUSD, fx);
     const npvTarget = multiply(npvUSD, fx);
     const navTarget = npvTarget !== null && netCash !== null ? npvTarget + netCash : null;
@@ -252,19 +261,26 @@ export function selectTimelineNodes(timeline: ValuationTimeline): TimelineNodes 
 /** Sole table/chart scalar adapter for canonical valuation values. */
 export function selectCanonicalValuationMetrics(timeline: ValuationTimeline): CanonicalValuationMetrics {
   const { today, productionStart } = selectTimelineNodes(timeline);
+  // A historical production start is not a current Corporate valuation milestone.
+  // Leave start scalars empty so the Corporate UI consumes the explicit current/future
+  // project milestones instead of leaking the first historical model year back in.
+  const activeCorporateProducer = timeline.scope === 'corporate'
+    && productionStart !== null
+    && productionStart.periodIndex <= timeline.todayPeriod;
+  const start = activeCorporateProducer ? null : productionStart;
   return {
     npvToday: today.npvAtPeriodTarget,
     npvPerShareToday: today.npvPerShareTarget,
     navToday: today.navAtPeriodTarget,
     navPerShareToday: today.navPerShareTarget,
-    dcfStart: productionStart?.dcfAtPeriodTarget ?? null,
-    dcfPerShareStart: productionStart?.dcfPerShareTarget ?? null,
-    dcfStartPresentToday: productionStart?.dcfPresentValueTodayTarget ?? null,
-    dcfPerShareStartPresentToday: productionStart?.dcfPresentValueTodayPerShareTarget ?? null,
-    npvStart: productionStart?.npvAtPeriodTarget ?? null,
-    npvPerShareStart: productionStart?.npvPerShareTarget ?? null,
-    navStart: productionStart?.navAtPeriodTarget ?? null,
-    navPerShareStart: productionStart?.navPerShareTarget ?? null,
+    dcfStart: start?.dcfAtPeriodTarget ?? null,
+    dcfPerShareStart: start?.dcfPerShareTarget ?? null,
+    dcfStartPresentToday: start?.dcfPresentValueTodayTarget ?? null,
+    dcfPerShareStartPresentToday: start?.dcfPresentValueTodayPerShareTarget ?? null,
+    npvStart: start?.npvAtPeriodTarget ?? null,
+    npvPerShareStart: start?.npvPerShareTarget ?? null,
+    navStart: start?.navAtPeriodTarget ?? null,
+    navPerShareStart: start?.navPerShareTarget ?? null,
   };
 }
 
@@ -304,7 +320,8 @@ export function selectCorporateProjectStartMilestones(
   return projects.flatMap((project) => {
     if (!finite(project.productionStartYear)) return [];
     const state = timeline.periods.find((period) => period.calendarYear === project.productionStartYear);
-    if (!state) return [];
+    // Project starts before the valuation year remain in the internal trace, but they are historical rather than current valuation milestones.
+    if (!state || state.periodIndex < timeline.todayPeriod) return [];
     return [{
       projectId: project.projectId,
       projectName: project.projectName ?? null,
@@ -326,26 +343,38 @@ export function selectTimelineChartSeries(timeline: ValuationTimeline) {
 }
 
 /**
- * Canonical chart semantics. Today High is the start DCF brought back to today;
- * subsequent High values are each period's rolling DCF. Low is NAV throughout.
- * Peak selection preserves series identity and never orders Low/High with min/max.
+ * Canonical chart semantics. For pre-revenue portfolios, Today High is the selected
+ * production-start DCF brought back to today and the pre-start line rolls that same
+ * residual value. For an already-producing Corporate portfolio, every current/future
+ * point is the rolling Corporate DCF from that date so actual FCFF before the next
+ * project start is neither cut away nor double counted. Low is NAV throughout.
  */
 export function selectValuationChart(
   timeline: ValuationTimeline,
   startPeriods: number[] = timeline.productionStartPeriod === null ? [] : [timeline.productionStartPeriod],
 ): ValuationChartSelection {
   const selectedStartPeriod = selectValuationStartPeriod(timeline, startPeriods);
-  const validStartPeriods = new Set(startPeriods.filter((period) => Number.isInteger(period) && timeline.periods[period]));
-  if (selectedStartPeriod !== null) validStartPeriods.add(selectedStartPeriod);
+  const validStartPeriods = new Set(startPeriods.filter((period) =>
+    Number.isInteger(period) && period >= timeline.todayPeriod && timeline.periods[period]
+  ));
+  if (selectedStartPeriod !== null && timeline.productionStartPeriod === selectedStartPeriod) {
+    validStartPeriods.add(selectedStartPeriod);
+  }
   const selectedStart = selectedStartPeriod === null ? null : timeline.periods[selectedStartPeriod] ?? null;
+  const activeCorporateProducer = timeline.scope === 'corporate'
+    && timeline.productionStartPeriod !== null
+    && timeline.productionStartPeriod <= timeline.todayPeriod;
   const points = timeline.periods.map((period): ValuationChartPoint => {
     const isToday = period.periodIndex === timeline.todayPeriod;
     const isBeforeSelectedStart = selectedStartPeriod !== null && period.periodIndex < selectedStartPeriod;
-    const high = isToday
-      ? selectedStart?.dcfPresentValueTodayPerShareTarget ?? null
-      : isBeforeSelectedStart
-        ? rollStartDcfToPeriod(selectedStart, period)
-        : period.dcfPerShareTarget;
+    const useRollingCorporateDcf = activeCorporateProducer && period.periodIndex >= timeline.todayPeriod;
+    const high = useRollingCorporateDcf
+      ? period.dcfPerShareTarget
+      : isToday
+        ? selectedStart?.dcfPresentValueTodayPerShareTarget ?? null
+        : isBeforeSelectedStart
+          ? rollStartDcfToPeriod(selectedStart, period)
+          : period.dcfPerShareTarget;
     return {
       periodIndex: period.periodIndex,
       calendarYear: period.calendarYear,
@@ -353,10 +382,13 @@ export function selectValuationChart(
       high,
       isToday,
       isStart: validStartPeriods.has(period.periodIndex),
-      highSource: isToday ? 'start-dcf-present' : isBeforeSelectedStart ? 'start-dcf-rollup' : 'period-remaining-dcf',
+      highSource: useRollingCorporateDcf
+        ? 'period-remaining-dcf'
+        : isToday ? 'start-dcf-present' : isBeforeSelectedStart ? 'start-dcf-rollup' : 'period-remaining-dcf',
     };
   });
   const maximum = (field: 'low' | 'high'): ValuationChartPoint | null => points.reduce<ValuationChartPoint | null>((peak, point) => {
+    if (point.periodIndex < timeline.todayPeriod) return peak;
     const value = point[field];
     if (!finite(value)) return peak;
     return peak === null || value > (peak[field] as number) ? point : peak;
@@ -388,18 +420,22 @@ function rollStartDcfToPeriod(
 /** Corporate and Project tables/charts share this exact milestone rule. */
 export function selectValuationStartPeriod(timeline: ValuationTimeline, startPeriods: number[] = []): number | null {
   const valid = startPeriods
-    .filter((period) => Number.isInteger(period) && timeline.periods[period])
+    .filter((period) => Number.isInteger(period) && period >= timeline.todayPeriod && timeline.periods[period])
     .sort((a, b) => {
       const yearDelta = timeline.periods[a].calendarYear - timeline.periods[b].calendarYear;
       return yearDelta !== 0 ? yearDelta : a - b;
     });
   if (valid.length > 0) return valid[0];
-  return timeline.productionStartPeriod !== null && timeline.periods[timeline.productionStartPeriod]
+  return timeline.productionStartPeriod !== null
+    && timeline.productionStartPeriod >= timeline.todayPeriod
+    && timeline.periods[timeline.productionStartPeriod]
     ? timeline.productionStartPeriod
-    : null;
+    : timeline.periods[timeline.todayPeriod]
+      ? timeline.todayPeriod
+      : null;
 }
 
-/** Clips presentation only, after anchors and peaks were selected over the full timeline. */
+/** Clips presentation only, after anchors and peaks were selected over the current/future valuation window. */
 export function selectValuationChartDisplayRange(
   timeline: ValuationTimeline,
   selection: ValuationChartSelection,
@@ -423,7 +459,9 @@ export function selectValuationChartDisplayRange(
     chartEndYear,
     controllingYear,
     latestProjectStartYear,
-    points: selection.points.filter((point) => point.calendarYear <= chartEndYear),
+    points: selection.points.filter((point) =>
+      point.periodIndex >= timeline.todayPeriod && point.calendarYear <= chartEndYear
+    ),
   };
 }
 
