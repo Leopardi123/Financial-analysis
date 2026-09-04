@@ -34,7 +34,7 @@ jobs:
           echo $? > /tmp/main-chart-status.txt
           set -e
           grep '^✖ ' /tmp/main-snapshot.log | grep -v '^✖ failing tests:' | sed -E 's/ \([0-9.]+ms\)$//' | sort -u > /tmp/main-snapshot-failures.txt || true
-          sed -n '/AssertionError/,+8p' /tmp/main-chart.log > /tmp/main-chart-failure.txt || true
+          grep -E 'AssertionError|^\+ [0-9.-]+$|^- [0-9.-]+$' /tmp/main-chart.log > /tmp/main-chart-failure.txt || true
           echo "Main snapshot status: $(cat /tmp/main-snapshot-status.txt)"
           cat /tmp/main-snapshot-failures.txt
           echo "Main chart status: $(cat /tmp/main-chart-status.txt)"
@@ -57,7 +57,7 @@ jobs:
           patched_chart_status=$?
           set -e
           grep '^✖ ' /tmp/patched-snapshot.log | grep -v '^✖ failing tests:' | sed -E 's/ \([0-9.]+ms\)$//' | sort -u > /tmp/patched-snapshot-failures.txt || true
-          sed -n '/AssertionError/,+8p' /tmp/patched-chart.log > /tmp/patched-chart-failure.txt || true
+          grep -E 'AssertionError|^\+ [0-9.-]+$|^- [0-9.-]+$' /tmp/patched-chart.log > /tmp/patched-chart-failure.txt || true
           echo "Patched snapshot status: $patched_snapshot_status"
           cat /tmp/patched-snapshot-failures.txt
           echo "Patched chart status: $patched_chart_status"
