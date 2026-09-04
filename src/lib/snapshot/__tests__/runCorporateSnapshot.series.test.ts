@@ -1375,3 +1375,22 @@ test('rebased valuation applies net cash once and discounts the first future mil
   const expectedPresent = (marker?.lista2Metrics?.DCF_prodStart_exCapex_TargetCurrency as number) / (1.1 ** years);
   assert.ok(Math.abs((result.snapshot.DCF_prodStart_present_TargetCurrency as number) - expectedPresent) < 1e-6);
 });
+
+
+test('pre-revenue multi-project portfolio keeps canonical corporate IRR', async () => {
+  const body = await loadFixture();
+  const projects = body.projects as Array<Record<string, unknown>>;
+  const secondProject = structuredClone(projects[0]);
+  secondProject.projectId = 'ABRA_SECOND_PRE_REVENUE';
+  projects.push(secondProject);
+  body.valuationYear = new Date().getUTCFullYear();
+
+  const result = await runCorporateSnapshotPipeline({ body, refresh: false });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const irr = result.snapshot.corporate?.lista3Metrics?.IRR;
+  assert.equal(typeof irr, 'number');
+  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.IRR;
+  assert.notEqual(debug?.intermediates?.method, 'NEXT_PROJECT_IRR');
+});

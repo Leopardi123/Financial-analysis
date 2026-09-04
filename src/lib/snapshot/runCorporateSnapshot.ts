@@ -2389,7 +2389,7 @@ export async function runCorporateSnapshotPipeline(args: {
       const value = toFiniteOrNull(context.economics.fcffUSD[localPeriod]);
       return value === null ? null : sum + value;
     }, 0));
-    const useNextProjectIrr = hasProducingProjectAtValuation || projectsForBuildFunding.length > 1;
+    const useNextProjectIrr = hasProducingProjectAtValuation;
     const nextProjectIrr = useNextProjectIrr && nextProjectFcff.length > 0
       ? computeIrr(nextProjectFcff, input.discountRate).selectedRoot
       : null;
