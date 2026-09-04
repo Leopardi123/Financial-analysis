@@ -1117,6 +1117,16 @@ function parseChartDate(rawDate: unknown): Date | null {
   return null;
 }
 
+function normalizeCurrencyCode(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const normalized = raw.trim().toUpperCase().replace(/[^A-Z]/g, "");
+  return normalized || null;
+}
+
+function formatDateAsIsoUtc(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
 function normalizeDateSeries(data: (string | number | Date | null)[][] | null) {
   if (!data || data.length === 0) {
     return data;
@@ -1289,6 +1299,12 @@ type CompanySectorMappingOption = {
   specificMappings: string[];
 };
 
+type PriceSeriesTable = (string | number | Date | null)[][];
+type PriceDataBlock = {
+  long: { price: PriceSeriesTable | null; volume: PriceSeriesTable | null } | null;
+  short: { price: PriceSeriesTable | null; volume: PriceSeriesTable | null } | null;
+};
+
 export default function SingleStockDashboard({ onTickerChange }: SingleStockDashboardProps = {}) {
   const { ticker, data, loading, error, fetchCompany } = useCompanyData("");
   const [quarterlyData, setQuarterlyData] = useState<CompanyResponse | null>(null);
@@ -1302,18 +1318,37 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [selectedMappedCategory, setSelectedMappedCategory] = useState("");
   const [tickersError, setTickersError] = useState<string | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [priceData, setPriceData] = useState<{
-    long: {
-      price: (string | number | Date | null)[][] | null;
-      volume: (string | number | Date | null)[][] | null;
-    } | null;
-    short: {
-      price: (string | number | Date | null)[][] | null;
-      volume: (string | number | Date | null)[][] | null;
-    } | null;
-  } | null>(null);
+  const [priceData, setPriceData] = useState<PriceDataBlock | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceError, setPriceError] = useState<string | null>(null);
+  const [priceHistoryMode, setPriceHistoryMode] = useState<"currency" | "gold_oz">("currency");
+  const [goldPriceSeriesUsed, setGoldPriceSeriesUsed] = useState<string | null>(null);
+  const [fxSeriesUsed, setFxSeriesUsed] = useState<string | null>(null);
+  const [goldModeFallbackReason, setGoldModeFallbackReason] = useState<string | null>(null);
+  const [goldModeDroppedPoints, setGoldModeDroppedPoints] = useState(0);
+  const [goldSampleRows, setGoldSampleRows] = useState<Array<{ date: string; sharePrice: number; goldPriceLocal: number; goldOz: number }>>([]);
+  const [goldAdjustedPriceData, setGoldAdjustedPriceData] = useState<PriceDataBlock | null>(null);
+  const priceHistorySwipeShellRef = useRef<HTMLDivElement | null>(null);
+  const currencyPanelRef = useRef<HTMLDivElement | null>(null);
+  const goldPanelRef = useRef<HTMLDivElement | null>(null);
+  const swipeTouchStartXRef = useRef<number | null>(null);
+  const [priceLayoutDebug, setPriceLayoutDebug] = useState<{
+    viewportWidth: number | null;
+    boxWidth: number | null;
+    currencyPanelWidth: number | null;
+    goldPanelWidth: number | null;
+    chartRenderedWidth: number | null;
+    overflowDetected: boolean;
+    overflowSource: string | null;
+  }>({
+    viewportWidth: null,
+    boxWidth: null,
+    currencyPanelWidth: null,
+    goldPanelWidth: null,
+    chartRenderedWidth: null,
+    overflowDetected: false,
+    overflowSource: null,
+  });
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(() => readModeFromUrl());
   const [primaryView, setPrimaryView] = useState<PrimaryView>(() => readPrimaryViewFromUrl());
@@ -1412,6 +1447,7 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
   const [manualFxInput] = useState("");
   const debugEnabled = isDebugEnabledInClient();
   const valueIntervalDebugVisible = isDebugEnabledByQueryParam();
+  const marketCurrencyForPrice = useMemo(() => normalizeCurrencyCode(profile?.currency) ?? "USD", [profile?.currency]);
 
   useEffect(() => {
     if (!ticker || !selectedProjectId) return;
@@ -1496,6 +1532,204 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
       isMounted = false;
     };
   }, [ticker]);
+
+  useEffect(() => {
+    setPriceHistoryMode("currency");
+  }, [ticker]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function buildGoldModeSeries() {
+      if (!priceData) {
+        if (!cancelled) {
+          setGoldAdjustedPriceData(null);
+          setGoldModeFallbackReason("priceData_missing");
+          setGoldModeDroppedPoints(0);
+          setGoldPriceSeriesUsed(null);
+          setFxSeriesUsed(null);
+          setGoldSampleRows([]);
+        }
+        return;
+      }
+
+      const datePoints = [priceData.long?.price, priceData.short?.price]
+        .flatMap((series) => (series?.slice(1) ?? []))
+        .map((row) => row[0])
+        .filter((value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()));
+      if (datePoints.length === 0) {
+        if (!cancelled) {
+          setGoldAdjustedPriceData(null);
+          setGoldModeFallbackReason("price_dates_missing");
+          setGoldModeDroppedPoints(0);
+          setGoldPriceSeriesUsed(null);
+          setFxSeriesUsed(null);
+          setGoldSampleRows([]);
+        }
+        return;
+      }
+
+      const from = formatDateAsIsoUtc(new Date(Math.min(...datePoints.map((d) => d.getTime()))));
+      const to = formatDateAsIsoUtc(new Date(Math.max(...datePoints.map((d) => d.getTime()))));
+      const goldPayload = await fetch(`/api/prices/history?key=XAU_USD_TOZ&from=${from}&to=${to}`).then((res) => res.json()).catch(() => null);
+      const goldRows = Array.isArray(goldPayload?.rows) ? goldPayload.rows as Array<{ date?: unknown; close?: unknown }> : [];
+      const goldByDate = new Map<string, number>();
+      for (const row of goldRows) {
+        const dateRaw = typeof row?.date === "string" ? row.date.trim() : "";
+        const close = Number(row?.close);
+        if (!dateRaw || !Number.isFinite(close) || close <= 0) continue;
+        goldByDate.set(dateRaw.slice(0, 10), close);
+      }
+      if (goldByDate.size === 0) {
+        if (!cancelled) {
+          setGoldAdjustedPriceData(null);
+          setGoldModeFallbackReason("gold_spot_missing");
+          setGoldModeDroppedPoints(0);
+          setGoldPriceSeriesUsed("XAU_USD_TOZ");
+          setFxSeriesUsed(marketCurrencyForPrice === "USD" ? "identity:USD" : null);
+          setGoldSampleRows([]);
+        }
+        return;
+      }
+
+      let fxByDate = new Map<string, number>();
+      let fxPathUsed: string | null = null;
+      if (marketCurrencyForPrice === "USD") {
+        fxByDate = new Map(Array.from(goldByDate.keys()).map((dateKey) => [dateKey, 1]));
+        fxPathUsed = "identity:USD";
+      } else {
+        const fxCandidates = [`USD_${marketCurrencyForPrice}`, `${marketCurrencyForPrice}_USD`];
+        for (const key of fxCandidates) {
+          const fxPayload = await fetch(`/api/prices/history?key=${encodeURIComponent(key)}&from=${from}&to=${to}`).then((res) => res.json()).catch(() => null);
+          const rows = Array.isArray(fxPayload?.rows) ? fxPayload.rows as Array<{ date?: unknown; close?: unknown }> : [];
+          if (rows.length === 0) continue;
+          const map = new Map<string, number>();
+          for (const row of rows) {
+            const dateRaw = typeof row?.date === "string" ? row.date.trim() : "";
+            const close = Number(row?.close);
+            if (!dateRaw || !Number.isFinite(close) || close <= 0) continue;
+            map.set(dateRaw.slice(0, 10), key.startsWith("USD_") ? close : 1 / close);
+          }
+          if (map.size > 0) {
+            fxByDate = map;
+            fxPathUsed = `/api/prices/history?key=${key}${key.startsWith("USD_") ? "" : " (inverted)"}`;
+            break;
+          }
+        }
+      }
+      if (fxByDate.size === 0) {
+        if (!cancelled) {
+          setGoldAdjustedPriceData(null);
+          setGoldModeFallbackReason(`fx_missing_for_${marketCurrencyForPrice}`);
+          setGoldModeDroppedPoints(0);
+          setGoldPriceSeriesUsed("XAU_USD_TOZ");
+          setFxSeriesUsed(null);
+          setGoldSampleRows([]);
+        }
+        return;
+      }
+
+      const sampleRows: Array<{ date: string; sharePrice: number; goldPriceLocal: number; goldOz: number }> = [];
+      let droppedPoints = 0;
+      const transformPriceSeries = (series: PriceSeriesTable | null) => {
+        if (!series || series.length < 2) return null;
+        const headers = series[0];
+        const rows = series.slice(1).map((row) => {
+          const date = row[0];
+          if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+          const dateKey = formatDateAsIsoUtc(date);
+          const goldUsd = goldByDate.get(dateKey);
+          const fxRate = fxByDate.get(dateKey);
+          if (typeof goldUsd !== "number" || !Number.isFinite(goldUsd) || goldUsd <= 0 || typeof fxRate !== "number" || !Number.isFinite(fxRate) || fxRate <= 0) {
+            droppedPoints += 1;
+            return [date, null, null, null, null] as (string | number | Date | null)[];
+          }
+          const goldLocal = goldUsd * fxRate;
+          const transformed: (string | number | Date | null)[] = [date];
+          for (let index = 1; index <= 4; index += 1) {
+            const value = row[index];
+            if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+              transformed.push(value / goldLocal);
+            } else {
+              transformed.push(null);
+            }
+          }
+          if (sampleRows.length < 5) {
+            const sharePrice = row[1];
+            const sharePriceNumber = typeof sharePrice === "number" && Number.isFinite(sharePrice) ? sharePrice : null;
+            const goldOz = transformed[1];
+            if (sharePriceNumber !== null && typeof goldOz === "number" && Number.isFinite(goldOz)) {
+              sampleRows.push({
+                date: dateKey,
+                sharePrice: sharePriceNumber,
+                goldPriceLocal: goldLocal,
+                goldOz,
+              });
+            }
+          }
+          return transformed as (string | number | Date | null)[];
+        }).filter((row): row is (string | number | Date | null)[] => row !== null);
+        return [headers, ...rows] as PriceSeriesTable;
+      };
+
+      const transformed: PriceDataBlock = {
+        long: priceData.long ? { price: transformPriceSeries(priceData.long.price), volume: priceData.long.volume } : null,
+        short: priceData.short ? { price: transformPriceSeries(priceData.short.price), volume: priceData.short.volume } : null,
+      };
+
+      if (!cancelled) {
+        setGoldAdjustedPriceData(transformed);
+        setGoldModeDroppedPoints(droppedPoints);
+        setGoldModeFallbackReason(null);
+        setGoldPriceSeriesUsed("XAU_USD_TOZ");
+        setFxSeriesUsed(fxPathUsed);
+        setGoldSampleRows(sampleRows);
+      }
+    }
+
+    void buildGoldModeSeries();
+    return () => {
+      cancelled = true;
+    };
+  }, [marketCurrencyForPrice, priceData]);
+
+  useEffect(() => {
+    const measure = () => {
+      const viewportWidth = typeof window !== "undefined" ? window.innerWidth : null;
+      const boxWidth = priceHistorySwipeShellRef.current?.getBoundingClientRect().width ?? null;
+      const currencyPanelWidth = currencyPanelRef.current?.getBoundingClientRect().width ?? null;
+      const goldPanelWidth = goldPanelRef.current?.getBoundingClientRect().width ?? null;
+      const chartCards = (priceHistorySwipeShellRef.current?.querySelectorAll(".chart-card") ?? []);
+      const chartRenderedWidth = chartCards.length > 0
+        ? Math.max(...Array.from(chartCards).map((node) => (node as HTMLElement).getBoundingClientRect().width))
+        : null;
+      const overflowSource =
+        (typeof viewportWidth === "number" && typeof boxWidth === "number" && boxWidth > viewportWidth + 1) ? "price_history_box"
+          : (typeof boxWidth === "number" && typeof currencyPanelWidth === "number" && currencyPanelWidth > boxWidth + 1) ? "currency_panel"
+            : (typeof boxWidth === "number" && typeof goldPanelWidth === "number" && goldPanelWidth > boxWidth + 1) ? "gold_panel"
+              : (typeof boxWidth === "number" && typeof chartRenderedWidth === "number" && chartRenderedWidth > boxWidth + 1) ? "chart_card"
+                : null;
+      setPriceLayoutDebug({
+        viewportWidth,
+        boxWidth,
+        currencyPanelWidth,
+        goldPanelWidth,
+        chartRenderedWidth,
+        overflowDetected: overflowSource !== null,
+        overflowSource,
+      });
+    };
+    measure();
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", measure);
+    const observer = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => measure())
+      : null;
+    if (observer && priceHistorySwipeShellRef.current) observer.observe(priceHistorySwipeShellRef.current);
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [priceHistoryMode, priceData, goldAdjustedPriceData]);
 
   useEffect(() => {
     setCorporateProjectEquityPct((prev) => {
@@ -2107,13 +2341,14 @@ export default function SingleStockDashboard({ onTickerChange }: SingleStockDash
     },
   };
 
+  const activePriceData = priceHistoryMode === "gold_oz" ? goldAdjustedPriceData : priceData;
   const combinedLongPriceVolumeData = useMemo(
-    () => combinePriceAndVolumeSeries(priceData?.long?.price ?? null, priceData?.long?.volume ?? null, false),
-    [priceData?.long?.price, priceData?.long?.volume],
+    () => combinePriceAndVolumeSeries(activePriceData?.long?.price ?? null, activePriceData?.long?.volume ?? null, false),
+    [activePriceData?.long?.price, activePriceData?.long?.volume],
   );
   const combinedShortPriceVolumeData = useMemo(
-    () => combinePriceAndVolumeSeries(priceData?.short?.price ?? null, priceData?.short?.volume ?? null, true),
-    [priceData?.short?.price, priceData?.short?.volume],
+    () => combinePriceAndVolumeSeries(activePriceData?.short?.price ?? null, activePriceData?.short?.volume ?? null, true),
+    [activePriceData?.short?.price, activePriceData?.short?.volume],
   );
 
   const longVolumeSummary = useMemo(() => summarizeChartSeries(priceData?.long?.volume ?? null), [priceData?.long?.volume]);
@@ -2863,9 +3098,7 @@ Capital Available: ${availableLabel}`,
     ? statementCurrencyRaw.trim().toUpperCase()
     : "USD";
   const marketCurrencyRaw = profile?.currency ?? statementCurrency;
-  const marketCurrency = typeof marketCurrencyRaw === "string" && marketCurrencyRaw.trim()
-    ? marketCurrencyRaw.trim().toUpperCase()
-    : statementCurrency;
+  const marketCurrency = normalizeCurrencyCode(marketCurrencyRaw) ?? statementCurrency;
   const mixedCurrency = statementCurrency !== marketCurrency;
   const mixedCurrencyNote = mixedCurrency
     ? `Market data uses ${marketCurrency} while statements use ${statementCurrency}.`
@@ -2949,6 +3182,8 @@ Capital Available: ${availableLabel}`,
   const unitMetaByTitle: Record<string, ChartUnitMeta> = {
     "Aktieprishistoria": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
     "Aktieprishistoria (kort)": { unitLabel: marketCurrency, unitKind: "money", yAxisTitle: marketCurrency },
+    "Gold oz (spot per datum)": { unitLabel: "oz Au", unitKind: "ratio", yAxisTitle: "oz Au" },
+    "Gold oz (spot per datum) (kort)": { unitLabel: "oz Au", unitKind: "ratio", yAxisTitle: "oz Au" },
     "Volume": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
     "Volume (kort)": { unitLabel: "shares", unitKind: "shares", yAxisTitle: "shares" },
     "Revenue": { unitLabel: statementCurrency, unitKind: "money", yAxisTitle: statementCurrency },
@@ -4857,78 +5092,195 @@ Capital Available: ${availableLabel}`,
               </section>
               <section className="producer-core-section single-stock-price-body">
                 <div className="producer-core-title-row">
-                  <h2 className="subrub small" style={{ margin: 0 }}>Price History</h2>
+                  <h2 className="subrub small" style={{ margin: 0 }}>{priceHistoryMode === "gold_oz" ? "Pris i oz guld (vid varje tidpunkt)" : "Price History"}</h2>
+                  <InfoPopover
+                    id="single-stock-price-history-gold-oz-info"
+                    openId={openInfoId}
+                    onToggle={(id) => setOpenInfoId((prev) => (prev === id ? null : id))}
+                    onClose={() => setOpenInfoId(null)}
+                    title="Gold oz (spot per datum)"
+                    sections={[
+                      {
+                        heading: "Vad visas?",
+                        lines: ["Visar hur många ounce guld aktien motsvarar vid varje tidpunkt."],
+                      },
+                      {
+                        heading: "Formel",
+                        lines: ["price_in_gold_oz(t) = share_price(t) / gold_price_per_oz(t)"],
+                      },
+                      {
+                        heading: "Datakrav",
+                        lines: ["Aktiepris, guld spot per datum och FX (USD till aktievaluta) alignas på samma datum."],
+                      },
+                    ]}
+                  />
+                  <div className="single-stock-price-mode-chip">{priceHistoryMode === "gold_oz" ? "Au oz" : "Currency"}</div>
                 </div>
+                <p className="bread single-stock-price-mode-description">
+                  {priceHistoryMode === "gold_oz"
+                    ? "Visar hur många ounce guld aktien motsvarar vid varje tidpunkt. Beräknas som aktiepris dividerat med guldpris (spot) samma dag."
+                    : "Aktiepris i vanlig valuta."}
+                </p>
                 {priceLoading && <p className="status">Fetching data…</p>}
                 {!priceLoading && priceError && <p className="status error">{priceError}</p>}
                 {!priceLoading && !priceError && !priceData && (
                   <p className="status empty">No historical data available.</p>
                 )}
+                {!priceLoading && !priceError && priceHistoryMode === "gold_oz" && goldModeFallbackReason && (
+                  <p className="status empty">Gold oz-vy kunde inte byggas ({goldModeFallbackReason}).</p>
+                )}
                 {!priceLoading && !priceError && priceData && !longVolumeData && !shortVolumeData && (
                   <p className="status empty">Volume data saknas för vald period.</p>
                 )}
-                <div className="chartcontainerdoublecolumn single-stock-price-charts">
-                  <ReportedChart reportedChartContext={reportedChartContext}
-                    fiscalYearEndMonth={fiscalYearEndMonth}
-                    chartType="ComboChart"
-                    title="Aktieprishistoria"
-                    data={combinedLongPriceVolumeData}
-                    height={260}
-                    options={{
-                      ...priceChartOptions,
-                      colors: [
-                        PRICE_SERIES_COLORS.close,
-                        PRICE_SERIES_COLORS.sma200,
-                        PRICE_SERIES_COLORS.sma50,
-                        "#7a7a7a",
-                      ],
-                      seriesType: "line",
-                      series: {
-                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        3: { type: "bars", targetAxisIndex: 1 },
-                      },
-                      vAxes: {
-                        0: { title: marketCurrency },
-                        1: { title: "shares", format: "short" },
-                      },
-                      bar: { groupWidth: "45%" },
-                    }}
-                    y2AxisTitle="shares"
-                  />
-                  <ReportedChart reportedChartContext={reportedChartContext}
-                    fiscalYearEndMonth={fiscalYearEndMonth}
-                    chartType="ComboChart"
-                    title="Aktieprishistoria (kort)"
-                    data={combinedShortPriceVolumeData}
-                    height={260}
-                    options={{
-                      ...priceChartOptions,
-                      colors: [
-                        PRICE_SERIES_COLORS.close,
-                        PRICE_SERIES_COLORS.sma200,
-                        PRICE_SERIES_COLORS.sma50,
-                        PRICE_SERIES_COLORS.sma20,
-                        "#7a7a7a",
-                      ],
-                      seriesType: "line",
-                      series: {
-                        0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
-                        1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        3: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
-                        4: { type: "bars", targetAxisIndex: 1 },
-                      },
-                      vAxes: {
-                        0: { title: marketCurrency },
-                        1: { title: "shares", format: "short" },
-                      },
-                      bar: { groupWidth: "45%" },
-                    }}
-                    y2AxisTitle="shares"
-                  />
+                <div className="single-stock-price-swipe-indicator">
+                  <span>Currency ↔ Gold oz</span>
+                  <div className="single-stock-price-toggle-buttons">
+                    <button
+                      type="button"
+                      className={`single-stock-price-toggle ${priceHistoryMode === "currency" ? "is-active" : ""}`}
+                      onClick={() => setPriceHistoryMode("currency")}
+                    >
+                      Currency
+                    </button>
+                    <button
+                      type="button"
+                      className={`single-stock-price-toggle ${priceHistoryMode === "gold_oz" ? "is-active" : ""}`}
+                      onClick={() => setPriceHistoryMode("gold_oz")}
+                    >
+                      Gold oz
+                    </button>
+                  </div>
                 </div>
+                <div
+                  className="single-stock-price-swipe-shell"
+                  ref={priceHistorySwipeShellRef}
+                  onTouchStart={(event) => {
+                    swipeTouchStartXRef.current = event.touches[0]?.clientX ?? null;
+                  }}
+                  onTouchEnd={(event) => {
+                    const startX = swipeTouchStartXRef.current;
+                    const endX = event.changedTouches[0]?.clientX ?? null;
+                    swipeTouchStartXRef.current = null;
+                    if (startX === null || endX === null) return;
+                    const delta = endX - startX;
+                    if (Math.abs(delta) < 40) return;
+                    if (delta < 0) {
+                      setPriceHistoryMode("gold_oz");
+                      return;
+                    }
+                    setPriceHistoryMode("currency");
+                  }}
+                >
+                  <div
+                    className="single-stock-price-swipe-track"
+                    style={{ transform: `translateX(-${priceHistoryMode === "gold_oz" ? 100 : 0}%)` }}
+                  >
+                  {(["currency", "gold_oz"] as const).map((mode) => {
+                    const modeData = mode === "gold_oz" ? goldAdjustedPriceData : priceData;
+                    const longData = combinePriceAndVolumeSeries(modeData?.long?.price ?? null, modeData?.long?.volume ?? null, false);
+                    const shortData = combinePriceAndVolumeSeries(modeData?.short?.price ?? null, modeData?.short?.volume ?? null, true);
+                    const yAxisTitle = mode === "gold_oz" ? "oz Au" : marketCurrency;
+                    const isGold = mode === "gold_oz";
+                    const accentColor = isGold ? "#b45309" : PRICE_SERIES_COLORS.close;
+                    return (
+                      <div
+                        className={`single-stock-price-swipe-page ${isGold ? "is-gold" : "is-currency"}`}
+                        key={`price-history-mode-${mode}`}
+                        ref={isGold ? goldPanelRef : currencyPanelRef}
+                      >
+                        <div className="chartcontainerdoublecolumn single-stock-price-charts">
+                          <ReportedChart reportedChartContext={reportedChartContext}
+                            fiscalYearEndMonth={fiscalYearEndMonth}
+                            chartType="ComboChart"
+                            title={isGold ? "Gold oz (spot per datum)" : "Aktieprishistoria"}
+                            data={longData}
+                            height={260}
+                            options={{
+                              ...priceChartOptions,
+                              colors: [
+                                accentColor,
+                                PRICE_SERIES_COLORS.sma200,
+                                PRICE_SERIES_COLORS.sma50,
+                                "#7a7a7a",
+                              ],
+                              seriesType: "line",
+                              series: {
+                                0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                                1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                                2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                                3: { type: "bars", targetAxisIndex: 1 },
+                              },
+                              vAxes: {
+                                0: { title: yAxisTitle },
+                                1: { title: "shares", format: "short" },
+                              },
+                              bar: { groupWidth: "45%" },
+                            }}
+                            y2AxisTitle="shares"
+                          />
+                          <ReportedChart reportedChartContext={reportedChartContext}
+                            fiscalYearEndMonth={fiscalYearEndMonth}
+                            chartType="ComboChart"
+                            title={isGold ? "Gold oz (spot per datum) (kort)" : "Aktieprishistoria (kort)"}
+                            data={shortData}
+                            height={260}
+                            options={{
+                              ...priceChartOptions,
+                              colors: [
+                                accentColor,
+                                PRICE_SERIES_COLORS.sma200,
+                                PRICE_SERIES_COLORS.sma50,
+                                PRICE_SERIES_COLORS.sma20,
+                                "#7a7a7a",
+                              ],
+                              seriesType: "line",
+                              series: {
+                                0: { type: "line", lineWidth: 2, targetAxisIndex: 0 },
+                                1: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                                2: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                                3: { type: "line", lineWidth: 1.5, targetAxisIndex: 0 },
+                                4: { type: "bars", targetAxisIndex: 1 },
+                              },
+                              vAxes: {
+                                0: { title: yAxisTitle },
+                                1: { title: "shares", format: "short" },
+                              },
+                              bar: { groupWidth: "45%" },
+                            }}
+                            y2AxisTitle="shares"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                </div>
+                {valueIntervalDebugVisible && (
+                  <details style={{ marginTop: 10 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 12, color: "#334155" }}>Debug: Price history Currency ↔ Gold oz</summary>
+                    <div style={{ display: "grid", gap: 4, marginTop: 8, fontSize: 12 }}>
+                      <div><strong>läge:</strong> {priceHistoryMode}</div>
+                      <div><strong>aktievaluta:</strong> {marketCurrencyForPrice}</div>
+                      <div><strong>guldserie som används:</strong> {goldPriceSeriesUsed ?? "—"}</div>
+                      <div><strong>FX-serie:</strong> {fxSeriesUsed ?? "—"}</div>
+                      <div><strong>formel:</strong> price_in_gold_oz(t) = share_price(t) / gold_price_per_oz(t)</div>
+                      <div><strong>viewport width:</strong> {priceLayoutDebug.viewportWidth ?? "—"}</div>
+                      <div><strong>box width:</strong> {priceLayoutDebug.boxWidth ?? "—"}</div>
+                      <div><strong>panel width (currency):</strong> {priceLayoutDebug.currencyPanelWidth ?? "—"}</div>
+                      <div><strong>panel width (gold):</strong> {priceLayoutDebug.goldPanelWidth ?? "—"}</div>
+                      <div><strong>grafens renderade width:</strong> {priceLayoutDebug.chartRenderedWidth ?? "—"}</div>
+                      <div><strong>overflow sker:</strong> {String(priceLayoutDebug.overflowDetected)}</div>
+                      <div><strong>overflow-element:</strong> {priceLayoutDebug.overflowSource ?? "none"}</div>
+                      <div><strong>antal droppade datapunkter:</strong> {goldModeDroppedPoints}</div>
+                      <div><strong>fallback-logik:</strong> {goldModeFallbackReason ?? "none"}</div>
+                      {goldSampleRows.map((row, index) => (
+                        <div key={`gold-sample-row-${row.date}-${index}`}>
+                          <strong>dp {index + 1}:</strong> {row.date} | share={row.sharePrice.toFixed(4)} | gold_local={row.goldPriceLocal.toFixed(4)} | oz={row.goldOz.toFixed(8)}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </section>
             </div>
           </div>

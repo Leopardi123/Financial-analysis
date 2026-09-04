@@ -748,10 +748,112 @@
 .single-stock-price-body {
   margin-top: 6px;
   padding: 8px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .single-stock-price-charts {
   margin-top: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.single-stock-price-mode-chip {
+  font-size: 11px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: #334155;
+  background: #f8fafc;
+}
+
+.single-stock-price-mode-description {
+  margin-top: 4px !important;
+}
+
+.single-stock-price-swipe-indicator {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.single-stock-price-toggle-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.single-stock-price-toggle {
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.single-stock-price-toggle.is-active {
+  border-color: #1e293b;
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.single-stock-price-swipe-shell {
+  margin-top: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  touch-action: pan-y;
+  box-sizing: border-box;
+}
+
+.single-stock-price-swipe-track {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  transform: translateX(0);
+  transition: transform 220ms ease;
+  will-change: transform;
+  box-sizing: border-box;
+}
+
+.single-stock-price-swipe-page {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 0 100%;
+  flex-shrink: 0;
+  padding-bottom: 2px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.single-stock-price-swipe-page.is-gold {
+  border-top: 2px solid rgba(180, 83, 9, 0.45);
+}
+
+.single-stock-price-charts .chart-card,
+.single-stock-price-charts > *,
+.single-stock-price-swipe-page svg,
+.single-stock-price-swipe-page canvas {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 900px) {
+  .single-stock-price-charts {
+    grid-template-columns: 1fr;
+  }
 }
 
 .single-stock-tasks-card {
