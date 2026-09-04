@@ -304,7 +304,8 @@ export function selectCorporateProjectStartMilestones(
   return projects.flatMap((project) => {
     if (!finite(project.productionStartYear)) return [];
     const state = timeline.periods.find((period) => period.calendarYear === project.productionStartYear);
-    if (!state) return [];
+    // Project starts before the valuation year remain in the internal trace, but they are historical rather than current valuation milestones.
+    if (!state || state.periodIndex < timeline.todayPeriod) return [];
     return [{
       projectId: project.projectId,
       projectName: project.projectName ?? null,
@@ -335,8 +336,12 @@ export function selectValuationChart(
   startPeriods: number[] = timeline.productionStartPeriod === null ? [] : [timeline.productionStartPeriod],
 ): ValuationChartSelection {
   const selectedStartPeriod = selectValuationStartPeriod(timeline, startPeriods);
-  const validStartPeriods = new Set(startPeriods.filter((period) => Number.isInteger(period) && timeline.periods[period]));
-  if (selectedStartPeriod !== null) validStartPeriods.add(selectedStartPeriod);
+  const validStartPeriods = new Set(startPeriods.filter((period) =>
+    Number.isInteger(period) && period >= timeline.todayPeriod && timeline.periods[period]
+  ));
+  if (selectedStartPeriod !== null && timeline.productionStartPeriod === selectedStartPeriod) {
+    validStartPeriods.add(selectedStartPeriod);
+  }
   const selectedStart = selectedStartPeriod === null ? null : timeline.periods[selectedStartPeriod] ?? null;
   const points = timeline.periods.map((period): ValuationChartPoint => {
     const isToday = period.periodIndex === timeline.todayPeriod;
@@ -357,6 +362,7 @@ export function selectValuationChart(
     };
   });
   const maximum = (field: 'low' | 'high'): ValuationChartPoint | null => points.reduce<ValuationChartPoint | null>((peak, point) => {
+    if (point.periodIndex < timeline.todayPeriod) return peak;
     const value = point[field];
     if (!finite(value)) return peak;
     return peak === null || value > (peak[field] as number) ? point : peak;
@@ -388,18 +394,22 @@ function rollStartDcfToPeriod(
 /** Corporate and Project tables/charts share this exact milestone rule. */
 export function selectValuationStartPeriod(timeline: ValuationTimeline, startPeriods: number[] = []): number | null {
   const valid = startPeriods
-    .filter((period) => Number.isInteger(period) && timeline.periods[period])
+    .filter((period) => Number.isInteger(period) && period >= timeline.todayPeriod && timeline.periods[period])
     .sort((a, b) => {
       const yearDelta = timeline.periods[a].calendarYear - timeline.periods[b].calendarYear;
       return yearDelta !== 0 ? yearDelta : a - b;
     });
   if (valid.length > 0) return valid[0];
-  return timeline.productionStartPeriod !== null && timeline.periods[timeline.productionStartPeriod]
+  return timeline.productionStartPeriod !== null
+    && timeline.productionStartPeriod >= timeline.todayPeriod
+    && timeline.periods[timeline.productionStartPeriod]
     ? timeline.productionStartPeriod
-    : null;
+    : timeline.periods[timeline.todayPeriod]
+      ? timeline.todayPeriod
+      : null;
 }
 
-/** Clips presentation only, after anchors and peaks were selected over the full timeline. */
+/** Clips presentation only, after anchors and peaks were selected over the current/future valuation window. */
 export function selectValuationChartDisplayRange(
   timeline: ValuationTimeline,
   selection: ValuationChartSelection,
@@ -423,7 +433,9 @@ export function selectValuationChartDisplayRange(
     chartEndYear,
     controllingYear,
     latestProjectStartYear,
-    points: selection.points.filter((point) => point.calendarYear <= chartEndYear),
+    points: selection.points.filter((point) =>
+      point.periodIndex >= timeline.todayPeriod && point.calendarYear <= chartEndYear
+    ),
   };
 }
 
