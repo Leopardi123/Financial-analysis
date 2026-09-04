@@ -1,0 +1,98 @@
+name: One-time PR534 per-share patch
+
+on:
+  push:
+    branches:
+      - feat/corporate-equity-value-table-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/corporate-equity-value-table-v2
+          fetch-depth: 0
+      - name: Add per-share rows only
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/SingleStockDashboard.tsx')
+          text = path.read_text()
+
+          current = '''                        <div className="compact-metric-row">
+                          <span className="compact-metric-label">Corporate equity value nuvärde</span>
+                          <span className="compact-metric-dots" />
+                          <span className="compact-metric-value">{
+                            isFiniteNumber(corporateEquityValue?.current?.valueTargetCurrency)
+                              ? formatMetricValue({ value: corporateEquityValue.current.valueTargetCurrency, reason: null }, "money", lockedTargetCurrency)
+                              : "n/a"
+                          }</span>
+                        </div>
+'''
+          current_with_per_share = current + '''                        <div className="compact-metric-row">
+                          <span className="compact-metric-label">Corporate equity value nuvärde/aktie</span>
+                          <span className="compact-metric-dots" />
+                          <span className="compact-metric-value">{
+                            isFiniteNumber(corporateEquityValue?.current?.valueTargetCurrency)
+                            && isFiniteNumber(corporateViewMetrics.marketBox.sharesPf.value)
+                            && corporateViewMetrics.marketBox.sharesPf.value > 0
+                              ? formatMetricValue({ value: corporateEquityValue.current.valueTargetCurrency / corporateViewMetrics.marketBox.sharesPf.value, reason: null }, "money", lockedTargetCurrency)
+                              : "n/a"
+                          }</span>
+                        </div>
+'''
+
+          production = '''                        <div className="compact-metric-row">
+                          <span className="compact-metric-label">Corporate equity value produktionsstart</span>
+                          <span className="compact-metric-dots" />
+                          <span className="compact-metric-value">{
+                            corporateEquityValue?.productionStarts?.length
+                              ? corporateEquityValue.productionStarts.map((row) => (
+                                  `${row.year}: ${isFiniteNumber(row.valueTargetCurrency)
+                                    ? formatMetricValue({ value: row.valueTargetCurrency, reason: null }, "money", lockedTargetCurrency)
+                                    : "n/a"}`
+                                )).join(", ")
+                              : "n/a"
+                          }</span>
+                        </div>
+'''
+          production_with_per_share = production + '''                        <div className="compact-metric-row">
+                          <span className="compact-metric-label">Corporate equity value produktionsstart/aktie</span>
+                          <span className="compact-metric-dots" />
+                          <span className="compact-metric-value">{
+                            corporateEquityValue?.productionStarts?.length
+                              ? corporateEquityValue.productionStarts.map((row) => (
+                                  `${row.year}: ${isFiniteNumber(row.valueTargetCurrency)
+                                    && isFiniteNumber(corporateViewMetrics.marketBox.sharesPf.value)
+                                    && corporateViewMetrics.marketBox.sharesPf.value > 0
+                                      ? formatMetricValue({ value: row.valueTargetCurrency / corporateViewMetrics.marketBox.sharesPf.value, reason: null }, "money", lockedTargetCurrency)
+                                      : "n/a"}`
+                                )).join(", ")
+                              : "n/a"
+                          }</span>
+                        </div>
+'''
+
+          if text.count(current) != 1:
+              raise SystemExit(f'Expected exactly one current equity row, found {text.count(current)}')
+          if text.count(production) != 1:
+              raise SystemExit(f'Expected exactly one production equity row, found {text.count(production)}')
+
+          text = text.replace(current, current_with_per_share, 1)
+          text = text.replace(production, production_with_per_share, 1)
+          path.write_text(text)
+          PY
+
+          rm .github/workflows/one-time-pr534-per-share.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/SingleStockDashboard.tsx .github/workflows/one-time-pr534-per-share.yml
+          git commit -m "Add Corporate equity value per-share rows"
+          git push origin HEAD:feat/corporate-equity-value-table-v2
