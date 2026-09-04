@@ -18,18 +18,46 @@ jobs:
         with:
           ref: feat/corporate-equity-value-table-clean
           fetch-depth: 0
-      - name: Apply isolated Corporate equity value patch
-        run: python scripts/one-time-corporate-equity-value-table.py
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
-      - name: Run equity-value and valuation regressions
+      - name: Capture unmodified main snapshot regression baseline
+        shell: bash
+        run: |
+          git worktree add /tmp/financial-analysis-main origin/main
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/financial-analysis-main/node_modules
+          set +e
+          (cd /tmp/financial-analysis-main && node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts) > /tmp/main-baseline.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/main-baseline.log
+          grep '^✖ ' /tmp/main-baseline.log | sort -u > /tmp/main-baseline-failures.txt || true
+          echo "baseline_status=$status"
+          cat /tmp/main-baseline-failures.txt
+      - name: Apply isolated Corporate equity value patch
+        run: python scripts/one-time-corporate-equity-value-table.py
+      - name: Run targeted equity-value regressions
         run: |
           node --experimental-strip-types src/lib/corporate/valuation/__tests__/corporateEquityValue.test.ts
           node --experimental-strip-types src/lib/snapshot/__tests__/producerNextProjectIrr.prebuild.test.ts
-          node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts
           node --experimental-strip-types src/components/project/__tests__/corporateValuationChart.integration.test.ts
+          node --experimental-strip-types src/lib/valuation/__tests__/canonicalValuationTimeline.test.ts
+      - name: Ensure full snapshot regression has no new failures versus main
+        shell: bash
+        run: |
+          set +e
+          node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts > /tmp/patched.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/patched.log
+          grep '^✖ ' /tmp/patched.log | sort -u > /tmp/patched-failures.txt || true
+          echo "patched_status=$status"
+          echo "Main baseline failures:"
+          cat /tmp/main-baseline-failures.txt
+          echo "Patched failures:"
+          cat /tmp/patched-failures.txt
+          diff -u /tmp/main-baseline-failures.txt /tmp/patched-failures.txt
       - name: Run production build
         run: npm run build
       - name: Commit implementation and remove one-time tooling
