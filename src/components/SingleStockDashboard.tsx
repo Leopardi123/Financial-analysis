@@ -3208,6 +3208,13 @@ Capital Available: ${availableLabel}`,
     };
   }, [corporateExtraSharesInput, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);
 
+  const corporateEquityValue = (corporateSnapshotData as {
+    corporateEquityValue?: {
+      current?: { valueTargetCurrency: number | null } | null;
+      productionStarts?: Array<{ year: number; valueTargetCurrency: number | null }>;
+    } | null;
+  } | null)?.corporateEquityValue ?? null;
+
   useEffect(() => {
     if (!debugEnabled) return;
     if (projectViewMetrics) console.table(projectViewMetrics.diagnostics.valuation_metric_audit.map((row) => ({ scope: "project", ...row })));
@@ -5903,6 +5910,28 @@ Capital Available: ${availableLabel}`,
                             }</span>
                           </div>
                         ))}
+                        <div className="compact-metric-row">
+                          <span className="compact-metric-label">Corporate equity value nuvärde</span>
+                          <span className="compact-metric-dots" />
+                          <span className="compact-metric-value">{
+                            isFiniteNumber(corporateEquityValue?.current?.valueTargetCurrency)
+                              ? formatMetricValue({ value: corporateEquityValue.current.valueTargetCurrency, reason: null }, "money", lockedTargetCurrency)
+                              : "n/a"
+                          }</span>
+                        </div>
+                        <div className="compact-metric-row">
+                          <span className="compact-metric-label">Corporate equity value produktionsstart</span>
+                          <span className="compact-metric-dots" />
+                          <span className="compact-metric-value">{
+                            corporateEquityValue?.productionStarts?.length
+                              ? corporateEquityValue.productionStarts.map((row) => (
+                                  `${row.year}: ${isFiniteNumber(row.valueTargetCurrency)
+                                    ? formatMetricValue({ value: row.valueTargetCurrency, reason: null }, "money", lockedTargetCurrency)
+                                    : "n/a"}`
+                                )).join(", ")
+                              : "n/a"
+                          }</span>
+                        </div>
                       </div>
                         </>}
                           columns={corporateSensitivityColumns}
