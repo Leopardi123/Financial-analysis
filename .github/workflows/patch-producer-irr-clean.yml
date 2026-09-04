@@ -1,0 +1,49 @@
+name: Patch producer-only next-project IRR
+
+on:
+  push:
+    branches:
+      - fix/producer-next-project-irr-clean
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[workflow-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/producer-next-project-irr-clean
+          fetch-depth: 0
+      - name: Restrict next-project IRR to producing portfolios
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/snapshot/runCorporateSnapshot.ts')
+          text = path.read_text()
+          old = 'const useNextProjectIrr = hasProducingProjectAtValuation || projectsForBuildFunding.length > 1;'
+          new = 'const useNextProjectIrr = hasProducingProjectAtValuation;'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one producer predicate to patch, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+
+          test_path = Path('src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts')
+          test_text = test_path.read_text()
+          marker = "test('pre-revenue multi-project portfolio keeps canonical corporate IRR'"
+          if marker not in test_text:
+              test_text += '''\n\ntest('pre-revenue multi-project portfolio keeps canonical corporate IRR', async () => {\n  const body = await loadFixture();\n  const projects = body.projects as Array<Record<string, unknown>>;\n  const secondProject = structuredClone(projects[0]);\n  secondProject.projectId = 'ABRA_SECOND_PRE_REVENUE';\n  projects.push(secondProject);\n  body.valuationYear = new Date().getUTCFullYear();\n\n  const result = await runCorporateSnapshotPipeline({ body, refresh: false });\n  assert.equal(result.ok, true);\n  if (!result.ok) return;\n\n  const irr = result.snapshot.corporate?.lista3Metrics?.IRR;\n  assert.equal(typeof irr, 'number');\n  const debug = result.diagnostics.meta.corporateLista3Debug?.perMetric?.IRR;\n  assert.notEqual(debug?.intermediates?.method, 'NEXT_PROJECT_IRR');\n});\n'''
+              test_path.write_text(test_text)
+          PY
+          rm .github/workflows/patch-producer-irr-clean.yml
+      - name: Commit clean patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m '[workflow-patched] Restrict next-project IRR to producers'
+          git push origin HEAD:fix/producer-next-project-irr-clean

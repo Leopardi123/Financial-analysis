@@ -13,7 +13,7 @@ import { getTodayUtcDateString } from '../prices/fx/date.ts';
 import { fxKeyUSDTo } from '../prices/fx/keys.ts';
 import { computeLista2CfDcfMetrics, makeNullLista2CfDcfMetrics } from './lista2CfDcf.ts';
 import { computeLista3aProjectEfficiencyMetrics } from './lista3aProjectEfficiency.ts';
-import { computeLista3 } from '../metrics/lista3.ts';
+import { computeIrr, computeLista3 } from '../metrics/lista3.ts';
 import { deriveCorporateRealPayback } from '../corporate/payback.ts';
 import { computeLista4TenYearMetrics } from './lista4TenYear.ts';
 import { buildCorporateModeledValuationTimeline } from './corporateModeledValuationTimeline.ts';
@@ -27,7 +27,6 @@ import { applyStressModifiers } from './applyStressModifiers.ts';
 import { buildValuationTimeline, selectCorporateProjectStartMilestones, selectTimelineChartSeries } from '../valuation/canonicalValuationTimeline.ts';
 import { computeCorporateQualityMultiples } from '../corporate/multipleContrast/engine.ts';
 import { buildCorporatePreRevenueValuationOutput } from '../corporate/preRevenueValuationOutput.ts';
-import { computeForwardCapitalEfficiency } from '../tier1/forwardCapitalEfficiency.ts';
 
 const CORPORATE_SNAPSHOT_MAX_REFRESH_KEYS = 10;
 
@@ -2363,18 +2362,37 @@ export async function runCorporateSnapshotPipeline(args: {
       ? 0
       : firstFutureProductionYear - input.valuationYear + delayPeriods;
     const hasProducingProjectAtValuation = projectsForBuildFunding.some((project) => project.productionStartYear <= input.valuationYear);
-    const forwardCapitalEfficiency = hasProducingProjectAtValuation
-      ? computeForwardCapitalEfficiency({
-          fcffUSD: valuationFcffUSD,
-          futureCapitalUSD: valuationCapexUSD.map((capex, t) => {
-            const closure = valuationReclamationUSD[t];
-            return toFiniteOrNull(capex) !== null && toFiniteOrNull(closure) !== null
-              ? (capex as number) + (closure as number)
-              : null;
-          }),
-          discountRate: input.discountRate,
-        })
-      : { value: null, npvUSD: null, futureCapitalPvUSD: null, reason: 'N/A: inga modellerade projekt producerar vid värderingsåret.' };
+    const nextProjectCandidates = projectsForBuildFunding.flatMap((project) => {
+      if (project.productionStartYear <= input.valuationYear) return [];
+      const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
+      if (!context) return [];
+      const constructionYears = context.economics.capexUSD
+        .map((value, t) => toFiniteOrNull(value) !== null && (value as number) > 0 && t < project.productionStartPeriod ? project.yearsByPeriod[t] : null)
+        .filter((year): year is number => Number.isInteger(year));
+      return [{ project, context, constructionStartYear: constructionYears[0] ?? project.productionStartYear }];
+    });
+    const nextConstructionStartYear = nextProjectCandidates.length > 0
+      ? Math.min(...nextProjectCandidates.map((candidate) => candidate.constructionStartYear))
+      : null;
+    const nextProjects = nextConstructionStartYear === null
+      ? []
+      : nextProjectCandidates.filter((candidate) => candidate.constructionStartYear === nextConstructionStartYear);
+    const nextProjectYears = nextProjects.length > 0
+      ? Array.from({
+          length: Math.max(...nextProjects.flatMap(({ project }) => project.yearsByPeriod)) - Math.min(...nextProjects.flatMap(({ project }) => project.yearsByPeriod)) + 1,
+        }, (_, index) => Math.min(...nextProjects.flatMap(({ project }) => project.yearsByPeriod)) + index)
+      : [];
+    const nextProjectFcff = nextProjectYears.map((year) => nextProjects.reduce<number | null>((sum, { project, context }) => {
+      if (sum === null) return null;
+      const localPeriod = project.yearsByPeriod.indexOf(year);
+      if (localPeriod < 0) return sum;
+      const value = toFiniteOrNull(context.economics.fcffUSD[localPeriod]);
+      return value === null ? null : sum + value;
+    }, 0));
+    const useNextProjectIrr = hasProducingProjectAtValuation || projectsForBuildFunding.length > 1;
+    const nextProjectIrr = useNextProjectIrr && nextProjectFcff.length > 0
+      ? computeIrr(nextProjectFcff, input.discountRate).selectedRoot
+      : null;
     diagnostics.meta.valuationYear = input.valuationYear;
     diagnostics.meta.valuationTimeAxis = {
       valuationYear: input.valuationYear,
@@ -3129,8 +3147,7 @@ export async function runCorporateSnapshotPipeline(args: {
 
     const corporateLista3 = {
       ...corporateLista3Result.metrics,
-      IRR: hasProducingProjectAtValuation ? null : corporateLista3Result.metrics.IRR,
-      Forward_Capital_Efficiency: hasProducingProjectAtValuation ? forwardCapitalEfficiency.value : null,
+      IRR: useNextProjectIrr ? nextProjectIrr : corporateLista3Result.metrics.IRR,
       Payback_real_years: corporateRealPayback.paybackYears,
       AISC_LOM: additionalLista3ByMetric.AISC_LOM.value,
       BreakEven_AuEq: additionalLista3ByMetric.BreakEven_AuEq.value,
@@ -3234,7 +3251,6 @@ export async function runCorporateSnapshotPipeline(args: {
       Payback_approx: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
       Payback_real: ['fcfUSD_total', 'tp_payback_real'],
       IRR: ['fcfUSD_total', 'masterN'],
-      Forward_Capital_Efficiency: ['fcfUSD_total', 'capexUSD_total', 'reclamationUSD_total', 'discountRate'],
       ROI_10Y: ['initialCapexUSD_main', 'fcfUSD_total', 'tp_main'],
       LOM_avg_EBIT_ROCE: ['ebitUSD_total', 'initialCapexUSD_main', 'tp_main'],
       LOM_discounted_EBIT_ROCE: ['ebitUSD_total', 'discountFactors_toToday', 'initialCapexUSD_main', 'tp_main'],
@@ -3294,20 +3310,17 @@ export async function runCorporateSnapshotPipeline(args: {
       ...kapitalavkastningMetrics.intermediates,
     };
 
-    const fcePayload = ensureMetricPayload('Forward_Capital_Efficiency');
-    fcePayload.formula = 'NPV(discountRate, corporate FCFF) / PV(discountRate, total CAPEX including sustaining + closure)';
-    fcePayload.inputs = {
-      fcffUSD_total: valuationFcffUSD,
-      capexUSD_total: valuationCapexUSD,
-      reclamationUSD_total: valuationReclamationUSD,
-      discountRate: input.discountRate,
-      hasProducingProjectAtValuation,
-    };
-    fcePayload.intermediates = {
-      npvUSD: forwardCapitalEfficiency.npvUSD,
-      futureCapitalPvUSD: forwardCapitalEfficiency.futureCapitalPvUSD,
-      applicability: hasProducingProjectAtValuation ? 'APPLICABLE' : 'N/A',
-    };
+    const irrPayload = ensureMetricPayload('IRR');
+    if (useNextProjectIrr) {
+      irrPayload.formula = 'IRR(FCFF for earliest next modeled construction start)';
+      irrPayload.inputs = { nextProjectFcff, valuationYear: input.valuationYear };
+      irrPayload.intermediates = {
+        method: 'NEXT_PROJECT_IRR',
+        selectedProjectIds: nextProjects.map(({ project }) => project.projectId),
+        constructionStartYear: nextConstructionStartYear,
+      };
+      irrPayload.missingInputs = nextProjectFcff.length > 0 ? [] : ['nextProjectFcff'];
+    }
 
     const previewValues: Record<string, number | null> = {
       AISC_LOM: additionalLista3ByMetric.AISC_LOM.value,
@@ -3316,7 +3329,6 @@ export async function runCorporateSnapshotPipeline(args: {
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.value,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.value,
       Corporate_ROIC: null,
-      Forward_Capital_Efficiency: hasProducingProjectAtValuation ? forwardCapitalEfficiency.value : null,
       LOM_avg_NOPAT_ROIC: avgNopatRoic.value,
       Kapitalavkastning_LOM: kapitalavkastningMetrics.kapitalavkastningLom,
       Kapitalavkastning_per_Year: kapitalavkastningMetrics.kapitalavkastningPerYear,
@@ -3329,7 +3341,6 @@ export async function runCorporateSnapshotPipeline(args: {
       LOM_avg_EBIT_ROCE: additionalLista3ByMetric.LOM_avg_EBIT_ROCE.nullReason,
       LOM_discounted_EBIT_ROCE: additionalLista3ByMetric.LOM_discounted_EBIT_ROCE.nullReason,
       Corporate_ROIC: 'domain rule: missing required inputs',
-      Forward_Capital_Efficiency: hasProducingProjectAtValuation ? forwardCapitalEfficiency.reason : 'N/A: endast relevant när minst ett modellerat projekt redan producerar vid värderingsåret.',
       LOM_avg_NOPAT_ROIC: avgNopatRoic.nullReason,
       Kapitalavkastning_LOM: kapitalavkastningMetrics.nullReason,
       Kapitalavkastning_per_Year: kapitalavkastningMetrics.nullReason,

@@ -311,8 +311,8 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
             <div><span>Uthållig combined scale</span><strong>{typeof assessment.support.combinedScaleEquivalent === 'number' ? `${assessment.support.combinedScaleEquivalent.toFixed(2)}x` : '—'}</strong></div>
             <div><span>Skalfönster</span><strong>{scaleWindow}</strong></div>
             <div><span>Kapitalmått · spot</span><strong>{assessment.support.capitalReturnsMetric ?? '—'}</strong></div>
-            <div><span>Tier-IRR · spot</span><strong>{assessment.support.capitalReturnsMetric === 'IRR' && typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : 'n/a'}</strong></div>
-            <div><span>Tier-FCE · spot</span><strong>{assessment.support.capitalReturnsMetric === 'FCE' && typeof assessment.support.tierBaseFce === 'number' ? `${(assessment.support.tierBaseFce * 100).toFixed(1)} %` : 'n/a'}</strong></div>
+            <div><span>Tier-IRR · spot</span><strong>{typeof assessment.support.tierBaseIrr === 'number' ? `${(assessment.support.tierBaseIrr * 100).toFixed(1)} %` : 'n/a'}</strong></div>
+            {assessment.support.tierBaseIrrMethod === 'NEXT_PROJECT_IRR' && <div><span>IRR-projekt</span><strong>{assessment.support.tierBaseIrrProjectIds?.join(', ') || 'n/a'}</strong></div>}
             <div><span>Cost Quartile</span><strong>{gateText(assessment.gates.cost)}</strong></div>
             <div><span>Cost-underlag</span><strong>{costBasisLabel}</strong></div>
             <div><span>Spotdatum</span><strong>{formatDate(assessment.support.tierBasePriceAsOfUtc)}</strong></div>
