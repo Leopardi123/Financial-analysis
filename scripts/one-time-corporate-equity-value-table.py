@@ -1,0 +1,343 @@
+from pathlib import Path
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    text = p.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: expected one occurrence, found {count}: {old[:160]!r}")
+    p.write_text(text.replace(old, new, 1))
+
+
+helper = r'''import type { CashWaterfallResult } from '../financing/cashWaterfall.ts';
+
+export type CorporateEquityValuePoint = {
+  year: number;
+  underlyingAssetValueTargetCurrency: number | null;
+  openingCashTargetCurrency: number | null;
+  openingDebtTargetCurrency: number | null;
+  openingNetCashTargetCurrency: number | null;
+  valueTargetCurrency: number | null;
+};
+
+export type CorporateEquityValueProductionStartPoint = CorporateEquityValuePoint & {
+  projectIds: string[];
+};
+
+export type CorporateEquityValueOutput = {
+  basis: 'opening_balance';
+  definition: 'remaining_corporate_dcf_plus_opening_net_cash';
+  valuationYear: number;
+  current: CorporateEquityValuePoint | null;
+  productionStarts: CorporateEquityValueProductionStartPoint[];
+  diagnostics: string[];
+};
+
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+/**
+ * Experimental Corporate equity-value bridge used only for the two explicit table
+ * rows. It does not mutate canonical NPV, NAV, DCF, financing, or chart semantics.
+ *
+ * A valuation point for year Y uses remaining Corporate DCF from Y onward and the
+ * opening balance sheet for Y. The same year's FCFF therefore remains in DCF and
+ * cannot also appear in cash.
+ */
+export function buildCorporateEquityValue(args: {
+  valuationYear: number;
+  reportedCashTarget: number | null;
+  reportedDebtTarget: number | null;
+  fxUSDToTarget: number | null;
+  waterfall: CashWaterfallResult | null;
+  dcfByYear: Array<{ year: number; dcfTargetCurrency: number | null }>;
+  productionStarts: Array<{ projectId: string; year: number }>;
+}): CorporateEquityValueOutput {
+  const diagnostics: string[] = [];
+  const cashByYear = new Map<number, number | null>();
+  const debtByYear = new Map<number, number | null>();
+  const reportedCash = finite(args.reportedCashTarget) ? args.reportedCashTarget : null;
+  const reportedDebt = finite(args.reportedDebtTarget) ? args.reportedDebtTarget : null;
+  const fx = finite(args.fxUSDToTarget) && args.fxUSDToTarget > 0 ? args.fxUSDToTarget : null;
+
+  if (reportedCash !== null) cashByYear.set(args.valuationYear, reportedCash);
+  if (reportedDebt !== null) debtByYear.set(args.valuationYear, reportedDebt);
+
+  if (args.waterfall && fx !== null && reportedCash !== null && reportedDebt !== null) {
+    const reportedCashUsd = reportedCash / fx;
+    const excludedCashUsd = reportedCashUsd - args.waterfall.initialCashAvailable;
+    let openingDebtUsd: number | null = reportedDebt / fx;
+
+    for (const row of args.waterfall.rows) {
+      if (!finite(row.year)) continue;
+      const openingCashTarget = finite(row.openingCash)
+        ? (row.openingCash + excludedCashUsd) * fx
+        : null;
+      cashByYear.set(row.year, openingCashTarget);
+      debtByYear.set(row.year, openingDebtUsd === null ? null : openingDebtUsd * fx);
+      if (openingDebtUsd !== null) {
+        openingDebtUsd = finite(row.debtAdded) ? openingDebtUsd + row.debtAdded : null;
+      }
+    }
+  } else {
+    if (!args.waterfall) diagnostics.push('Valuation-year cash waterfall unavailable; future opening balances are not computable.');
+    if (fx === null) diagnostics.push('FX unavailable; future opening balances are not computable.');
+    if (reportedCash === null) diagnostics.push('Reported cash unavailable.');
+    if (reportedDebt === null) diagnostics.push('Reported debt unavailable.');
+  }
+
+  const dcfByYear = new Map(args.dcfByYear.map((row) => [row.year, row.dcfTargetCurrency]));
+  const point = (year: number): CorporateEquityValuePoint => {
+    const underlying = dcfByYear.get(year) ?? null;
+    const cash = cashByYear.get(year) ?? null;
+    const debt = debtByYear.get(year) ?? null;
+    const netCash = finite(cash) && finite(debt) ? cash - debt : null;
+    const value = finite(underlying) && netCash !== null ? underlying + netCash : null;
+    return {
+      year,
+      underlyingAssetValueTargetCurrency: finite(underlying) ? underlying : null,
+      openingCashTargetCurrency: finite(cash) ? cash : null,
+      openingDebtTargetCurrency: finite(debt) ? debt : null,
+      openingNetCashTargetCurrency: netCash,
+      valueTargetCurrency: value,
+    };
+  };
+
+  const projectsByYear = new Map<number, string[]>();
+  for (const start of args.productionStarts) {
+    if (!Number.isInteger(start.year)) continue;
+    const ids = projectsByYear.get(start.year) ?? [];
+    ids.push(start.projectId);
+    projectsByYear.set(start.year, ids);
+  }
+
+  return {
+    basis: 'opening_balance',
+    definition: 'remaining_corporate_dcf_plus_opening_net_cash',
+    valuationYear: args.valuationYear,
+    current: dcfByYear.has(args.valuationYear) ? point(args.valuationYear) : null,
+    productionStarts: [...projectsByYear.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([year, projectIds]) => ({ ...point(year), projectIds: [...projectIds].sort() })),
+    diagnostics,
+  };
+}
+'''
+helper_path = Path('src/lib/corporate/valuation/corporateEquityValue.ts')
+helper_path.parent.mkdir(parents=True, exist_ok=True)
+helper_path.write_text(helper)
+
+
+test = r'''import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { computeCorporateCashWaterfall } from '../../financing/cashWaterfall.ts';
+import { buildCorporateEquityValue } from '../corporateEquityValue.ts';
+
+test('Corporate equity value uses opening cash and does not double-count same-year FCFF', () => {
+  const waterfall = computeCorporateCashWaterfall({
+    yearsByPeriod: [2026, 2027, 2028],
+    latestQuarterlyCash: 100,
+    useLatestQuarterlyCash: true,
+    cashUsedPercent: 1,
+    minimumCashReserve: 0,
+    debtPercent: 0,
+    projects: [{
+      projectId: 'p1',
+      constructionStartPeriod: 1,
+      capexNeedByPeriod: [0, 50, 0],
+      fcffIncludesConstructionCapex: true,
+      fcffByPeriod: [30, -10, 40],
+    }],
+  });
+  const output = buildCorporateEquityValue({
+    valuationYear: 2026,
+    reportedCashTarget: 1000,
+    reportedDebtTarget: 200,
+    fxUSDToTarget: 10,
+    waterfall,
+    dcfByYear: [
+      { year: 2026, dcfTargetCurrency: 10_000 },
+      { year: 2027, dcfTargetCurrency: 12_000 },
+      { year: 2028, dcfTargetCurrency: 14_000 },
+    ],
+    productionStarts: [{ projectId: 'p1', year: 2028 }],
+  });
+
+  assert.equal(output.current?.openingCashTargetCurrency, 1000);
+  assert.equal(output.current?.openingDebtTargetCurrency, 200);
+  assert.equal(output.current?.valueTargetCurrency, 10_800);
+  assert.equal(output.productionStarts[0]?.openingCashTargetCurrency, 1200);
+  assert.equal(output.productionStarts[0]?.openingDebtTargetCurrency, 200);
+  assert.equal(output.productionStarts[0]?.valueTargetCurrency, 15_000);
+  assert.equal(waterfall.rows[2]?.openingCash, 120);
+});
+
+test('Debt raised during a year enters equity value from the following opening balance', () => {
+  const waterfall = computeCorporateCashWaterfall({
+    yearsByPeriod: [2026, 2027, 2028],
+    latestQuarterlyCash: 10,
+    useLatestQuarterlyCash: true,
+    cashUsedPercent: 1,
+    minimumCashReserve: 0,
+    debtPercent: 1,
+    projects: [{
+      projectId: 'p1',
+      constructionStartPeriod: 1,
+      capexNeedByPeriod: [0, 100, 0],
+      fcffIncludesConstructionCapex: true,
+      fcffByPeriod: [0, -100, 0],
+    }],
+  });
+  const output = buildCorporateEquityValue({
+    valuationYear: 2026,
+    reportedCashTarget: 100,
+    reportedDebtTarget: 50,
+    fxUSDToTarget: 10,
+    waterfall,
+    dcfByYear: [
+      { year: 2026, dcfTargetCurrency: 1000 },
+      { year: 2027, dcfTargetCurrency: 1100 },
+      { year: 2028, dcfTargetCurrency: 1200 },
+    ],
+    productionStarts: [{ projectId: 'p1', year: 2028 }],
+  });
+
+  assert.equal(waterfall.rows[1]?.debtAdded, 90);
+  assert.equal(output.productionStarts[0]?.openingDebtTargetCurrency, 950);
+  assert.equal(output.productionStarts[0]?.openingCashTargetCurrency, 0);
+  assert.equal(output.productionStarts[0]?.valueTargetCurrency, 250);
+});
+'''
+test_path = Path('src/lib/corporate/valuation/__tests__/corporateEquityValue.test.ts')
+test_path.parent.mkdir(parents=True, exist_ok=True)
+test_path.write_text(test)
+
+
+replace_once(
+    'src/lib/corporate/snapshot/types.ts',
+    "  DCF_prodStart_present_perShare_TargetCurrency: number | null;\n\n  Payback_approx_years",
+    "  DCF_prodStart_present_perShare_TargetCurrency: number | null;\n\n  /** Experimental table-only equity bridge. Existing NPV/NAV/DCF semantics are unchanged. */\n  corporateEquityValue?: import('../valuation/corporateEquityValue.ts').CorporateEquityValueOutput;\n\n  Payback_approx_years",
+)
+
+
+path = 'src/lib/snapshot/runCorporateSnapshot.ts'
+replace_once(
+    path,
+    "import { computeCorporateCashWaterfall } from '../corporate/financing/cashWaterfall.ts';\nimport { deriveBuildFundingNeedUSD }",
+    "import { computeCorporateCashWaterfall } from '../corporate/financing/cashWaterfall.ts';\nimport { buildCorporateEquityValue } from '../corporate/valuation/corporateEquityValue.ts';\nimport { deriveBuildFundingNeedUSD }",
+)
+
+old_waterfall = r'''    // The waterfall is the sole cash allocator. computeCorporateFinancing receives
+    // only its residual external need and cash-first is disabled there.
+    const cashWaterfall = fxRate === null ? null : computeCorporateCashWaterfall({
+      yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+      latestQuarterlyCash: (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) / fxRate,
+      useLatestQuarterlyCash: input.financingPlan?.use_cash_first ?? true,
+      cashUsedPercent: input.financingPlan?.cash_use_percent ?? 1,
+      minimumCashReserve: (input.financingPlan?.minimum_cash_reserve_TargetCurrency ?? 0) / fxRate,
+      debtPercent: input.financingPlan?.debt_fraction ?? 0,
+      fxUSDToTargetCurrency: fxRate,
+      equityRaisePriceTargetCurrency: input.financingPlan?.equity_raise_price_TargetCurrency ?? marketInput.price_current_TargetCurrency,
+      sharesCurrent: marketInput.shares_current,
+      fdExtraShares: totalFdExtraShares,
+      projects: projectsForBuildFunding.map((project) => {
+        const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
+        const productionYear = project.yearsByPeriod[project.productionStartPeriod];
+        const constructionStartPeriod = aggregationEffective.corporateYearsByPeriod.findIndex((year) => {
+          const local = project.yearsByPeriod.indexOf(year);
+          return local >= 0 && local < project.productionStartPeriod && (context?.economics.capexUSD[local] ?? 0) > 0;
+        });
+        return {
+          projectId: project.projectId,
+          constructionStartPeriod: constructionStartPeriod < 0 ? aggregationEffective.corporateYearsByPeriod.indexOf(productionYear) : constructionStartPeriod,
+          fcffIncludesConstructionCapex: true,
+          debtPercent: input.financingPlanByProject?.[project.projectId]?.debt_fraction ?? input.financingPlan?.debt_fraction ?? 0,
+          equityRaisePriceTargetCurrency: input.financingPlanByProject?.[project.projectId]?.equity_raise_price_TargetCurrency
+            ?? input.financingPlan?.equity_raise_price_TargetCurrency
+            ?? marketInput.price_current_TargetCurrency,
+          capexNeedByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
+            const local = project.yearsByPeriod.indexOf(year);
+            // Initial/build CAPEX can remain in the production-start (ramp) period.
+            // Include that period in the construction leg so FCFF is grossed up once
+            // and the amount is not mislabeled as an operating cash deficit.
+            if (local < 0 || local > project.productionStartPeriod) return 0;
+            const capex = context?.economics.capexUSD[local];
+            return capex == null ? null : Math.max(0, capex);
+          }),
+          fcffByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
+            const local = project.yearsByPeriod.indexOf(year);
+            return local < 0 ? 0 : context?.economics.fcffUSD[local] ?? null;
+          }),
+        };
+      }),
+    });
+'''
+new_waterfall = r'''    // The existing financing waterfall remains the sole cash allocator for canonical
+    // financing. A second, valuation-year-rebased run is used only by the isolated
+    // Corporate equity-value table rows so historical model years cannot consume
+    // today's reported cash.
+    const buildCashWaterfallForYears = (waterfallYears: number[]) => fxRate === null ? null : computeCorporateCashWaterfall({
+      yearsByPeriod: waterfallYears,
+      latestQuarterlyCash: (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) / fxRate,
+      useLatestQuarterlyCash: input.financingPlan?.use_cash_first ?? true,
+      cashUsedPercent: input.financingPlan?.cash_use_percent ?? 1,
+      minimumCashReserve: (input.financingPlan?.minimum_cash_reserve_TargetCurrency ?? 0) / fxRate,
+      debtPercent: input.financingPlan?.debt_fraction ?? 0,
+      fxUSDToTargetCurrency: fxRate,
+      equityRaisePriceTargetCurrency: input.financingPlan?.equity_raise_price_TargetCurrency ?? marketInput.price_current_TargetCurrency,
+      sharesCurrent: marketInput.shares_current,
+      fdExtraShares: totalFdExtraShares,
+      projects: projectsForBuildFunding.map((project) => {
+        const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
+        const productionYear = project.yearsByPeriod[project.productionStartPeriod];
+        const constructionStartPeriod = waterfallYears.findIndex((year) => {
+          const local = project.yearsByPeriod.indexOf(year);
+          return local >= 0 && local < project.productionStartPeriod && (context?.economics.capexUSD[local] ?? 0) > 0;
+        });
+        const productionStartPeriodInWaterfall = waterfallYears.indexOf(productionYear);
+        return {
+          projectId: project.projectId,
+          constructionStartPeriod: constructionStartPeriod >= 0
+            ? constructionStartPeriod
+            : productionStartPeriodInWaterfall >= 0 ? productionStartPeriodInWaterfall : 0,
+          fcffIncludesConstructionCapex: true,
+          debtPercent: input.financingPlanByProject?.[project.projectId]?.debt_fraction ?? input.financingPlan?.debt_fraction ?? 0,
+          equityRaisePriceTargetCurrency: input.financingPlanByProject?.[project.projectId]?.equity_raise_price_TargetCurrency
+            ?? input.financingPlan?.equity_raise_price_TargetCurrency
+            ?? marketInput.price_current_TargetCurrency,
+          capexNeedByPeriod: waterfallYears.map((year) => {
+            const local = project.yearsByPeriod.indexOf(year);
+            if (local < 0 || local > project.productionStartPeriod) return 0;
+            const capex = context?.economics.capexUSD[local];
+            return capex == null ? null : Math.max(0, capex);
+          }),
+          fcffByPeriod: waterfallYears.map((year) => {
+            const local = project.yearsByPeriod.indexOf(year);
+            return local < 0 ? 0 : context?.economics.fcffUSD[local] ?? null;
+          }),
+        };
+      }),
+    });
+    const cashWaterfall = buildCashWaterfallForYears(aggregationEffective.corporateYearsByPeriod);
+    const equityValueWaterfall = buildCashWaterfallForYears(valuationYears);
+'''
+replace_once(path, old_waterfall, new_waterfall)
+
+replace_once(
+    path,
+    "    snapshot.canonicalValuationTimeline = corporateCanonicalTimeline;\n    snapshot.projectStartMilestones = projectStartMilestones;\n    // For an already-producing portfolio",
+    "    snapshot.canonicalValuationTimeline = corporateCanonicalTimeline;\n    snapshot.projectStartMilestones = projectStartMilestones;\n    snapshot.corporateEquityValue = buildCorporateEquityValue({\n      valuationYear: input.valuationYear,\n      reportedCashTarget: input.balanceSheet?.cash_t0_TargetCurrency ?? 0,\n      reportedDebtTarget: input.balanceSheet?.debt_t0_TargetCurrency ?? null,\n      fxUSDToTarget: fxRate,\n      waterfall: equityValueWaterfall,\n      dcfByYear: corporateCanonicalTimeline.periods.map((row) => ({\n        year: row.calendarYear,\n        dcfTargetCurrency: row.dcfAtPeriodTarget,\n      })),\n      productionStarts: projectStartMilestones.map((marker) => ({\n        projectId: marker.projectId,\n        year: marker.calendarYear,\n      })),\n    });\n    // For an already-producing portfolio",
+)
+
+
+path = 'src/components/SingleStockDashboard.tsx'
+replace_once(
+    path,
+    "  }, [corporateExtraSharesInput, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);\n\n  useEffect(() => {\n    if (!debugEnabled) return;",
+    "  }, [corporateExtraSharesInput, corporateSnapshotData, lockedTargetCurrency, riskAdjustedDiscountRatePctInput]);\n\n  const corporateEquityValue = corporateSnapshotData?.corporateEquityValue ?? null;\n\n  useEffect(() => {\n    if (!debugEnabled) return;",
+)
+replace_once(
+    path,
+    "                        ))}\n                      </div>\n                        </>}",
+    "                        ))}\n                        <div className=\"compact-metric-row\">\n                          <span className=\"compact-metric-label\">Corporate equity value nuvärde</span>\n                          <span className=\"compact-metric-dots\" />\n                          <span className=\"compact-metric-value\">{\n                            isFiniteNumber(corporateEquityValue?.current?.valueTargetCurrency)\n                              ? formatMetricValue({ value: corporateEquityValue.current.valueTargetCurrency, reason: null }, \"money\", lockedTargetCurrency)\n                              : \"n/a\"\n                          }</span>\n                        </div>\n                        <div className=\"compact-metric-row\">\n                          <span className=\"compact-metric-label\">Corporate equity value produktionsstart</span>\n                          <span className=\"compact-metric-dots\" />\n                          <span className=\"compact-metric-value\">{\n                            corporateEquityValue?.productionStarts?.length\n                              ? corporateEquityValue.productionStarts.map((row) => (\n                                  `${row.year}: ${isFiniteNumber(row.valueTargetCurrency)\n                                    ? formatMetricValue({ value: row.valueTargetCurrency, reason: null }, \"money\", lockedTargetCurrency)\n                                    : \"n/a\"}`\n                                )).join(\", \")\n                              : \"n/a\"\n                          }</span>\n                        </div>\n                      </div>\n                        </>}",
+)
