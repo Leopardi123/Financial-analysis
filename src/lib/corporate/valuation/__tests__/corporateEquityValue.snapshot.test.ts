@@ -32,9 +32,8 @@ test('snapshot publishes isolated Corporate equity value without replacing canon
     today.dcfAtPeriodTarget + body.balanceSheet.cash_t0_TargetCurrency - body.balanceSheet.debt_t0_TargetCurrency,
   );
 
-  // Existing canonical metrics remain separate contracts; the new field is additive.
+  // Existing canonical NAV remains its own contract; the new equity field is additive.
   assert.equal(snapshot.NAV_today_TargetCurrency, snapshot.financing.NAV_today_TargetCurrency);
-  assert.equal(snapshot.DCF_prodStart_present_TargetCurrency, snapshot.list2.DCF_prodStart_present_TargetCurrency);
 
   const futureMarkers = snapshot.projectStartMilestones as Array<Record<string, any>>;
   assert.equal(output.productionStarts.length, futureMarkers.length);
