@@ -1,0 +1,120 @@
+{
+  "version": "project_json_v3",
+  "meta": {
+    "projectId": "oko-west-fs-2025-golden",
+    "projectName": "Oko West Gold Project",
+    "currency": "USD",
+    "notes": "G Mining Ventures 2025 Feasibility Study golden fixture. All economic series are the rounded annual values published in Tables 22.3 and 22.6; no balancing item or inferred royalty allocation is used. Operating costs retain Table 22.3 Total OPEX plus its separately reported Y1 land payment; Y-1 uses Table 22.6 after the published transfer of pre-production costs to initial capital. The aggregate rows are used because the report does not publish annual open-pit/underground royalty production splits."
+  },
+  "time": {
+    "masterN": 18,
+    "productionStartPeriod": 2,
+    "nameplateCapacityPeriod": 3,
+    "reportPeriodLabels": ["Y-3", "Y-2", "Y-1", "Y1", "Y2", "Y3", "Y4", "Y5", "Y6", "Y7", "Y8", "Y9", "Y10", "Y11", "Y12", "Y13", "Y14", "Y15", "Y16"],
+    "phaseByPeriod": ["construction", "construction", "ramp_up", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "closure", "closure", "closure"],
+    "runtimePlacement": {
+      "constructionStart": {
+        "year": 2025,
+        "sourceId": "oko-west-fs-2025",
+        "pageOrTable": "Section 24.2 pp.24-2–24-5: early works began March 2025",
+        "asOfDate": "2025-04-28"
+      },
+      "productionStart": {
+        "year": 2027,
+        "sourceId": "oko-west-fs-2025",
+        "pageOrTable": "Sections 1.24 p.1-30 and 24.2 pp.24-2–24-5: commissioning begins Q3 2027",
+        "asOfDate": "2025-04-28",
+        "notes": "Maps the report's Y-1 commissioning production to calendar 2027."
+      },
+      "nameplateCapacity": {
+        "year": 2028,
+        "sourceId": "oko-west-fs-2025",
+        "pageOrTable": "Sections 1.24 p.1-30 and 24.2 pp.24-2–24-5: commercial production starts January 2028",
+        "asOfDate": "2025-04-28"
+      },
+      "notes": "Report-sourced placement: Y-3=2025, Y-2=2026, Y-1=2027 commissioning, Y1=2028 commercial production. The relative Table 22.6 series is not shifted."
+    }
+  },
+  "metals": {
+    "payableQtyByMetal": {
+      "Au": [0, 0, 30100, 311400, 316500, 303100, 324800, 354200, 352800, 351400, 367800, 380000, 432800, 385500, 334200, 92900, 0, 0, 0]
+    },
+    "metalInProductQtyByMetal": null,
+    "revenueBasisByMetal": { "Au": "PAYABLE_DIRECT" },
+    "payableQtyUnitByMetal": { "Au": "toz" },
+    "priceKeyByMetal": { "Au": "XAU_USD_TOZ" },
+    "auPriceKey": "XAU_USD_TOZ"
+  },
+  "streamsByMetal": null,
+  "economics": {
+    "costModel": {
+      "mode": "AGGREGATE",
+      "operatingCostsUSD": [0, 0, 6200000, 271400000, 286600000, 317000000, 347900000, 361200000, 385900000, 375900000, 378800000, 367500000, 344000000, 319400000, 272000000, 119100000, 0, 0, 0],
+      "siteGandA_USD": null
+    },
+    "sellingModel": { "mode": "NONE" },
+    "fiscalTakeModel": { "mode": "NONE" },
+    "taxModel": {
+      "mode": "REPORT_LOCKED_WITH_RUNTIME_PROXY",
+      "reportTaxCashFlowUSD": [0, 0, 0, 0, -63200000, -52000000, -62000000, -97400000, -100300000, -102900000, -114500000, -128400000, -169400000, -148700000, -131600000, -22400000, 0, 0, 0],
+      "runtime": {
+        "method": "NOMINAL_RATE_WITH_LOSS_CARRYFORWARD",
+        "taxRate": 0.25
+      },
+      "notes": "REPORT: exact rounded Taxes row from Table 22.6. RUNTIME: Section 22.10 states a 25% corporate tax rate; the runtime proxy applies that nominal rate with loss carryforward. The report's five-year straight-line depreciation and opening US$148.2M tax asset pool are not reconstructed because annual depreciation is not published."
+    },
+    "depreciationUSD": null
+  },
+  "capital": {
+    "capexUSD": [187500000, 531100000, 322800000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "sustainingCapexUSD": [0, 0, 0, 92400000, 83600000, 98100000, 87000000, 69800000, 73400000, 38700000, 28400000, 37100000, 21900000, 18300000, 1200000, 100000, 0, 0, 0],
+    "closureUSD": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12900000, 12900000, 12900000],
+    "workingCapitalDeltaUSD": [1100000, 7500000, 14300000, 17400000, 3300000, 12300000, 1300000, 500000, 1500000, -500000, 0, -900000, -2100000, -900000, -900000, -3700000, -50100000, 0, 0],
+    "terminalProceedsUSD": null
+  },
+  "verification": {
+    "report": {
+      "sourceId": "oko-west-fs-2025",
+      "npvIrrPageOrTable": "Section 22.11 and Tables 22.5–22.6 pp.22-10–22-12",
+      "pricesPageOrTable": "Sections 22.2 and 22.11; Tables 22.5–22.7 pp.22-2, 22-10–22-13",
+      "periodsPageOrTable": "Table 22.6 p.22-12: Y-3, Y-2, Y-1, Y1–Y16",
+      "discountRate": 0.05,
+      "discountConvention": "period_end",
+      "priceDeckByKey": { "XAU_USD_TOZ": 2500 },
+      "reportNPVPostTaxUSD": 2163000000,
+      "reportIRRPostTax": 0.271,
+      "reportNPVPreTaxUSD": 2901000000,
+      "reportIRRPreTax": 0.311,
+      "toleranceRelative": 0.02,
+      "reportInitialCapexUSD": 1041400000,
+      "reportSustainingCapexUSD": 650000000,
+      "reportClosureUSD": 38700000,
+      "reportClosurePeriod": 18,
+      "reportWorkingCapitalUnwindUSD": 50100000,
+      "reportWorkingCapitalUnwindPeriod": 16,
+      "reportTerminalProceedsUSD": 0,
+      "assumptionsPageOrTable": "Sections 1.21–1.24 pp.1-24–1-30; Sections 22.1–22.11 pp.22-1–22-12; Section 24.2 pp.24-2–24-5",
+      "assumptionsNotes": "Real H1-2025 USD, no escalation; US$2,500/oz gold; 5% annual discount rate with t=0 at Y-3; 7 Mtpa saprolite/blend then 6 Mtpa hard-rock plant; five-month ramp-up; 12.3 operating years; 25% corporate tax; five-year straight-line depreciation; US$148.2M opening tax asset pool; 8% NSR on open-pit gold and 3% NSR on underground gold. Table 22.6 includes US$69M pre-production EBITDA in Y-1, reports initial capital before that benefit, and publishes the resulting project cash flow directly. The operating-cost series uses Table 22.3 Total OPEX and adds the separately published US$21.7M Y1 land payment; Y-1 follows Table 22.6 after its explicit transfer to capital. Rounded report values create at most sub-US$1M annual differences; no balancing item is introduced."
+    },
+    "reportedCostCheckpoints": [
+      {
+        "metric": "CASH_COST_AU_USD_PER_OZ",
+        "value": 958,
+        "unit": "USD/oz Au",
+        "period": { "kind": "LOM" },
+        "sourceId": "oko-west-fs-2025",
+        "pageOrTable": "Table 22.5 pp.22-10–22-11",
+        "definitionNotes": "LOM total operating cost per payable ounce, including royalties."
+      },
+      {
+        "metric": "AISC_AU_USD_PER_OZ",
+        "value": 1123,
+        "unit": "USD/oz Au",
+        "period": { "kind": "LOM" },
+        "sourceId": "oko-west-fs-2025",
+        "pageOrTable": "Table 22.5 pp.22-10–22-11",
+        "definitionNotes": "LOM AISC per payable ounce."
+      }
+    ]
+  }
+}
