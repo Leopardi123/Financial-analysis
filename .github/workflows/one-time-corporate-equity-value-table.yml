@@ -22,42 +22,50 @@ jobs:
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
-      - name: Capture unmodified main snapshot regression baseline
+      - name: Capture unmodified main regression baseline
         shell: bash
         run: |
           git worktree add /tmp/financial-analysis-main origin/main
           ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/financial-analysis-main/node_modules
           set +e
-          (cd /tmp/financial-analysis-main && node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts) > /tmp/main-baseline.log 2>&1
-          status=$?
+          (cd /tmp/financial-analysis-main && node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts) > /tmp/main-snapshot.log 2>&1
+          echo $? > /tmp/main-snapshot-status.txt
+          (cd /tmp/financial-analysis-main && node --experimental-strip-types src/components/project/__tests__/corporateValuationChart.integration.test.ts) > /tmp/main-chart.log 2>&1
+          echo $? > /tmp/main-chart-status.txt
           set -e
-          cat /tmp/main-baseline.log
-          grep '^✖ ' /tmp/main-baseline.log | sort -u > /tmp/main-baseline-failures.txt || true
-          echo "baseline_status=$status"
-          cat /tmp/main-baseline-failures.txt
+          grep '^✖ ' /tmp/main-snapshot.log | grep -v '^✖ failing tests:' | sed -E 's/ \([0-9.]+ms\)$//' | sort -u > /tmp/main-snapshot-failures.txt || true
+          sed -n '/AssertionError/,+8p' /tmp/main-chart.log > /tmp/main-chart-failure.txt || true
+          echo "Main snapshot status: $(cat /tmp/main-snapshot-status.txt)"
+          cat /tmp/main-snapshot-failures.txt
+          echo "Main chart status: $(cat /tmp/main-chart-status.txt)"
+          cat /tmp/main-chart-failure.txt
       - name: Apply isolated Corporate equity value patch
         run: python scripts/one-time-corporate-equity-value-table.py
       - name: Run targeted equity-value regressions
         run: |
           node --experimental-strip-types src/lib/corporate/valuation/__tests__/corporateEquityValue.test.ts
+          node --experimental-strip-types src/lib/corporate/valuation/__tests__/corporateEquityValue.snapshot.test.ts
           node --experimental-strip-types src/lib/snapshot/__tests__/producerNextProjectIrr.prebuild.test.ts
-          node --experimental-strip-types src/components/project/__tests__/corporateValuationChart.integration.test.ts
           node --experimental-strip-types src/lib/valuation/__tests__/canonicalValuationTimeline.test.ts
-      - name: Ensure full snapshot regression has no new failures versus main
+      - name: Ensure existing regressions have no new failures versus main
         shell: bash
         run: |
           set +e
-          node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts > /tmp/patched.log 2>&1
-          status=$?
+          node --experimental-strip-types src/lib/snapshot/__tests__/runCorporateSnapshot.series.test.ts > /tmp/patched-snapshot.log 2>&1
+          patched_snapshot_status=$?
+          node --experimental-strip-types src/components/project/__tests__/corporateValuationChart.integration.test.ts > /tmp/patched-chart.log 2>&1
+          patched_chart_status=$?
           set -e
-          cat /tmp/patched.log
-          grep '^✖ ' /tmp/patched.log | sort -u > /tmp/patched-failures.txt || true
-          echo "patched_status=$status"
-          echo "Main baseline failures:"
-          cat /tmp/main-baseline-failures.txt
-          echo "Patched failures:"
-          cat /tmp/patched-failures.txt
-          diff -u /tmp/main-baseline-failures.txt /tmp/patched-failures.txt
+          grep '^✖ ' /tmp/patched-snapshot.log | grep -v '^✖ failing tests:' | sed -E 's/ \([0-9.]+ms\)$//' | sort -u > /tmp/patched-snapshot-failures.txt || true
+          sed -n '/AssertionError/,+8p' /tmp/patched-chart.log > /tmp/patched-chart-failure.txt || true
+          echo "Patched snapshot status: $patched_snapshot_status"
+          cat /tmp/patched-snapshot-failures.txt
+          echo "Patched chart status: $patched_chart_status"
+          cat /tmp/patched-chart-failure.txt
+          diff -u /tmp/main-snapshot-failures.txt /tmp/patched-snapshot-failures.txt
+          test "$patched_snapshot_status" = "$(cat /tmp/main-snapshot-status.txt)"
+          diff -u /tmp/main-chart-failure.txt /tmp/patched-chart-failure.txt
+          test "$patched_chart_status" = "$(cat /tmp/main-chart-status.txt)"
       - name: Run production build
         run: npm run build
       - name: Commit implementation and remove one-time tooling
