@@ -70,7 +70,7 @@ function lastProd(payable: Record<string, Array<number | null>>, fallback: numbe
 function firstConstruction(capex: Array<number | null>, tp: number) { for (let t = 0; t <= tp; t += 1) if (finite(capex[t]) && Math.abs(capex[t] as number) > 1e-6) return t; return tp; }
 function revenue(gross: Array<number | null>, credits: Array<number | null> | null | undefined, a: number, b: number) { let x = 0; for (let t = a; t <= b; t += 1) { if (!finite(gross[t])) return null; const c = credits?.[t]; if (c != null && !finite(c)) return null; x += (gross[t] as number) + (finite(c) ? c : 0); } return x; }
 
-const method = `5-årig revenue-normaliserad NPV10 downside beta; stresspris = median av 3 separerade lågprisobservationer från 7 års historik med 6 månaders rullande medel; 7-årig positiv NPV10 survival-gate; beta T1 ≤0,85x, T2 ≤1,15x.`;
+const method = `5-årig revenue-normaliserad NPV10 downside beta; stresspris = median av 3 separerade lågprisobservationer från 7 års historik med 6 månaders rullande medel; 7-årig survival-NPV10 är diagnostik och påverkar inte Tier; beta T1 ≤0,85x, T2 ≤1,15x, annars T3.`;
 
 const stressPriceCache = new Map<string, { expiresAt: number; promise: Promise<StressPriceResult> }>();
 const STRESS_PRICE_CACHE_TTL_MS = 60_000;
@@ -199,8 +199,19 @@ export async function computeTier1CyclePolicyFromPreparedProjects(
 
   const survivalPass = row7.stressNpv > 0;
   const tier = row5.beta <= TIER1_CYCLE_POLICY.tier1BetaMax ? 1 : row5.beta <= TIER1_CYCLE_POLICY.tier2BetaMax ? 2 : 3;
-  const gate: Tier1Gate = survivalPass
-    ? { status: 'PASS', tier, value: row5.beta, threshold: TIER1_CYCLE_POLICY.tier1BetaMax, unit: 'NPV downside beta', reason: `5-årig normalized downside beta ${row5.beta.toFixed(2)}x · Tier ${tier}. Revenue retention ${(row5.revenueRetention * 100).toFixed(1)} %, NPV10 retention ${(row5.npvRetention * 100).toFixed(1)} %, stress-IRR ${finite(row5.stressIrr) ? `${(row5.stressIrr * 100).toFixed(1)} %` : 'Ej verifierad'}. 7-årig survival NPV10 ${Math.round(row7.stressNpv).toLocaleString('sv-SE')} USD > 0.` }
-    : { status: 'FAIL', tier: null, value: row5.beta, threshold: 0, unit: 'USD NPV10', reason: `7-årig survival-stress ger NPV10 ${Math.round(row7.stressNpv).toLocaleString('sv-SE')} USD ≤ 0; projektet kvalificerar inte oavsett 5-årig beta ${row5.beta.toFixed(2)}x.` };
+  const survivalText = survivalPass
+    ? `7-årig survival NPV10 ${Math.round(row7.stressNpv).toLocaleString('sv-SE')} USD > 0 (PASS, diagnostik).`
+    : `7-årig survival NPV10 ${Math.round(row7.stressNpv).toLocaleString('sv-SE')} USD ≤ 0 (FAIL, diagnostik; påverkar inte Tier).`;
+  if (!survivalPass) {
+    diagnostics.push(`CYCLE_SURVIVAL_DIAGNOSTIC_FAIL: 7-årig survival NPV10 ${Math.round(row7.stressNpv)} USD ≤ 0. Detta är diagnostik och påverkar inte Tier; 5-årig downside beta styr cycle-Tier.`);
+  }
+  const gate: Tier1Gate = {
+    status: 'PASS',
+    tier,
+    value: row5.beta,
+    threshold: TIER1_CYCLE_POLICY.tier1BetaMax,
+    unit: 'NPV downside beta',
+    reason: `5-årig normalized downside beta ${row5.beta.toFixed(2)}x · Tier ${tier}. Revenue retention ${(row5.revenueRetention * 100).toFixed(1)} %, NPV10 retention ${(row5.npvRetention * 100).toFixed(1)} %, stress-IRR ${finite(row5.stressIrr) ? `${(row5.stressIrr * 100).toFixed(1)} %` : 'Ej verifierad'}. ${survivalText}`,
+  };
   return { status: 'VERIFIED', gate, diagnostics, projectCount: ps.length, method, baseRevenueUsd: row5.baseRevenue, stressRevenueUsd: row5.stressRevenue, revenueRetention: row5.revenueRetention, baseNpv10Usd: row5.baseNpv, stressNpv10Usd: row5.stressNpv, npvRetention: row5.npvRetention, downsideBeta: row5.beta, stressIrr: row5.stressIrr, survivalNpv10Usd: row7.stressNpv, multipliersByMetal: row5.multipliersByMetal };
 }
