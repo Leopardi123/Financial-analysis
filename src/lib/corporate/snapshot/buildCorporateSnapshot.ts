@@ -60,11 +60,12 @@ export function computeMarketValue(args: {
       ? MarketCap_TargetCurrency + debtPost - cashPost + EnterpriseAdjustments_TargetCurrency
       : null;
 
-  const NPV_T = toFiniteOrNull(args.financing.NPV_today_TargetCurrency);
   const NAV_T = toFiniteOrNull(args.financing.NAV_today_TargetCurrency);
 
-  const EV_over_NPV =
-    EV_TargetCurrency !== null && NPV_T !== null && NPV_T > 0 ? EV_TargetCurrency / NPV_T : null;
+  // DEBUG QUARANTINE: absolute EV remains available for diagnostics, but EV/NPV
+  // is not an investable Corporate metric until current market-cap timing and
+  // post-financing cash/debt are reconciled to one explicit valuation date.
+  const EV_over_NPV = null;
 
   const EV_over_NAV =
     EV_TargetCurrency !== null && NAV_T !== null && NAV_T > 0 ? EV_TargetCurrency / NAV_T : null;
