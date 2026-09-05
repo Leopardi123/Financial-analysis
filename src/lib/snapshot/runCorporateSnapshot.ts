@@ -6,6 +6,7 @@ import { resolveProjectPricesToEngineInput, type MetalPriceDiagnostic } from '..
 import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts';
 import { computeCorporateFinancing } from '../corporate/financing/compute.ts';
 import { computeCorporateCashWaterfall } from '../corporate/financing/cashWaterfall.ts';
+import { buildCorporateEquityValue } from '../corporate/valuation/corporateEquityValue.ts';
 import { deriveBuildFundingNeedUSD } from '../corporate/financing/deriveBuildFundingNeed.ts';
 import { buildCorporateSnapshot } from '../corporate/snapshot/buildCorporateSnapshot.ts';
 import { resolveFxUSDToTarget } from '../prices/fx/resolveFx.ts';
@@ -2401,10 +2402,12 @@ export async function runCorporateSnapshotPipeline(args: {
       valuationStartInternalIndex: internalIndexByYear.get(input.valuationYear) ?? null,
     };
 
-    // The waterfall is the sole cash allocator. computeCorporateFinancing receives
-    // only its residual external need and cash-first is disabled there.
-    const cashWaterfall = fxRate === null ? null : computeCorporateCashWaterfall({
-      yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+    // Preserve the canonical financing waterfall. The new Corporate equity-value
+    // rows use a separate valuation-year-rebased waterfall so today's reported cash
+    // cannot be consumed by historical model years (for example an already-producing
+    // project's prior report year).
+    const buildCashWaterfallForYears = (waterfallYears: number[]) => fxRate === null ? null : computeCorporateCashWaterfall({
+      yearsByPeriod: waterfallYears,
       latestQuarterlyCash: (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) / fxRate,
       useLatestQuarterlyCash: input.financingPlan?.use_cash_first ?? true,
       cashUsedPercent: input.financingPlan?.cash_use_percent ?? 1,
@@ -2417,34 +2420,36 @@ export async function runCorporateSnapshotPipeline(args: {
       projects: projectsForBuildFunding.map((project) => {
         const context = projectSeriesContexts.find((entry) => entry.projectId === project.projectId);
         const productionYear = project.yearsByPeriod[project.productionStartPeriod];
-        const constructionStartPeriod = aggregationEffective.corporateYearsByPeriod.findIndex((year) => {
+        const constructionStartPeriod = waterfallYears.findIndex((year) => {
           const local = project.yearsByPeriod.indexOf(year);
           return local >= 0 && local < project.productionStartPeriod && (context?.economics.capexUSD[local] ?? 0) > 0;
         });
+        const productionStartPeriodInWaterfall = waterfallYears.indexOf(productionYear);
         return {
           projectId: project.projectId,
-          constructionStartPeriod: constructionStartPeriod < 0 ? aggregationEffective.corporateYearsByPeriod.indexOf(productionYear) : constructionStartPeriod,
+          constructionStartPeriod: constructionStartPeriod >= 0
+            ? constructionStartPeriod
+            : productionStartPeriodInWaterfall >= 0 ? productionStartPeriodInWaterfall : 0,
           fcffIncludesConstructionCapex: true,
           debtPercent: input.financingPlanByProject?.[project.projectId]?.debt_fraction ?? input.financingPlan?.debt_fraction ?? 0,
           equityRaisePriceTargetCurrency: input.financingPlanByProject?.[project.projectId]?.equity_raise_price_TargetCurrency
             ?? input.financingPlan?.equity_raise_price_TargetCurrency
             ?? marketInput.price_current_TargetCurrency,
-          capexNeedByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
+          capexNeedByPeriod: waterfallYears.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
-            // Initial/build CAPEX can remain in the production-start (ramp) period.
-            // Include that period in the construction leg so FCFF is grossed up once
-            // and the amount is not mislabeled as an operating cash deficit.
             if (local < 0 || local > project.productionStartPeriod) return 0;
             const capex = context?.economics.capexUSD[local];
             return capex == null ? null : Math.max(0, capex);
           }),
-          fcffByPeriod: aggregationEffective.corporateYearsByPeriod.map((year) => {
+          fcffByPeriod: waterfallYears.map((year) => {
             const local = project.yearsByPeriod.indexOf(year);
             return local < 0 ? 0 : context?.economics.fcffUSD[local] ?? null;
           }),
         };
       }),
     });
+    const cashWaterfall = buildCashWaterfallForYears(aggregationEffective.corporateYearsByPeriod);
+    const equityValueWaterfall = buildCashWaterfallForYears(valuationYears);
 
     const financingEffective = fxRate === null
       ? financing
@@ -3574,6 +3579,21 @@ export async function runCorporateSnapshotPipeline(args: {
     );
     snapshot.canonicalValuationTimeline = corporateCanonicalTimeline;
     snapshot.projectStartMilestones = projectStartMilestones;
+    (snapshot as Record<string, unknown>).corporateEquityValue = buildCorporateEquityValue({
+      valuationYear: input.valuationYear,
+      reportedCashTarget: input.balanceSheet?.cash_t0_TargetCurrency ?? 0,
+      reportedDebtTarget: input.balanceSheet?.debt_t0_TargetCurrency ?? null,
+      fxUSDToTarget: fxRate,
+      waterfall: equityValueWaterfall,
+      dcfByYear: corporateCanonicalTimeline.periods.map((row) => ({
+        year: row.calendarYear,
+        dcfTargetCurrency: row.dcfAtPeriodTarget,
+      })),
+      productionStarts: projectStartMilestones.map((marker) => ({
+        projectId: marker.projectId,
+        year: marker.calendarYear,
+      })),
+    });
     // For an already-producing portfolio, the Corporate DCF present-value scalar
     // must include every actual FCFF from the valuation year up to the next project
     // start exactly once. The canonical today row is the full rolling Corporate DCF;
