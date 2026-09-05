@@ -1,12 +1,8 @@
-import { loadProjectsForSymbol } from '../api/loadProjectsForSymbol.ts';
 import { aggregateProjectsCorporateV1 } from '../corporate/aggregateProjects.ts';
 import type { CorporateProjectEngineSnapshot } from '../corporate/types.ts';
 import { computeProjectEngineFullProductionV1 } from '../project/engineFullProductionV1.ts';
 import { computeProjectPhase2 } from '../project/phase2.ts';
-import { parseProjectJsonV1 } from '../project/jsonv1/parse.ts';
-import { resolveProjectPricesToEngineInput } from '../project/jsonv1/resolvePrices.ts';
 import { readHistoryRowsInRange } from '../prices/db/readHistory.ts';
-import { refreshHistoryRangeToMonthlyBlobs } from '../prices/refreshHistory.ts';
 import type { PriceKey } from '../prices/keys.ts';
 import { analyzeRecentSustainedLows } from './recentSustainedLow.ts';
 import type { Tier1Gate } from './preRevenueLegacySnapshot.ts';
@@ -41,7 +37,7 @@ export type Tier1CyclePolicyResult = {
   multipliersByMetal: Record<string, number>;
 };
 
-type Prepared = {
+export type Tier1CyclePreparedProject = {
   projectId: string;
   rawJson: unknown;
   physical: any;
@@ -63,6 +59,9 @@ type WindowEval = {
   multipliersByMetal: Record<string, number>;
 };
 
+type StressPriceResult = { value: number | null; reason: string | null };
+type CycleRuntimeDeps = { loadStressPriceFn?: (key: string) => Promise<StressPriceResult> };
+
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const clone = <T>(v: T): T => typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v)) as T;
 function dateYearsAgo(to: string, n: number) { const d = new Date(`${to}T00:00:00Z`); d.setUTCFullYear(d.getUTCFullYear() - n); return d.toISOString().slice(0, 10); }
@@ -73,34 +72,62 @@ function revenue(gross: Array<number | null>, credits: Array<number | null> | nu
 
 const method = `5-årig revenue-normaliserad NPV10 downside beta; stresspris = median av 3 separerade lågprisobservationer från 7 års historik med 6 månaders rullande medel; 7-årig positiv NPV10 survival-gate; beta T1 ≤0,85x, T2 ≤1,15x.`;
 
-async function loadStressPrice(key: string): Promise<{ value: number | null; reason: string | null }> {
+const stressPriceCache = new Map<string, { expiresAt: number; promise: Promise<StressPriceResult> }>();
+const STRESS_PRICE_CACHE_TTL_MS = 60_000;
+
+async function loadStressPriceUncached(key: string): Promise<StressPriceResult> {
   const to = new Date().toISOString().slice(0, 10);
   const from = dateYearsAgo(to, TIER1_CYCLE_POLICY.lookbackYears);
-  const read = async () => {
-    const h = await readHistoryRowsInRange({ priceKey: key as PriceKey, from, to });
-    return analyzeRecentSustainedLows(h.rows, {
+  try {
+    const history = await readHistoryRowsInRange({ priceKey: key as PriceKey, from, to });
+    const analysis = analyzeRecentSustainedLows(history.rows, {
       lookbackYears: TIER1_CYCLE_POLICY.lookbackYears,
       rollingMonths: TIER1_CYCLE_POLICY.rollingMonths,
       minimumSeparationMonths: TIER1_CYCLE_POLICY.minimumSeparationMonths,
       selectedLowCount: TIER1_CYCLE_POLICY.selectedLowCount,
     });
-  };
-  try {
-    let analysis = await read();
-    if (analysis.status !== 'COMPUTABLE' || !finite(analysis.stressPrice)) {
-      try { await refreshHistoryRangeToMonthlyBlobs({ priceKey: key as PriceKey, from, to }); analysis = await read(); } catch { /* preserve original failure below */ }
-    }
     if (analysis.status === 'COMPUTABLE' && finite(analysis.stressPrice)) return { value: analysis.stressPrice, reason: null };
-    return { value: null, reason: `Cykelpris ${key} är Ej verifierad efter 7-årig historik/6m/3-lågpunktstest.` };
+    return { value: null, reason: `CYCLE_HISTORY_NOT_COMPUTABLE priceKey=${key}: 7-årig lagrad historik klarar inte 6m/3-lågpunktstestet. Ingen provider-refresh körs i Tier read-path.` };
   } catch (error) {
-    return { value: null, reason: `Cykelpris ${key}: ${error instanceof Error ? error.message : String(error)}` };
+    return { value: null, reason: `CYCLE_HISTORY_READ_FAILED priceKey=${key}: ${error instanceof Error ? error.message : String(error)}` };
   }
+}
+
+async function loadStressPrice(key: string): Promise<StressPriceResult> {
+  const cacheKey = `${new Date().toISOString().slice(0, 10)}:${key}`;
+  const now = Date.now();
+  const cached = stressPriceCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.promise;
+  const promise = loadStressPriceUncached(key);
+  stressPriceCache.set(cacheKey, { expiresAt: now + STRESS_PRICE_CACHE_TTL_MS, promise });
+  void promise.then((result) => {
+    if (!finite(result.value) && stressPriceCache.get(cacheKey)?.promise === promise) stressPriceCache.delete(cacheKey);
+  }, () => {
+    if (stressPriceCache.get(cacheKey)?.promise === promise) stressPriceCache.delete(cacheKey);
+  });
+  return promise;
+}
+
+export function prepareTier1CycleProject(args: {
+  projectId: string;
+  rawJson: unknown;
+  physical: any;
+  baseInput: any;
+  baseOutput: any;
+}): Tier1CyclePreparedProject {
+  const tp = args.physical.productionStartPeriod;
+  const ct = firstConstruction(args.baseOutput.capexUSD_used, tp);
+  return {
+    ...args,
+    productionStartYear: args.physical.yearsByPeriod[tp],
+    constructionStartYear: args.physical.yearsByPeriod[ct],
+  };
 }
 
 function snap(input: any, out: any): CorporateProjectEngineSnapshot {
   return { capexUSD: out.capexUSD_used, fcffUSD: out.phase1.fcffUSD, grossRevenueUSD: out.revenue.grossRevenueUSD, auPriceUSDPerOz: input.aisc.auPriceUSDPerOz, priceUSDByMetal: input.spotPriceUSDByMetal, priceKeyByMetal: input.priceKeyByMetal, sustainingCostUSD: out.phase1.sustainingCostUSD, payableAuEqOz: out.aisc.payableAuEqOz };
 }
-async function corp(ps: Prepared[], runs: Array<{ input: any; output: any }>) {
+async function corp(ps: Tier1CyclePreparedProject[], runs: Array<{ input: any; output: any }>) {
   const byId = new Map(ps.map((p, i) => [p.projectId, snap(runs[i].input, runs[i].output)]));
   return aggregateProjectsCorporateV1({ discountRate: TIER1_CYCLE_POLICY.discountRate, projects: ps.map(p => ({ projectId: p.projectId, rawJson: p.rawJson })) }, { projectToSeries: async ({ projectId }) => { const s = byId.get(projectId); if (!s) throw new Error('missing cycle snapshot'); return s; } });
 }
@@ -112,7 +139,7 @@ function phase(years: number[], fcff: Array<number | null>, prodYear: number, st
   return finite(o.npvToday_USD) ? { npv: o.npvToday_USD, irr: finite(o.irr) ? o.irr : null } : null;
 }
 
-async function evaluate(ps: Prepared[], stressPrices: Map<string, number>, windowYears: number): Promise<WindowEval | null> {
+async function evaluate(ps: Tier1CyclePreparedProject[], stressPrices: Map<string, number>, windowYears: number): Promise<WindowEval | null> {
   let baseRev = 0, stressRev = 0;
   const baseRuns = ps.map(x => ({ input: x.baseInput, output: x.baseOutput }));
   const stressRuns: Array<{ input: any; output: any }> = [];
@@ -134,7 +161,8 @@ async function evaluate(ps: Prepared[], stressPrices: Map<string, number>, windo
     if (!finite(br) || !finite(sr) || !(br > 0)) return null;
     baseRev += br; stressRev += sr; stressRuns.push({ input, output });
   }
-  const bc = await corp(ps, baseRuns), sc = await corp(ps, stressRuns), years = bc.corporateYearsByPeriod;
+  const [bc, sc] = await Promise.all([corp(ps, baseRuns), corp(ps, stressRuns)]);
+  const years = bc.corporateYearsByPeriod;
   if (JSON.stringify(years) !== JSON.stringify(sc.corporateYearsByPeriod)) return null;
   const anchor = Math.min(...ps.map(x => x.constructionStartYear)), prod = Math.min(...ps.map(x => x.productionStartYear));
   const b = phase(years, bc.fcffUSD_total, prod, anchor), s = phase(years, sc.fcffUSD_total, prod, anchor);
@@ -147,32 +175,27 @@ function notVerified(reason: string, projectCount = 0): Tier1CyclePolicyResult {
   return { status: 'NOT_VERIFIED', gate: { status: 'NOT_VERIFIED', tier: null, value: null, threshold: TIER1_CYCLE_POLICY.tier1BetaMax, unit: 'NPV downside beta', reason }, diagnostics: [reason], projectCount, method, baseRevenueUsd: null, stressRevenueUsd: null, revenueRetention: null, baseNpv10Usd: null, stressNpv10Usd: null, npvRetention: null, downsideBeta: null, stressIrr: null, survivalNpv10Usd: null, multipliersByMetal: {} };
 }
 
-export async function computeTier1CyclePolicyForSymbol(symbol: string): Promise<Tier1CyclePolicyResult> {
-  const loaded = await loadProjectsForSymbol(symbol);
-  if (!loaded.length) return notVerified('Inga project_json-projekt hittades för cykelresistens.');
-  const ps: Prepared[] = [];
-  try {
-    for (const p of loaded) {
-      const parsed = parseProjectJsonV1(p.rawJson), physical = parsed.engineInputWithoutPrices;
-      const baseInput = await resolveProjectPricesToEngineInput({ parsed, scenario: { mode: 'spot' }, allowRefresh: true, projectId: p.projectId });
-      const baseOutput = computeProjectEngineFullProductionV1(baseInput);
-      const tp = physical.productionStartPeriod, ct = firstConstruction(baseOutput.capexUSD_used, tp);
-      ps.push({ projectId: p.projectId, rawJson: p.rawJson, physical, baseInput, baseOutput, productionStartYear: physical.yearsByPeriod[tp], constructionStartYear: physical.yearsByPeriod[ct] });
-    }
-  } catch (error) { return notVerified(`Cykelresistens ${symbol}: ${error instanceof Error ? error.message : String(error)}`, loaded.length); }
-
+export async function computeTier1CyclePolicyFromPreparedProjects(
+  ps: Tier1CyclePreparedProject[],
+  deps: CycleRuntimeDeps = {},
+): Promise<Tier1CyclePolicyResult> {
+  if (!ps.length) return notVerified('Inga förberedda project_json-projekt hittades för cykelresistens.');
   const keys = [...new Set(ps.flatMap(p => Object.values(p.physical.priceKeyByMetal) as string[]))];
+  const loadStress = deps.loadStressPriceFn ?? loadStressPrice;
+  const stressRows = await Promise.all(keys.map(async (key) => [key, await loadStress(key)] as const));
   const stressPrices = new Map<string, number>();
   const diagnostics: string[] = [];
-  for (const key of keys) {
-    const r = await loadStressPrice(key);
-    if (!finite(r.value)) diagnostics.push(r.reason ?? `Cykelpris ${key} är Ej verifierad.`); else stressPrices.set(key, r.value);
+  for (const [key, result] of stressRows) {
+    if (!finite(result.value)) diagnostics.push(result.reason ?? `CYCLE_PRICE_NOT_VERIFIED priceKey=${key}`);
+    else stressPrices.set(key, result.value);
   }
   if (diagnostics.length) return { ...notVerified(diagnostics.join(' '), ps.length), diagnostics };
 
-  const row5 = await evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.classificationStressYears);
-  const row7 = await evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.survivalStressYears);
-  if (!row5 || !row7 || !finite(row5.beta)) return notVerified('Cykelresistens kunde inte beräknas från canonical corporate kassaflöde/revenue.', ps.length);
+  const [row5, row7] = await Promise.all([
+    evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.classificationStressYears),
+    evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.survivalStressYears),
+  ]);
+  if (!row5 || !row7 || !finite(row5.beta)) return notVerified('CYCLE_EVALUATION_FAILED: canonical Corporate kassaflöde/revenue kunde inte bilda ett verifierat 5y/7y cycle-resultat.', ps.length);
 
   const survivalPass = row7.stressNpv > 0;
   const tier = row5.beta <= TIER1_CYCLE_POLICY.tier1BetaMax ? 1 : row5.beta <= TIER1_CYCLE_POLICY.tier2BetaMax ? 2 : 3;

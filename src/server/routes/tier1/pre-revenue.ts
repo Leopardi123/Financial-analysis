@@ -5,7 +5,12 @@ import { resolveProjectPricesToEngineInput } from '../../../lib/project/jsonv1/r
 import { computeProjectEngineFullProductionV1 } from '../../../lib/project/engineFullProductionV1.ts';
 import { computeProjectPhase2 } from '../../../lib/project/phase2.ts';
 import { computeIrr } from '../../../lib/metrics/lista3.ts';
-import { computeTier1CyclePolicyForSymbol, TIER1_CYCLE_POLICY } from '../../../lib/tier1/cyclePolicyRuntime.ts';
+import {
+  computeTier1CyclePolicyFromPreparedProjects,
+  prepareTier1CycleProject,
+  TIER1_CYCLE_POLICY,
+  type Tier1CyclePreparedProject,
+} from '../../../lib/tier1/cyclePolicyRuntime.ts';
 import {
   TIER1_COST_BENCHMARKS,
   TIER1_POLICY,
@@ -38,6 +43,7 @@ type ProjectPrepared = {
   basePriceByKey: Record<string, number>;
   baseInput: Awaited<ReturnType<typeof resolveProjectPricesToEngineInput>>;
   baseOutput: ReturnType<typeof computeProjectEngineFullProductionV1>;
+  cycleProject: Tier1CyclePreparedProject;
 };
 
 function finite(value: unknown): value is number {
@@ -291,25 +297,33 @@ export default async function handler(req: any, res: any): Promise<void> {
         }
       }
 
-      let baseInput: Awaited<ReturnType<typeof resolveProjectPricesToEngineInput>>;
-      try {
-        baseInput = await resolveProjectPricesToEngineInput({
-          parsed,
-          scenario: { mode: 'spot' },
-          allowRefresh: true,
-          projectId: project.projectId,
-        });
-      } catch (error) {
-        spotDeckComplete = false;
-        diagnostics.push(`${project.projectId}: gemensamt Tier-spotdeck kunde inte lösas: ${error instanceof Error ? error.message : String(error)}`);
-        continue;
+      let baseInput: Awaited<ReturnType<typeof resolveProjectPricesToEngineInput>> | null = null;
+      let basePriceByKey: Record<string, number> | null = null;
+      let priceFailures: string[] = [];
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          baseInput = await resolveProjectPricesToEngineInput({
+            parsed,
+            scenario: { mode: 'spot' },
+            allowRefresh: false,
+            projectId: project.projectId,
+          });
+          priceFailures = baseInput.diagnostics?.metalsWithPriceFailure ?? [];
+          basePriceByKey = resolvedSpotPriceByKey(baseInput, physicalInput.priceKeyByMetal);
+          if (priceFailures.length === 0 && basePriceByKey) break;
+          if (attempt === 0) diagnostics.push(`${project.projectId}: transient spot-resolution gav ofullständigt deck; gör en enda kontrollerad retry.`);
+        } catch (error) {
+          if (attempt === 0) {
+            diagnostics.push(`${project.projectId}: spot-resolution kastade fel; gör en enda kontrollerad retry: ${error instanceof Error ? error.message : String(error)}`);
+            continue;
+          }
+          diagnostics.push(`${project.projectId}: gemensamt Tier-spotdeck kunde inte lösas efter retry: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
 
-      const priceFailures = baseInput.diagnostics?.metalsWithPriceFailure ?? [];
-      const basePriceByKey = resolvedSpotPriceByKey(baseInput, physicalInput.priceKeyByMetal);
-      if (priceFailures.length > 0 || !basePriceByKey) {
+      if (!baseInput || priceFailures.length > 0 || !basePriceByKey) {
         spotDeckComplete = false;
-        diagnostics.push(`${project.projectId}: spotpris saknas eller är ogiltigt för ${priceFailures.length > 0 ? priceFailures.join(', ') : 'minst en price key'}; prisberoende Tier-kriterier lämnas Ej verifierade.`);
+        diagnostics.push(`${project.projectId}: spotpris saknas eller är ogiltigt för ${priceFailures.length > 0 ? priceFailures.join(', ') : 'minst en price key'} efter retry; prisberoende Tier-kriterier lämnas Ej verifierade.`);
         continue;
       }
       for (const warning of baseInput.diagnostics?.warnings ?? []) diagnostics.push(`${project.projectId}: ${warning}`);
@@ -324,6 +338,13 @@ export default async function handler(req: any, res: any): Promise<void> {
         basePriceByKey,
         baseInput,
         baseOutput,
+        cycleProject: prepareTier1CycleProject({
+          projectId: project.projectId,
+          rawJson: project.rawJson,
+          physical: physicalInput,
+          baseInput,
+          baseOutput,
+        }),
       });
 
       for (let t = 0; t <= productionStartPeriod; t += 1) {
@@ -420,9 +441,9 @@ export default async function handler(req: any, res: any): Promise<void> {
         })
       : null;
 
-    const cyclePolicy = await computeTier1CyclePolicyForSymbol(symbol);
+    const cyclePolicy = await computeTier1CyclePolicyFromPreparedProjects(preparedProjects.map((project) => project.cycleProject));
     diagnostics.push(...cyclePolicy.diagnostics);
-    diagnostics.push(`Cykelresistens aktiv policy: ${cyclePolicy.method} Corporate projectCount=${cyclePolicy.projectCount}.`);
+    diagnostics.push(`Cykelresistens aktiv policy: ${cyclePolicy.method} Corporate projectCount=${cyclePolicy.projectCount}. Base case återanvänds från Tierns gemensamma spot-resolution.`);
 
     const valuationYear = new Date().getUTCFullYear();
     const usesNextProjectIrr = preparedProjects.some((project) => (project.yearsByPeriod[project.productionStartPeriod] ?? Infinity) <= valuationYear);
