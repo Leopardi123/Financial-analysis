@@ -1353,8 +1353,8 @@ type SnapshotDiagnostics = {
     metalsWithPriceFailure?: string[];
     royaltiesDiagnostics?: Record<string, {
       grossRevenueUSDNumeric: boolean;
-      royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
-      royaltiesComputedFromSeriesName: 'outPreRoyalties.revenue.grossRevenueUSD' | 'resolved.totalRevenue_USD' | 'series.royaltiesUSD-fallback' | 'null';
+      royaltiesSource: 'project-engine-fiscal-rules' | 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null';
+      royaltiesComputedFromSeriesName: 'project-engine.nationalTake.totalRoyaltiesUSD' | 'outPreRoyalties.revenue.grossRevenueUSD' | 'resolved.totalRevenue_USD' | 'series.royaltiesUSD-fallback' | 'null';
       royaltiesDetailFailureReason: string | null;
       royaltiesResolvedNumeric: boolean;
       computedPeriods: number;
@@ -1628,6 +1628,13 @@ export async function runCorporateSnapshotPipeline(args: {
 
           const outPreRoyalties = computeProjectEngineFullProductionV1(resolved);
           diagnostics.warnings.push(...outPreRoyalties.nationalTake.diagnostics);
+          // project_json_v3 fiscal rules are already resolved by the canonical Project engine.
+          // Corporate must consume that output rather than reconstructing a parallel royalty/tax path.
+          const hasCanonicalFiscalRules = Array.isArray(resolved.phase1.fiscalTakeRules)
+            && resolved.phase1.fiscalTakeRules.length > 0;
+          const canonicalFiscalRoyaltiesUSD = hasCanonicalFiscalRules
+            ? sanitizeSeries(outPreRoyalties.nationalTake.totalRoyaltiesUSD)
+            : null;
           const projectLength = yearsByPeriod.length;
           const nullSeries = new Array<number | null>(projectLength).fill(null);
           const taxRate = parsed.engineInputWithoutPrices.taxRate;
@@ -1722,21 +1729,27 @@ export async function runCorporateSnapshotPipeline(args: {
           const hasRoyaltiesDetailArray = Array.isArray(royaltiesDetailRaw);
           const hasComputableRoyaltyRules = computableRuleCount > 0;
           const hasExplicitRoyalties = !isAllNullOrNonFinite(explicitRoyaltiesUSD);
-          const royaltiesUSD = hasComputableRoyaltyRules
-            ? sanitizeSeries(computedRoyaltiesUSD)
-            : hasExplicitRoyalties
-              ? explicitRoyaltiesUSD
-              : nullSeries;
-          const royaltiesSource: 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null' = hasComputableRoyaltyRules
-            ? 'royaltiesDetail-current-run'
-            : hasExplicitRoyalties
-              ? 'series.royaltiesUSD-fallback'
-              : 'null';
-          const royaltiesDetailFailureReason = hasComputableRoyaltyRules
+          const royaltiesUSD = hasCanonicalFiscalRules
+            ? (canonicalFiscalRoyaltiesUSD as Array<number | null>)
+            : hasComputableRoyaltyRules
+              ? sanitizeSeries(computedRoyaltiesUSD)
+              : hasExplicitRoyalties
+                ? explicitRoyaltiesUSD
+                : nullSeries;
+          const royaltiesSource: 'project-engine-fiscal-rules' | 'royaltiesDetail-current-run' | 'series.royaltiesUSD-fallback' | 'null' = hasCanonicalFiscalRules
+            ? 'project-engine-fiscal-rules'
+            : hasComputableRoyaltyRules
+              ? 'royaltiesDetail-current-run'
+              : hasExplicitRoyalties
+                ? 'series.royaltiesUSD-fallback'
+                : 'null';
+          const royaltiesDetailFailureReason = hasCanonicalFiscalRules
             ? null
-            : hasRoyaltiesDetailArray
-              ? 'royaltiesDetail present but no computable revenue-based rate rules'
-              : 'royaltiesDetail missing';
+            : hasComputableRoyaltyRules
+              ? null
+              : hasRoyaltiesDetailArray
+                ? 'royaltiesDetail present but no computable revenue-based rate rules'
+                : 'royaltiesDetail missing';
           const computedPeriods = royaltiesUSD.filter((value) => value !== null).length;
           const skippedPeriods = royaltiesUSD.length - computedPeriods;
           const royaltiesResolvedNumeric = computedPeriods > 0;
@@ -1760,11 +1773,13 @@ export async function runCorporateSnapshotPipeline(args: {
           diagnostics.meta.royaltiesDiagnostics[projectId] = {
             grossRevenueUSDNumeric: grossRevenueForRoyalties.some((value) => value !== null),
             royaltiesSource,
-            royaltiesComputedFromSeriesName: hasComputableRoyaltyRules
-              ? grossRevenueSourceForRoyalties
-              : hasExplicitRoyalties
-                ? 'series.royaltiesUSD-fallback'
-                : 'null',
+            royaltiesComputedFromSeriesName: hasCanonicalFiscalRules
+              ? 'project-engine.nationalTake.totalRoyaltiesUSD'
+              : hasComputableRoyaltyRules
+                ? grossRevenueSourceForRoyalties
+                : hasExplicitRoyalties
+                  ? 'series.royaltiesUSD-fallback'
+                  : 'null',
             royaltiesDetailFailureReason,
             royaltiesResolvedNumeric,
             computedPeriods,
@@ -1790,7 +1805,10 @@ export async function runCorporateSnapshotPipeline(args: {
             diagnostics.warnings.push(`royaltiesDetail failed because ${royaltiesDetailFailureReason}`);
           }
 
-          if (hasComputableRoyaltyRules) {
+          if (hasCanonicalFiscalRules) {
+            diagnostics.warnings.push('royalties: using canonical Project engine fiscalTakeRules output');
+            diagnostics.warnings.push('Royalties (Project fiscal rules)');
+          } else if (hasComputableRoyaltyRules) {
             const rateTypes = Array.from(computableRateTypes).sort((a, b) => a.localeCompare(b)).join('|');
             diagnostics.warnings.push(`royalties: computed from royaltiesDetail (base=revenue, rateType=${rateTypes}, count=${String(computableRuleCount)})`);
             diagnostics.warnings.push('Royalties (computed)');
@@ -1803,33 +1821,41 @@ export async function runCorporateSnapshotPipeline(args: {
             diagnostics.warnings.push('royaltiesDetail missing; using series.royaltiesUSD');
           }
 
-          const out = computeProjectEngineFullProductionV1({
-            ...resolved,
-            phase1: {
-              ...resolved.phase1,
-              royaltiesUSD,
-            },
-          });
+          // Never feed Project-engine fiscal royalties back into the same engine: fiscalTakeRules
+          // would add them a second time. Legacy v1/v2 keeps its historical royalty override path.
+          const out = hasCanonicalFiscalRules
+            ? outPreRoyalties
+            : computeProjectEngineFullProductionV1({
+                ...resolved,
+                phase1: {
+                  ...resolved.phase1,
+                  royaltiesUSD,
+                },
+              });
 
           const spotDeckValid = hasValidSpotDeck(resolved.spotPriceUSDByMetal, yearsByPeriod.length);
           const outLowSpot = spotDeckValid
             ? computeProjectEngineFullProductionV1({
                 ...resolved,
                 spotPriceUSDByMetal: scaleSpotDeck(resolved.spotPriceUSDByMetal, 0.75),
-                phase1: {
-                  ...resolved.phase1,
-                  royaltiesUSD,
-                },
+                ...(hasCanonicalFiscalRules ? {} : {
+                  phase1: {
+                    ...resolved.phase1,
+                    royaltiesUSD,
+                  },
+                }),
               })
             : null;
           const outHighSpot = spotDeckValid
             ? computeProjectEngineFullProductionV1({
                 ...resolved,
                 spotPriceUSDByMetal: scaleSpotDeck(resolved.spotPriceUSDByMetal, 1.25),
-                phase1: {
-                  ...resolved.phase1,
-                  royaltiesUSD,
-                },
+                ...(hasCanonicalFiscalRules ? {} : {
+                  phase1: {
+                    ...resolved.phase1,
+                    royaltiesUSD,
+                  },
+                }),
               })
             : null;
           const ebitLowSpot = spotDeckValid
@@ -1846,60 +1872,76 @@ export async function runCorporateSnapshotPipeline(args: {
           const workingCapitalDeltaUSD_effective = sanitizeSeries(out.phase1.workingCapitalDeltaUSD_effective);
 
           const centralRevenueUSD = grossRevenueForRoyalties;
-          const sustainingAdjustedOperatingEarningsUSD = centralRevenueUSD.map((revenue, t) => {
-            if (revenue === null) return null;
-            const op = operatingCostsUSD[t] ?? 0;
-            const sc = sustainingCapexUSD[t] ?? 0;
-            const ga = siteGandA_USD[t] ?? 0;
-            const roy = royaltiesUSD[t] ?? 0;
-            const rec = reclamationUSD[t] ?? 0;
-            const bp = byproductCreditsUSD[t] ?? 0;
-            return revenue - op - sc - ga - roy - rec + bp;
-          });
-          const ebitdaUSD = centralRevenueUSD.map((revenue, t) => {
-            if (revenue === null) return null;
-            const op = operatingCostsUSD[t] ?? 0;
-            const ga = siteGandA_USD[t] ?? 0;
-            const roy = royaltiesUSD[t] ?? 0;
-            const rec = reclamationUSD[t] ?? 0;
-            const bp = byproductCreditsUSD[t] ?? 0;
-            return revenue - op - ga - roy - rec + bp;
-          });
-          const ebitUSD = sustainingAdjustedOperatingEarningsUSD.map((operatingEarnings, t) => {
-            if (operatingEarnings === null) return null;
-            const dep = depreciationUSD[t] ?? 0;
-            return operatingEarnings - dep;
-          });
-          const taxableIncomeUSD = ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
+          const sustainingAdjustedOperatingEarningsUSD = hasCanonicalFiscalRules
+            ? sanitizeSeries(out.phase1.sustainingAdjustedOperatingEarningsUSD)
+            : centralRevenueUSD.map((revenue, t) => {
+                if (revenue === null) return null;
+                const op = operatingCostsUSD[t] ?? 0;
+                const sc = sustainingCapexUSD[t] ?? 0;
+                const ga = siteGandA_USD[t] ?? 0;
+                const roy = royaltiesUSD[t] ?? 0;
+                const rec = reclamationUSD[t] ?? 0;
+                const bp = byproductCreditsUSD[t] ?? 0;
+                return revenue - op - sc - ga - roy - rec + bp;
+              });
+          const ebitdaUSD = hasCanonicalFiscalRules
+            ? sanitizeSeries(out.phase1.ebitdaUSD)
+            : centralRevenueUSD.map((revenue, t) => {
+                if (revenue === null) return null;
+                const op = operatingCostsUSD[t] ?? 0;
+                const ga = siteGandA_USD[t] ?? 0;
+                const roy = royaltiesUSD[t] ?? 0;
+                const rec = reclamationUSD[t] ?? 0;
+                const bp = byproductCreditsUSD[t] ?? 0;
+                return revenue - op - ga - roy - rec + bp;
+              });
+          const ebitUSD = hasCanonicalFiscalRules
+            ? sanitizeSeries(out.phase1.ebitUSD)
+            : sustainingAdjustedOperatingEarningsUSD.map((operatingEarnings, t) => {
+                if (operatingEarnings === null) return null;
+                const dep = depreciationUSD[t] ?? 0;
+                return operatingEarnings - dep;
+              });
+          const taxableIncomeUSD = hasCanonicalFiscalRules
+            ? sanitizeSeries(out.phase1.taxableIncomeUSD)
+            : ebitUSD.map((ebit) => (ebit === null ? null : Math.max(0, ebit)));
           const hasExplicitTaxCashFlow = Array.isArray(resolved.phase1.taxCashFlowUSD);
           const hasTerminalProceeds = Array.isArray(resolved.phase1.terminalProceedsUSD);
           // Preserve the legacy snapshot rule exactly when explicit tax is absent.
           // Opt-in explicit tax consumes canonical Phase1 taxUSD so construction
           // credits and operating tax payments retain their disclosed cash signs.
-          const taxByRule = hasExplicitTaxCashFlow
+          const taxByRule = hasCanonicalFiscalRules
             ? sanitizeSeries(out.phase1.taxUSD)
-            : taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
-          const effectiveTaxRate = hasExplicitTaxCashFlow
+            : hasExplicitTaxCashFlow
+              ? sanitizeSeries(out.phase1.taxUSD)
+              : taxableIncomeUSD.map((taxable) => (taxRate === null || taxable === null ? null : taxable * taxRate));
+          const effectiveTaxRate = hasCanonicalFiscalRules
             ? sanitizeSeries(out.phase1.effectiveTaxRate)
-            : ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
+            : hasExplicitTaxCashFlow
+              ? sanitizeSeries(out.phase1.effectiveTaxRate)
+              : ebitUSD.map((ebit, t) => (ebit !== null && ebit > 0 && taxByRule[t] !== null ? (taxByRule[t] as number) / ebit : null));
           const terminalProceedsUSD_effective = hasTerminalProceeds
             ? sanitizeSeries(out.phase1.terminalProceedsUSD_effective ?? new Array<number | null>(projectLength).fill(null))
             : new Array<number | null>(projectLength).fill(0);
-          const fcffByCentralEbit = ebitUSD.map((ebit, t) => {
-            if (ebit === null) return null;
-            if (hasExplicitTaxCashFlow && taxByRule[t] === null) return null;
-            if (hasTerminalProceeds && terminalProceedsUSD_effective[t] === null) return null;
-            const tax = taxByRule[t] ?? 0;
-            const dep = depreciationUSD[t] ?? 0;
-            const cx = capexUSD_used[t] ?? 0;
-            const dWC = workingCapitalDeltaUSD_effective[t] ?? 0;
-            const terminal = terminalProceedsUSD_effective[t] ?? 0;
-            // Reclamation is already included in EBITDA/EBIT and must not be deducted twice in FCFF.
-            // Terminal proceeds are non-operating cash and enter only at FCFF level.
-            return ebit - tax + dep - cx - dWC + terminal;
-          });
-          const usesTaxRateRule = !hasExplicitTaxCashFlow && taxRate !== null;
-          const taxExpectedFromCentralEbit = ebitUSD.map((ebit) => (ebit === null || taxRate === null ? null : Math.max(0, ebit) * taxRate));
+          const fcffByCentralEbit = hasCanonicalFiscalRules
+            ? sanitizeSeries(out.phase1.fcffUSD)
+            : ebitUSD.map((ebit, t) => {
+                if (ebit === null) return null;
+                if (hasExplicitTaxCashFlow && taxByRule[t] === null) return null;
+                if (hasTerminalProceeds && terminalProceedsUSD_effective[t] === null) return null;
+                const tax = taxByRule[t] ?? 0;
+                const dep = depreciationUSD[t] ?? 0;
+                const cx = capexUSD_used[t] ?? 0;
+                const dWC = workingCapitalDeltaUSD_effective[t] ?? 0;
+                const terminal = terminalProceedsUSD_effective[t] ?? 0;
+                // Reclamation is already included in EBITDA/EBIT and must not be deducted twice in FCFF.
+                // Terminal proceeds are non-operating cash and enter only at FCFF level.
+                return ebit - tax + dep - cx - dWC + terminal;
+              });
+          const usesTaxRateRule = !hasCanonicalFiscalRules && !hasExplicitTaxCashFlow && taxRate !== null;
+          const taxExpectedFromCentralEbit = hasCanonicalFiscalRules
+            ? new Array<number | null>(projectLength).fill(null)
+            : ebitUSD.map((ebit) => (ebit === null || taxRate === null ? null : Math.max(0, ebit) * taxRate));
           const taxDiffFromCentralRule = taxByRule.map((tax, t) => {
             const expected = taxExpectedFromCentralEbit[t];
             if (tax === null || expected === null) return null;
@@ -1911,16 +1953,30 @@ export async function runCorporateSnapshotPipeline(args: {
           }, 0);
           diagnostics.warnings.push(`[${projectId}] tax mode=live-model`);
           diagnostics.warnings.push(`[${projectId}] totalRevenue source path=grossRevenueForRoyalties (${grossRevenueSourceForRoyalties})`);
-          diagnostics.warnings.push(`[${projectId}] sustaining-adjusted operating earnings source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits`);
-          diagnostics.warnings.push(`[${projectId}] EBITDA source path=totalRevenue - operatingCosts - siteG&A - royalties - reclamation + byproductCredits (informational/valuation only)`);
-          diagnostics.warnings.push(`[${projectId}] ebit source path=sustainingAdjustedOperatingEarnings - depreciation`);
-          diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - capex - workingCapitalDelta + terminalProceeds (sustaining CAPEX and reclamation already included in operating earnings)`);
-          diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
-          diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
-          diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
-          diagnostics.warnings.push(`[${projectId}] tax source of truth=${hasExplicitTaxCashFlow ? 'phase1.taxUSD from explicit taxCashFlowUSD' : 'snapshot taxRate rule'}`);
-          diagnostics.warnings.push(`[${projectId}] tax rule=${hasExplicitTaxCashFlow ? 'taxUSD[t]=-taxCashFlowUSD[t]' : 'taxUSD[t]=max(0, EBIT[t])*taxRate'}`);
-          diagnostics.warnings.push(`[${projectId}] tax rate source=${hasExplicitTaxCashFlow ? 'explicit tax cash-flow series' : usesTaxRateRule ? 'economics.taxRate' : 'missing economics.taxRate (legacy zero-tax FCFF behavior preserved)'}`);
+          if (hasCanonicalFiscalRules) {
+            diagnostics.warnings.push(`[${projectId}] corporate economics source=Project engine Phase1 canonical fiscal output`);
+            diagnostics.warnings.push(`[${projectId}] sustaining-adjusted operating earnings source path=projectEngine.phase1.sustainingAdjustedOperatingEarningsUSD`);
+            diagnostics.warnings.push(`[${projectId}] EBITDA source path=projectEngine.phase1.ebitdaUSD`);
+            diagnostics.warnings.push(`[${projectId}] ebit source path=projectEngine.phase1.ebitUSD`);
+            diagnostics.warnings.push(`[${projectId}] fcff source path=projectEngine.phase1.fcffUSD`);
+            diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=projectEngine.phase1.ebitUSD`);
+            diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (Project engine Phase1)`);
+            diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
+            diagnostics.warnings.push(`[${projectId}] tax source of truth=projectEngine.phase1.taxUSD`);
+            diagnostics.warnings.push(`[${projectId}] tax rule=canonical Project tax model including loss carryforward where configured`);
+            diagnostics.warnings.push(`[${projectId}] tax rate source=project_json_v3 canonical tax model via Project engine`);
+          } else {
+            diagnostics.warnings.push(`[${projectId}] sustaining-adjusted operating earnings source path=totalRevenue - operatingCosts - sustainingCapex - siteG&A - royalties - reclamation + byproductCredits`);
+            diagnostics.warnings.push(`[${projectId}] EBITDA source path=totalRevenue - operatingCosts - siteG&A - royalties - reclamation + byproductCredits (informational/valuation only)`);
+            diagnostics.warnings.push(`[${projectId}] ebit source path=sustainingAdjustedOperatingEarnings - depreciation`);
+            diagnostics.warnings.push(`[${projectId}] fcff source path=ebit - tax + depreciation - capex - workingCapitalDelta + terminalProceeds (sustaining CAPEX and reclamation already included in operating earnings)`);
+            diagnostics.warnings.push(`[${projectId}] ebitPath_projectTable=series.ebitUSD (central revenue-cost builder)`);
+            diagnostics.warnings.push(`[${projectId}] ebitPath_corporateNopat=projectSeriesContexts.economics.ebitUSD (central revenue-cost builder)`);
+            diagnostics.warnings.push(`[${projectId}] sameEbitSource=true`);
+            diagnostics.warnings.push(`[${projectId}] tax source of truth=${hasExplicitTaxCashFlow ? 'phase1.taxUSD from explicit taxCashFlowUSD' : 'snapshot taxRate rule'}`);
+            diagnostics.warnings.push(`[${projectId}] tax rule=${hasExplicitTaxCashFlow ? 'taxUSD[t]=-taxCashFlowUSD[t]' : 'taxUSD[t]=max(0, EBIT[t])*taxRate'}`);
+            diagnostics.warnings.push(`[${projectId}] tax rate source=${hasExplicitTaxCashFlow ? 'explicit tax cash-flow series' : usesTaxRateRule ? 'economics.taxRate' : 'missing economics.taxRate (legacy zero-tax FCFF behavior preserved)'}`);
+          }
           diagnostics.warnings.push(`[${projectId}] terminal proceeds source=${hasTerminalProceeds ? 'phase1.terminalProceedsUSD_effective' : 'absent (0)'}`);
           diagnostics.warnings.push(`[${projectId}] tax consistency maxAbsDiff(actual-vs-expectedFromCentralEbit)=${taxDiffMaxAbs}`);
           const focusPeriods = [2, 3, 4].filter((t) => t >= 0 && t < projectLength);
