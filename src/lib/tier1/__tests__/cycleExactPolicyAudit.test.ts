@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { query } from '../../../../api/_db.ts';
 import { loadProjectsForSymbol } from '../../api/loadProjectsForSymbol.ts';
 import { aggregateProjectsCorporateV1 } from '../../corporate/aggregateProjects.ts';
@@ -128,13 +129,20 @@ async function evaluate(symbol: string, windowYears: number): Promise<Eval | nul
   return { symbol, projectCount: ps.length, baseRevenue: baseRev, stressRevenue: stressRev, revenueRetention, baseNpv: b.npv, stressNpv: s.npv, npvRetention, beta: revenueDrawdown > 1e-9 ? (1 - npvRetention) / revenueDrawdown : NaN, baseIrr: b.irr, stressIrr: s.irr };
 }
 
-function classify(row5: Eval, row7: Eval): Tier {
-  if (!(row7.stressNpv > 0)) return 'FAIL';
+function classify(row5: Eval, _row7: Eval): Tier {
   if (!finite(row5.beta)) return 'FAIL';
   if (row5.beta <= T1_BETA_MAX) return 'T1';
   if (row5.beta <= T2_BETA_MAX) return 'T2';
   return 'T3';
 }
+
+const synthetic5 = {
+  symbol: 'SURVIVAL-DIAGNOSTIC', projectCount: 1, baseRevenue: 100, stressRevenue: 40,
+  revenueRetention: 0.4, baseNpv: 100, stressNpv: 10, npvRetention: 0.1,
+  beta: 1.5, baseIrr: 0.5, stressIrr: 0.2,
+} satisfies Eval;
+const synthetic7 = { ...synthetic5, stressNpv: -1 } satisfies Eval;
+assert.equal(classify(synthetic5, synthetic7), 'T3', 'negative 7y survival NPV10 is diagnostic only; verified 5y beta still sets cycle Tier');
 
 (async () => {
   const q = await query(`SELECT DISTINCT UPPER(symbol) AS symbol FROM company_projects ORDER BY UPPER(symbol)`) as Array<{ symbol?: string }>;
@@ -147,7 +155,7 @@ function classify(row5: Eval, row7: Eval): Tier {
     const row5 = await evaluate(symbol, CLASSIFICATION_STRESS_YEARS), row7 = await evaluate(symbol, SURVIVAL_STRESS_YEARS);
     if (!row5 || !row7) { unavailable.push(symbol); console.log(`CYCLE_EXACT_POLICY ${symbol} status=NOT_VERIFIED`); continue; }
     const tier = classify(row5, row7); counts[tier] += 1; members[tier].push(symbol);
-    console.log(`CYCLE_EXACT_POLICY ${symbol} projects=${row5.projectCount} baseRevenue=${row5.baseRevenue.toFixed(0)} stressRevenue=${row5.stressRevenue.toFixed(0)} revenueRetention=${row5.revenueRetention.toFixed(4)} baseNPV10=${row5.baseNpv.toFixed(0)} stressNPV10=${row5.stressNpv.toFixed(0)} npvRetention=${row5.npvRetention.toFixed(4)} beta=${row5.beta.toFixed(4)} baseIRR=${row5.baseIrr?.toFixed(4) ?? 'null'} stressIRR=${row5.stressIrr?.toFixed(4) ?? 'null'} survival7NPV10=${row7.stressNpv.toFixed(0)} survival7=${row7.stressNpv > 0 ? 'PASS' : 'FAIL'} cycleTier=${tier}`);
+    console.log(`CYCLE_EXACT_POLICY ${symbol} projects=${row5.projectCount} baseRevenue=${row5.baseRevenue.toFixed(0)} stressRevenue=${row5.stressRevenue.toFixed(0)} revenueRetention=${row5.revenueRetention.toFixed(4)} baseNPV10=${row5.baseNpv.toFixed(0)} stressNPV10=${row5.stressNpv.toFixed(0)} npvRetention=${row5.npvRetention.toFixed(4)} beta=${row5.beta.toFixed(4)} baseIRR=${row5.baseIrr?.toFixed(4) ?? 'null'} stressIRR=${row5.stressIrr?.toFixed(4) ?? 'null'} survival7NPV10=${row7.stressNpv.toFixed(0)} survival7=${row7.stressNpv > 0 ? 'PASS_DIAGNOSTIC' : 'FAIL_DIAGNOSTIC'} cycleTier=${tier}`);
   }
   console.log(`CYCLE_EXACT_POLICY_SUMMARY T1=${counts.T1}[${members.T1.join(',')}] T2=${counts.T2}[${members.T2.join(',')}] T3=${counts.T3}[${members.T3.join(',')}] FAIL=${counts.FAIL}[${members.FAIL.join(',')}] NOT_VERIFIED=${unavailable.length}[${unavailable.join(',')}]`);
   console.log('CYCLE_EXACT_POLICY_END');

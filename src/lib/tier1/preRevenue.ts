@@ -17,16 +17,30 @@ import type { Tier1Metal, Tier1CostMetric } from './config.ts';
 export const TIER1_COST_QUARTILE_INACTIVE_REASON =
   'N/A — Cost Quartile är avstängd som Tier-input. Kostnadsdata och externa referenser är endast diagnostik och påverkar inte Tier-resultatet. Se docs/TIER1_COST_QUARTILE_DISABLED_READ_BEFORE_REACTIVATION.md.';
 
-/** Active policy: Cost Quartile is N/A; cycle resistance is a real Tier ceiling. */
+function enforceInactiveCostGate(cost: Tier1Gate): void {
+  cost.status = 'NOT_VERIFIED';
+  cost.tier = null;
+  cost.value = null;
+  cost.threshold = null;
+  cost.unit = null;
+  cost.reason = TIER1_COST_QUARTILE_INACTIVE_REASON;
+}
+
+/**
+ * Active policy: Cost Quartile is N/A. Cycle Tier is set by the verified
+ * 5-year downside beta. The 7-year survival NPV10 is diagnostic only and must
+ * never turn an otherwise computable cycle result into NOT_QUALIFIED.
+ */
 export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   status: Tier1OverallStatus;
   reason: string;
 } {
+  // Post-processing may enrich cost diagnostics, but active Tier must always
+  // leave the cost gate in the canonical N/A state.
+  enforceInactiveCostGate(gates.cost);
+
   if (gates.capitalReturns.status === 'FAIL' && gates.capitalReturns.tier === null) {
     return { status: 'NOT_QUALIFIED', reason: 'Kapitalavkastningen ligger under det valda måttets miniminivå. Cost Quartile är N/A och räknas inte.' };
-  }
-  if (gates.cycle.status === 'FAIL' && gates.cycle.tier === null) {
-    return { status: 'NOT_QUALIFIED', reason: 'Projektet klarar inte den 7-åriga survival-stressen med positiv NPV10. Cost Quartile är N/A och räknas inte.' };
   }
 
   const essential = [gates.lom, gates.scale, gates.capitalReturns, gates.cycle];
@@ -44,7 +58,7 @@ export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
   if (structuralTier === 1) {
     return {
       status: 'TIER_1',
-      reason: 'Tier-1-kraven uppfylls för livslängd, fysisk produktionsskala, 5-årig normaliserad cykelresistens med 7-årig survival-gate och kapitalavkastning. Cost Quartile är N/A och påverkar inte klassningen.',
+      reason: 'Tier-1-kraven uppfylls för livslängd, fysisk produktionsskala, 5-årig normaliserad cykelresistens och kapitalavkastning. 7-årig survival-NPV10 är separat diagnostik. Cost Quartile är N/A och påverkar inte klassningen.',
     };
   }
 
@@ -56,7 +70,7 @@ export function classifyTier(gates: Tier1PreRevenueAssessment['gates']): {
 
   return {
     status: structuralTier === 2 ? 'TIER_2' : 'TIER_3',
-    reason: `${limiters.length > 0 ? limiters.join(', ') : 'Minst en aktiv kategori'} sätter Tier-${structuralTier}-taket. Cost Quartile är N/A och påverkar inte klassningen.`,
+    reason: `${limiters.length > 0 ? limiters.join(', ') : 'Minst en aktiv kategori'} sätter Tier-${structuralTier}-taket. 7-årig survival-NPV10 är separat diagnostik. Cost Quartile är N/A och påverkar inte klassningen.`,
   };
 }
 

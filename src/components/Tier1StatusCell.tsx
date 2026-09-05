@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Tier1Gate, Tier1PreRevenueAssessment } from '../lib/tier1/preRevenue.ts';
 import { TIER1_COST_BENCHMARKS } from '../lib/tier1/config.ts';
+import { fetchTier1Assessment } from '../lib/client/tier1AssessmentClient.ts';
 import Tier1CostReferencePanel from './Tier1CostReferencePanel.tsx';
 import '../styles/tier1-diagnostic-hierarchy.css';
-
-const assessmentPromiseCache = new Map<string, Promise<Tier1PreRevenueAssessment | null>>();
 
 type CyclePriceDisplayRow = {
   metal: string;
@@ -71,21 +70,6 @@ type ExtendedTierSupport = Tier1PreRevenueAssessment['support'] & {
   primaryProduct?: string | null;
   primaryProductRevenueShare?: number | null;
 };
-
-function fetchAssessment(symbol: string): Promise<Tier1PreRevenueAssessment | null> {
-  const key = symbol.trim().toUpperCase();
-  const cached = assessmentPromiseCache.get(key);
-  if (cached) return cached;
-  const promise = fetch(`/api/tier1-pre-revenue?symbol=${encodeURIComponent(key)}`)
-    .then(async (response) => {
-      if (!response.ok) return null;
-      const payload = await response.json() as { ok?: boolean; assessment?: Tier1PreRevenueAssessment };
-      return payload.ok && payload.assessment ? payload.assessment : null;
-    })
-    .catch(() => null);
-  assessmentPromiseCache.set(key, promise);
-  return promise;
-}
 
 function costQuartileIsInactive(gate: Tier1Gate | null | undefined): boolean {
   return Boolean(gate?.reason.startsWith('N/A — Cost Quartile är avstängd'));
@@ -237,7 +221,7 @@ export default function Tier1StatusCell({ symbol }: { symbol: string }) {
   useEffect(() => {
     let cancelled = false;
     setLoaded(false);
-    void fetchAssessment(symbol).then((next) => {
+    void fetchTier1Assessment(symbol).then((next) => {
       if (cancelled) return;
       setAssessment(next);
       setLoaded(true);

@@ -39,6 +39,28 @@ type ResolveDeps = {
   resolveLegacyCommodityCloseOnOrBeforeFn: typeof resolveLegacyCommodityCloseOnOrBefore;
 };
 
+type ResolvePriceSeriesArgs = {
+  price_key: string;
+  anchorDatesUtc: string[];
+  scenario: PriceScenario;
+  allowRefresh: boolean;
+};
+
+const inFlightSpotResolutions = new Map<string, Promise<ResolvedPriceSeries>>();
+const dependencyIdentity = new WeakMap<object, number>();
+let nextDependencyIdentity = 1;
+
+function dependencyCacheKey(deps: Partial<ResolveDeps>): string {
+  if (Object.keys(deps).length === 0) return 'default';
+  const object = deps as object;
+  const existing = dependencyIdentity.get(object);
+  if (existing) return `deps:${existing}`;
+  const created = nextDependencyIdentity;
+  nextDependencyIdentity += 1;
+  dependencyIdentity.set(object, created);
+  return `deps:${created}`;
+}
+
 function withDefaults(deps: Partial<ResolveDeps>): ResolveDeps {
   return {
     findLastMonthlyDateFn: deps.findLastMonthlyDateFn ?? findLastMonthlyDate,
@@ -254,13 +276,8 @@ async function resolveImfCommoditySeries(
   return { values, warnings: [...new Set(warnings)], meta };
 }
 
-export async function resolvePriceSeries(
-  args: {
-    price_key: string;
-    anchorDatesUtc: string[];
-    scenario: PriceScenario;
-    allowRefresh: boolean;
-  },
+async function resolvePriceSeriesUncached(
+  args: ResolvePriceSeriesArgs,
   deps: Partial<ResolveDeps> = {},
 ): Promise<ResolvedPriceSeries> {
   const resolvedDeps = withDefaults(deps);
@@ -420,4 +437,28 @@ export async function resolvePriceSeries(
   });
 
   return { values, warnings, meta: storedMeta };
+}
+
+export function resolvePriceSeries(
+  args: ResolvePriceSeriesArgs,
+  deps: Partial<ResolveDeps> = {},
+): Promise<ResolvedPriceSeries> {
+  if (args.scenario.mode !== 'spot') {
+    return resolvePriceSeriesUncached(args, deps);
+  }
+
+  const key = JSON.stringify([
+    dependencyCacheKey(deps),
+    args.price_key,
+    [...args.anchorDatesUtc].sort(),
+    args.allowRefresh,
+  ]);
+  const cached = inFlightSpotResolutions.get(key);
+  if (cached) return cached;
+
+  const promise = resolvePriceSeriesUncached(args, deps).finally(() => {
+    if (inFlightSpotResolutions.get(key) === promise) inFlightSpotResolutions.delete(key);
+  });
+  inFlightSpotResolutions.set(key, promise);
+  return promise;
 }

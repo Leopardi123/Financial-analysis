@@ -38,19 +38,19 @@ const arbitraryLegacyTier3Cost = gate(3);
 assert.equal(classifyTier({
   lom: gate(1), scale: gate(1), cost: arbitraryLegacyTier3Cost, cycle: gate(1), capitalReturns: gate(1),
 }).status, 'TIER_1');
+assert.equal(arbitraryLegacyTier3Cost.status, 'NOT_VERIFIED');
+assert.equal(arbitraryLegacyTier3Cost.tier, null);
+assert.equal(arbitraryLegacyTier3Cost.reason, TIER1_COST_QUARTILE_INACTIVE_REASON);
+
+const secondLegacyTier3Cost = gate(3);
 assert.equal(classifyTier({
-  lom: gate(1), scale: gate(2), cost: arbitraryLegacyTier3Cost, cycle: gate(1), capitalReturns: gate(1),
+  lom: gate(1), scale: gate(2), cost: secondLegacyTier3Cost, cycle: gate(1), capitalReturns: gate(1),
 }).status, 'TIER_2');
+assert.equal(secondLegacyTier3Cost.reason, TIER1_COST_QUARTILE_INACTIVE_REASON);
 
-const tier3CostMustNotLowerTier1 = classifyTier({
-  lom: gate(1), scale: gate(1),
-  cost: { ...inactiveCost, tier: 3, status: 'FAIL' },
-  cycle: gate(1), capitalReturns: gate(1),
-});
-assert.equal(tier3CostMustNotLowerTier1.status, 'TIER_1');
-
-// Active cycle policy is a structural Tier ceiling. T2/T3 cycle outcomes are
-// valid surviving projects (PASS), while only the 7y survival failure disqualifies.
+// Active cycle policy is a structural Tier ceiling set by 5y normalized beta.
+// The 7y survival NPV10 is diagnostic only; a negative survival observation must
+// not convert a verified beta result into NOT_QUALIFIED.
 assert.equal(classifyTier({
   lom: gate(1), scale: gate(1), cost: inactiveCost, cycle: gate(2, 'PASS'), capitalReturns: gate(1),
 }).status, 'TIER_2');
@@ -58,7 +58,10 @@ assert.equal(classifyTier({
   lom: gate(1), scale: gate(1), cost: inactiveCost, cycle: gate(3, 'PASS'), capitalReturns: gate(1),
 }).status, 'TIER_3');
 assert.equal(classifyTier({
+  lom: gate(1), scale: gate(1), cost: inactiveCost, cycle: gate(3, 'FAIL'), capitalReturns: gate(1),
+}).status, 'TIER_3');
+assert.equal(classifyTier({
   lom: gate(1), scale: gate(1), cost: inactiveCost, cycle: gate(null, 'FAIL'), capitalReturns: gate(1),
-}).status, 'NOT_QUALIFIED');
+}).status, 'NOT_VERIFIED');
 
 console.log('tier1 active Cost Quartile disabled + cycle ceiling regressions passed');

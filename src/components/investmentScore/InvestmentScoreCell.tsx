@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CorporateSnapshot } from '../../lib/corporate/snapshot/types.ts';
 import { getInvestmentScoreEvidence } from '../../lib/client/investmentScoreEvidenceClient.ts';
+import { fetchTier1Assessment } from '../../lib/client/tier1AssessmentClient.ts';
 import { adaptCanonicalPreRevenueToInvestmentScore } from '../../lib/investmentScore/canonicalPreRevenueAdapter.ts';
 import { computeInvestmentScore } from '../../lib/investmentScore/engine.ts';
 import { computeProvisionalRawScoreV0, type ProvisionalRawScoreResult } from '../../lib/investmentScore/rawScore.ts';
@@ -11,10 +12,7 @@ import type {
   OptionalityEvidence,
   ScoreGateResult,
 } from '../../lib/investmentScore/types.ts';
-import type { Tier1PreRevenueAssessment } from '../../lib/tier1/preRevenue.ts';
 import '../../styles/investment-score-cell.css';
-
-type TierResponse = { ok?: boolean; assessment?: Tier1PreRevenueAssessment };
 
 type Props = {
   symbol: string;
@@ -165,12 +163,10 @@ export default function InvestmentScoreCell({
         }
 
         const projectId = projectIds[0];
-        const [tierRes, evidence] = await Promise.all([
-          fetch(`/api/tier1/pre-revenue?symbol=${encodeURIComponent(symbol)}`),
+        const [tierAssessment, evidence] = await Promise.all([
+          fetchTier1Assessment(symbol),
           getInvestmentScoreEvidence(symbol, projectId),
         ]);
-        const tierBody = await tierRes.json() as TierResponse;
-        const tierAssessment = tierRes.ok && tierBody.ok === true ? tierBody.assessment ?? null : null;
 
         const adapted = adaptCanonicalPreRevenueToInvestmentScore({
           snapshot,
