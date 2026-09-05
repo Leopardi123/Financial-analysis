@@ -61,10 +61,13 @@ export function withCanonicalViewMetrics(
           pOverNavPf,
           'Missing current price or canonical PF NAV/share for P/NAV PF',
         ),
-        // DEBUG QUARANTINE: the existing Corporate EV/NAV numerator is a hybrid
-        // of current market cap and post-financing cash/debt while NAV is an
-        // equity NAV. Keep the metric visibly unavailable until a like-for-like
-        // enterprise definition is approved.
+        // DEBUG QUARANTINE: current Corporate EV combines current market cap with
+        // post-financing cash/debt. Until the EV date/basis is redesigned, do not
+        // expose EV/NPV or EV/NAV as investable canonical metrics.
+        EV_over_NPV: metric(
+          null,
+          'DEBUG: EV/NPV is quarantined. Existing Corporate EV mixes current market cap with post-financing cash/debt; dated enterprise-value redesign pending.',
+        ),
         EV_over_NAV: metric(
           null,
           'DEBUG: EV/NAV is quarantined. Existing definition mixes current market cap with post-financing cash/debt and equity NAV; redesign pending.',
