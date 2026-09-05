@@ -19,9 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Extract prepared patch
         run: python -c 'from pathlib import Path; s=Path(".github/workflows/one-shot-corporate-fiscal-ssot.yml").read_text(); start=s.index("          python - <<"); start=s.index("\n",start)+1; end=s.index("\n          PY\n",start); b=s[start:end]; lines=[line[10:] if line.startswith("          ") else line for line in b.splitlines()]; Path("/tmp/apply-corporate-fiscal-ssot.py").write_text("\n".join(lines)+"\n")'
       - name: Apply prepared patch
