@@ -1,0 +1,58 @@
+name: One-shot Corporate fiscal SSOT runner
+
+on:
+  push:
+    branches:
+      - fix/corporate-waterfall-valuation-year-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.event.head_commit.message == 'chore: run corporate fiscal ssot fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/corporate-waterfall-valuation-year-20260905
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Extract and run prepared patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/one-shot-corporate-fiscal-ssot.yml').read_text()
+          marker = "          python - <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          block = source[start:end]
+          lines = [line[10:] if line.startswith('          ') else line for line in block.splitlines()]
+          Path('/tmp/apply-corporate-fiscal-ssot.py').write_text('\n'.join(lines) + '\n')
+          PY
+          python /tmp/apply-corporate-fiscal-ssot.py
+
+      - name: Run focused regression and full build gate
+        run: |
+          npm run test:snapshot-cashflow
+          npm run test:corporate-financing
+          npm run build
+
+      - name: Commit final fix and remove one-shot files
+        shell: bash
+        run: |
+          git rm .github/workflows/one-shot-corporate-fiscal-ssot.yml .github/workflows/one-shot-corporate-fiscal-runner.yml
+          git add src/lib/snapshot/runCorporateSnapshot.ts src/lib/snapshot/__tests__/v3RuntimeTimeline.test.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: preserve canonical fiscal economics in Corporate"
+          git push origin HEAD:fix/corporate-waterfall-valuation-year-20260905
