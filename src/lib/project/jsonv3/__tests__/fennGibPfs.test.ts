@@ -58,16 +58,25 @@ async function runEngine(raw: ProjectJsonV3, leg: 'report' | 'runtime') {
   assert(raw.time.productionStartPeriod === 3, 'Report Year 1 must be t=3 after Y-3,Y-2,Y-1');
   assert(raw.time.nameplateCapacityPeriod === 4, 'First full 1.752 Mt / 4,800 t/d year must be report Year 2 / t=4');
   assert(FENN_GIB_REPORT_PERIODS.join(',') === raw.time.reportPeriodLabels?.join(','), 'Report period labels must be preserved exactly');
+  assert(raw.time.phaseByPeriod[18] === 'closure', 'Report Y16/t18 must remain the terminal closure period');
 
   const placement = raw.time.runtimePlacement;
-  assert(placement?.constructionStart?.year === 2026, 'Sourced Fenn-Gib construction start must be 2026');
-  assert(placement?.productionStart?.year === 2029, 'Sourced Fenn-Gib first production must be 2029');
-  assert(placement?.nameplateCapacity?.year === 2030, 'Sourced Fenn-Gib first full nameplate year must be 2030');
-  parseProjectJsonV3(raw, { requireRuntimePlacement: true, taxScenario: 'runtime', fiscalScenario: 'runtime' });
+  assert(placement?.constructionStart == null, 'Do not infer report economic t=0 from Mayfair major-construction guidance');
+  assert(placement?.productionStart?.year === 2030, 'Current Mayfair guidance must place initial production in 2030');
+  assert(placement?.nameplateCapacity == null, 'No current calendar nameplate anchor may be inferred');
+  const runtimeParsed = parseProjectJsonV3(raw, { requireRuntimePlacement: true, taxScenario: 'runtime', fiscalScenario: 'runtime' });
+  assert(runtimeParsed.productionStartYear === 2030, 'Runtime compiler must preserve the sourced 2030 production start');
+  assert(runtimeParsed.periodEndDatesUtc[0]?.startsWith('2027-'), 'productionStartPeriod=3 plus production 2030 must place economic t=0 in 2027');
 
   assert(raw.metals.priceKeyByMetal.Au === 'XAU_USD_TOZ', 'Fenn-Gib Au must use the verified canonical gold price key');
-  assert(raw.metals.revenueBasisByMetal.Au === 'PAYABLE_DIRECT', 'Fenn-Gib report-derived payable Au must be the sole revenue basis');
+  assert(raw.metals.revenueBasisByMetal.Au === 'METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION', 'Recovered Au plus the disclosed 99.95% payability must be represented explicitly');
   assert(raw.metals.payableQtyUnitByMetal.Au === 'toz', 'Fenn-Gib payable Au must be represented in troy ounces');
+  const recoveredYear1 = raw.metals.metalInProductQtyByMetal?.Au?.[3];
+  const payableYear1 = raw.metals.payableQtyByMetal.Au[3];
+  assert(finite(recoveredYear1) && finite(payableYear1), 'Fenn-Gib Year 1 recovered/payable Au must be finite');
+  assert(Math.abs(payableYear1 / recoveredYear1 - 0.9995) < 1e-12, 'Fenn-Gib payability must remain exactly 99.95%');
+  assert(raw.operations?.recoveryPctByMetal?.Au.every((value) => value == null || (value >= 0 && value <= 1)), 'Recovery must be stored as decimal fractions, not percentage points');
+  assert(raw.operations?.recoveryPctByMetal?.Au[3] === 0.858, 'Report Year 1 recovery must be 85.8% = 0.858');
 
   assert(Math.abs(sum(raw.capital.capexUSD) - 450_000_000 * FENN_GIB_CAD_TO_USD) <= 1, 'Table 22-2 initial capital must sum to C$450.0m');
   assert(Math.abs(sum(raw.capital.sustainingCapexUSD) - FENN_GIB_REPORT_CASHFLOW_SUSTAINING_CAPEX_CAD * FENN_GIB_CAD_TO_USD) <= 1, 'Table 22-2 annual sustaining capital must sum to C$68.2m');
@@ -95,8 +104,12 @@ async function runEngine(raw: ProjectJsonV3, leg: 'report' | 'runtime') {
   assert(Math.abs(reconciliation.irrPreTaxRelativeDifference ?? Infinity) <= 0.02, 'Fenn-Gib pre-tax IRR must be within 2%');
 
   const reportOutput = await runEngine(raw, 'report');
-  const revenueDiff = maxAbsDiff(reportOutput.revenue.grossRevenueUSD, FENN_GIB_REPORT_GROSS_REVENUE_USD);
-  assert(revenueDiff <= 250_000, `Fenn-Gib annual gross revenue should stay within report rounding, max diff=${revenueDiff}`);
+  const reportRevenueAfterPayability = reportOutput.revenue.grossRevenueUSD.map((value, t) => {
+    const deduction = reportOutput.payabilityDeductionUSDTotal?.[t];
+    return finite(value) && finite(deduction) ? value - deduction : null;
+  });
+  const revenueDiff = maxAbsDiff(reportRevenueAfterPayability, FENN_GIB_REPORT_GROSS_REVENUE_USD);
+  assert(revenueDiff <= 250_000, `Fenn-Gib annual report revenue after 99.95% payability should stay within report rounding, max diff=${revenueDiff}`);
 
   const postTaxMaxDiff = maxAbsDiff(reportOutput.phase1.fcffUSD, FENN_GIB_REPORT_POST_TAX_FCFF_USD);
   assert(postTaxMaxDiff <= 250_000, `Fenn-Gib period post-tax FCFF differs from rounded Table 22-2 by ${postTaxMaxDiff}, expected <=250k USD`);
