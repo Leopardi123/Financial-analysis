@@ -8,11 +8,18 @@ export default async function handler(_req: any, res: any) {
     const rawLimit = Number(_req.query?.limit ?? 0);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : null;
     const slim = String(_req.query?.slim ?? "") === "1";
-    const whereSql = q
-      ? `WHERE v2.active = 1 AND (UPPER(v2.ticker) LIKE ? OR UPPER(COALESCE(c.name, v2.ticker)) LIKE ?)`
-      : `WHERE v2.active = 1`;
-    const args: Array<string | number> = q ? [`%${q}%`, `%${q}%`] : [];
-    const limitSql = limit ? ` LIMIT ?` : "";
+    const projectsOnly = String(_req.query?.projectsOnly ?? "") === "1";
+    const filters = ["v2.active = 1"];
+    const args: Array<string | number> = [];
+    if (q) {
+      filters.push("(UPPER(v2.ticker) LIKE ? OR UPPER(COALESCE(c.name, v2.ticker)) LIKE ?)");
+      args.push(`%${q}%`, `%${q}%`);
+    }
+    if (projectsOnly) {
+      filters.push("EXISTS (SELECT 1 FROM company_projects cp WHERE UPPER(cp.symbol) = UPPER(v2.ticker))");
+    }
+    const whereSql = `WHERE ${filters.join(" AND ")}`;
+    const limitSql = limit ? " LIMIT ?" : "";
     if (limit) args.push(limit);
     const rows = await query(
       `SELECT v2.ticker, COALESCE(c.name, v2.ticker) AS name
