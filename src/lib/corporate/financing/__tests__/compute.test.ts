@@ -1,4 +1,5 @@
 import { computeCorporateFinancing } from '../compute.ts';
+import { computeCorporateCashWaterfall } from '../cashWaterfall.ts';
 import type { CorporateFinancingInput } from '../types.ts';
 
 function assertEqual(actual: unknown, expected: unknown, message: string): void {
@@ -121,6 +122,67 @@ function baseInput(): CorporateFinancingInput {
   assertEqual(case8.financing_provenance.equity_fraction, 'REPORT', 'case8 report equity provenance is preserved');
   assertEqual(case8.new_debt_TargetCurrency, 150, 'case8 provenance must not change debt math');
   assertEqual(case8.equity_raised_TargetCurrency, 350, 'case8 provenance must not change equity math');
+
+  const currentYear = new Date().getUTCFullYear();
+  const liveRebasedWaterfall = computeCorporateCashWaterfall({
+    yearsByPeriod: [currentYear - 2, currentYear - 1, currentYear, currentYear + 1],
+    latestQuarterlyCash: 50,
+    useLatestQuarterlyCash: true,
+    cashUsedPercent: 1,
+    minimumCashReserve: 0,
+    debtPercent: 0,
+    fxUSDToTargetCurrency: 1,
+    equityRaisePriceTargetCurrency: 1,
+    sharesCurrent: 100,
+    projects: [
+      {
+        projectId: 'producer',
+        constructionStartPeriod: 0,
+        capexNeedByPeriod: [100, 100, 0, 0],
+        fcffIncludesConstructionCapex: true,
+        fcffByPeriod: [-100, 50, 40, 40],
+      },
+      {
+        projectId: 'future',
+        constructionStartPeriod: 1,
+        capexNeedByPeriod: [0, 80, 120, 0],
+        fcffIncludesConstructionCapex: true,
+        fcffByPeriod: [0, -80, -120, 0],
+      },
+    ],
+  });
+  assertEqual(liveRebasedWaterfall.rows.length, 2, 'waterfall runtime fallback should omit historical calendar rows');
+  assertEqual(liveRebasedWaterfall.rows[0]?.period, 0, 'rebased waterfall period zero should be valuation year');
+  assertEqual(liveRebasedWaterfall.rows[0]?.year, currentYear, 'rebased waterfall first year should be current valuation year');
+  assertEqual(liveRebasedWaterfall.rows[0]?.projectCapexNeed, 120, 'only valuation-year future CAPEX should remain');
+  assertEqual(liveRebasedWaterfall.rows[0]?.operatingCashGenerated, 40, 'historical producer FCFF must not be replayed; valuation-year producer FCFF remains');
+  assertEqual(liveRebasedWaterfall.totalInitialCashUsed, 50, 'today cash should be introduced once at valuation year');
+  assertEqual(liveRebasedWaterfall.totalExternalFundingNeed, 30, 'residual funding should exclude historical producer and project CAPEX');
+  assertEqual(liveRebasedWaterfall.totalNewShares, 30, 'new shares should fund only residual valuation-year-plus need');
+
+  const explicitRebasedWaterfall = computeCorporateCashWaterfall({
+    yearsByPeriod: [2030, 2031, 2032],
+    valuationYear: 2031,
+    latestQuarterlyCash: 30,
+    useLatestQuarterlyCash: true,
+    cashUsedPercent: 1,
+    minimumCashReserve: 0,
+    debtPercent: 0,
+    fxUSDToTargetCurrency: 1,
+    equityRaisePriceTargetCurrency: 1,
+    sharesCurrent: 100,
+    projects: [{
+      projectId: 'future-explicit',
+      constructionStartPeriod: 0,
+      capexNeedByPeriod: [90, 50, 0],
+      fcffIncludesConstructionCapex: true,
+      fcffByPeriod: [-90, -50, 20],
+    }],
+  });
+  assertEqual(explicitRebasedWaterfall.rows.length, 2, 'explicit valuationYear should define the financing axis');
+  assertEqual(explicitRebasedWaterfall.rows[0]?.year, 2031, 'explicit valuationYear should be first waterfall year');
+  assertEqual(explicitRebasedWaterfall.totalInitialCashUsed, 30, 'explicit valuation-year cash should be used once');
+  assertEqual(explicitRebasedWaterfall.totalExternalFundingNeed, 20, 'historical 2030 CAPEX must be sunk');
 
   console.log('Corporate financing Lista 5 tests passed');
 })();
