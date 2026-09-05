@@ -65,8 +65,9 @@ async function runEngine(raw: ProjectJsonV3, leg: 'report' | 'runtime') {
   assert(placement?.productionStart?.year === 2030, 'Current Mayfair guidance must place initial production in 2030');
   assert(placement?.nameplateCapacity == null, 'No current calendar nameplate anchor may be inferred');
   const runtimeParsed = parseProjectJsonV3(raw, { requireRuntimePlacement: true, taxScenario: 'runtime', fiscalScenario: 'runtime' });
-  assert(runtimeParsed.productionStartYear === 2030, 'Runtime compiler must preserve the sourced 2030 production start');
-  assert(runtimeParsed.periodEndDatesUtc[0]?.startsWith('2027-'), 'productionStartPeriod=3 plus production 2030 must place economic t=0 in 2027');
+  const runtimeYears = runtimeParsed.engineInputWithoutPrices.yearsByPeriod;
+  assert(runtimeYears[raw.time.productionStartPeriod] === 2030, 'Runtime canonical year axis must preserve the sourced 2030 production start');
+  assert(runtimeYears[0] === 2027, 'productionStartPeriod=3 plus production 2030 must place economic t=0 in 2027');
 
   assert(raw.metals.priceKeyByMetal.Au === 'XAU_USD_TOZ', 'Fenn-Gib Au must use the verified canonical gold price key');
   assert(raw.metals.revenueBasisByMetal.Au === 'METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION', 'Recovered Au plus the disclosed 99.95% payability must be represented explicitly');
