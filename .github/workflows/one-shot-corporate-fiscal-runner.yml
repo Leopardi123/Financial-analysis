@@ -25,12 +25,14 @@ jobs:
         run: python -c 'from pathlib import Path; s=Path(".github/workflows/one-shot-corporate-fiscal-ssot.yml").read_text(); start=s.index("          python - <<"); start=s.index("\n",start)+1; end=s.index("\n          PY\n",start); b=s[start:end]; lines=[line[10:] if line.startswith("          ") else line for line in b.splitlines()]; Path("/tmp/apply-corporate-fiscal-ssot.py").write_text("\n".join(lines)+"\n")'
       - name: Apply prepared patch
         run: python /tmp/apply-corporate-fiscal-ssot.py
-      - name: Run focused regression
+      - name: Run focused fiscal regression
         run: npm run test:snapshot-cashflow
       - name: Run financing regression
         run: npm run test:corporate-financing
-      - name: Run full build gate
-        run: npm run build
+      - name: TypeScript build gate
+        run: npx tsc -b
+      - name: Vite build gate
+        run: npx vite build
       - name: Commit final fix
         run: |
           git rm .github/workflows/one-shot-corporate-fiscal-ssot.yml .github/workflows/one-shot-corporate-fiscal-runner.yml
