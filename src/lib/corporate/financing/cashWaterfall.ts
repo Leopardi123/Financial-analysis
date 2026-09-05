@@ -78,6 +78,8 @@ export type CashWaterfallResult = {
 
 export type CashWaterfallInput = {
   yearsByPeriod?: number[];
+  /** Explicit valuation year. Callers that omit it use the current UTC year when present on the calendar axis. */
+  valuationYear?: number;
   latestQuarterlyCash: number;
   useLatestQuarterlyCash: boolean;
   cashUsedPercent: number;
@@ -105,39 +107,70 @@ function nullableSum(rows: CashWaterfallRow[], key: keyof CashWaterfallRow): num
   return total;
 }
 
+function resolveValuationStartPeriod(input: CashWaterfallInput, periods: number): { startPeriod: number; valuationYear: number | null; source: 'input' | 'runtime-current-year' | 'none' } {
+  const years = input.yearsByPeriod;
+  if (!Array.isArray(years) || years.length === 0 || periods === 0) {
+    return { startPeriod: 0, valuationYear: null, source: 'none' };
+  }
+
+  const explicitYear = Number.isInteger(input.valuationYear) ? input.valuationYear as number : null;
+  const requestedYear = explicitYear ?? new Date().getUTCFullYear();
+  const startPeriod = years.findIndex((year) => Number.isFinite(year) && year >= requestedYear);
+  if (startPeriod < 0) {
+    // Preserve legacy behavior when this helper is used with a non-calendar or wholly historical axis.
+    return { startPeriod: 0, valuationYear: null, source: 'none' };
+  }
+  return {
+    startPeriod,
+    valuationYear: requestedYear,
+    source: explicitYear === null ? 'runtime-current-year' : 'input',
+  };
+}
+
 /**
  * Chronological Corporate cash waterfall.
  *
  * Project FCFF that contains construction CAPEX is grossed up once before the
  * same CAPEX is deducted once below. External financing restores closing cash
  * to the applicable minimum reserve after both operations and construction.
+ *
+ * When a calendar axis contains the valuation year, historical periods are sunk:
+ * today's reported cash is introduced at valuationYear and only valuationYear+
+ * CAPEX/FCFF may consume or generate cash in this financing waterfall.
  */
 export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWaterfallResult {
   const cashPercent = clampedFraction(input.cashUsedPercent);
   const debtPercent = clampedFraction(input.debtPercent);
-  const initialReserve = nonNegative(Array.isArray(input.minimumCashReserve) ? input.minimumCashReserve[0] ?? 0 : input.minimumCashReserve);
+  const periods = Math.max(input.yearsByPeriod?.length ?? 0, ...input.projects.map((project) => Math.max(project.capexNeedByPeriod.length, project.fcffByPeriod.length)), 0);
+  const valuationStart = resolveValuationStartPeriod(input, periods);
+  const initialReserve = nonNegative(Array.isArray(input.minimumCashReserve) ? input.minimumCashReserve[valuationStart.startPeriod] ?? 0 : input.minimumCashReserve);
   const usableInitialCash = input.useLatestQuarterlyCash
     ? Math.max(0, nonNegative(input.latestQuarterlyCash) - initialReserve) * cashPercent
     : 0;
   // Preserve the historical cash-first contract: disabling cash-first excludes
   // reported cash from this modeled funding pool; enabling it introduces it once.
   const initialCashAvailable = input.useLatestQuarterlyCash ? initialReserve + usableInitialCash : 0;
-  const periods = Math.max(input.yearsByPeriod?.length ?? 0, ...input.projects.map((project) => Math.max(project.capexNeedByPeriod.length, project.fcffByPeriod.length)), 0);
   const projects = [...input.projects].sort((left, right) => left.constructionStartPeriod - right.constructionStartPeriod || left.projectId.localeCompare(right.projectId));
   const rows: CashWaterfallRow[] = [];
   const diagnostics: string[] = [];
+  if (valuationStart.startPeriod > 0 && valuationStart.valuationYear !== null) {
+    diagnostics.push(
+      `Corporate cash waterfall rebased to valuationYear=${valuationStart.valuationYear}; skipped ${valuationStart.startPeriod} historical periods (source=${valuationStart.source}).`,
+    );
+  }
   let openingCash = initialCashAvailable;
   let initialCashBalance = usableInitialCash;
   let cumulativeNewShares = 0;
   let cumulativeSharesComputable = true;
 
-  for (let period = 0; period < periods; period += 1) {
+  for (let sourcePeriod = valuationStart.startPeriod; sourcePeriod < periods; sourcePeriod += 1) {
+    const period = sourcePeriod - valuationStart.startPeriod;
     const rowDiagnostics: string[] = [];
-    const reserve = nonNegative(Array.isArray(input.minimumCashReserve) ? input.minimumCashReserve[period] ?? 0 : input.minimumCashReserve);
+    const reserve = nonNegative(Array.isArray(input.minimumCashReserve) ? input.minimumCashReserve[sourcePeriod] ?? 0 : input.minimumCashReserve);
     const projectValues = projects.map((project) => ({
       project,
-      capex: project.capexNeedByPeriod[period] ?? null,
-      fcff: project.fcffByPeriod[period] ?? null,
+      capex: project.capexNeedByPeriod[sourcePeriod] ?? null,
+      fcff: project.fcffByPeriod[sourcePeriod] ?? null,
     }));
     const invalidProjects = projectValues.filter(({ capex, fcff }) => !isFiniteNumber(capex) || capex < 0 || !isFiniteNumber(fcff));
 
@@ -149,7 +182,7 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
       if (!isFiniteNumber(openingCash)) rowDiagnostics.push(`Invalid opening cash in period ${period}.`);
       diagnostics.push(...rowDiagnostics);
       rows.push({
-        period, year: input.yearsByPeriod?.[period] ?? null, openingCash,
+        period, year: input.yearsByPeriod?.[sourcePeriod] ?? null, openingCash,
         operatingCashGenerated: null, projectCapexNeed: null, constructionCapex: null,
         preFinancingCash: null, minimumCashReserve: reserve, constructionFundingNeed: null,
         operationalFundingNeed: null, totalExternalFundingNeed: null, internalCashUsed: null,
@@ -279,7 +312,7 @@ export function computeCorporateCashWaterfall(input: CashWaterfallInput): CashWa
     const status: CashWaterfallRowStatus = rowDiagnostics.length > 0 ? 'NOT_COMPUTABLE' : 'COMPUTABLE';
     diagnostics.push(...rowDiagnostics);
     rows.push({
-      period, year: input.yearsByPeriod?.[period] ?? null, openingCash, operatingCashGenerated,
+      period, year: input.yearsByPeriod?.[sourcePeriod] ?? null, openingCash, operatingCashGenerated,
       projectCapexNeed, constructionCapex: projectCapexNeed, preFinancingCash,
       minimumCashReserve: reserve, constructionFundingNeed, operationalFundingNeed,
       totalExternalFundingNeed, internalCashUsed, initialCashUsed, internallyGeneratedCashUsed,
