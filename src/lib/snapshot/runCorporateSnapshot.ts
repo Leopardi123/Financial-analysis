@@ -2405,6 +2405,7 @@ export async function runCorporateSnapshotPipeline(args: {
     // only its residual external need and cash-first is disabled there.
     const cashWaterfall = fxRate === null ? null : computeCorporateCashWaterfall({
       yearsByPeriod: aggregationEffective.corporateYearsByPeriod,
+      valuationYear: input.valuationYear,
       latestQuarterlyCash: (input.balanceSheet?.cash_t0_TargetCurrency ?? 0) / fxRate,
       useLatestQuarterlyCash: input.financingPlan?.use_cash_first ?? true,
       cashUsedPercent: input.financingPlan?.cash_use_percent ?? 1,
