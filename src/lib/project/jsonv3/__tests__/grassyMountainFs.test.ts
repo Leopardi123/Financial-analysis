@@ -65,15 +65,13 @@ async function runReportEngine() {
   assert(raw.time.phaseByPeriod[0] === 'construction', 'Y-2/t0 must remain construction');
   assert(raw.time.phaseByPeriod[1] === 'ramp_up', 'Y-1/t1 must remain pre-commercial ramp-up');
   assert(raw.time.phaseByPeriod[11] === 'closure', 'Y10/t11 is the annualized terminal production/closure period');
-  assert(raw.time.runtimePlacement == null, 'No construction/production calendar year may be guessed for Grassy Mountain');
+  assert(raw.time.runtimePlacement?.productionStart?.year === 2029, 'User-approved Grassy Mountain consensus runtime production start must remain 2029');
+  assert(raw.time.runtimePlacement?.productionStart?.sourceId === 'user-approved-consensus-2026-09-06', '2029 runtime placement must remain explicitly attributed to the user-approved consensus assumption, not company/report guidance');
 
-  let runtimePlacementFailed = false;
-  try {
-    parseProjectJsonV3(raw, { requireRuntimePlacement: true, taxScenario: 'runtime', fiscalScenario: 'runtime' });
-  } catch (error) {
-    runtimePlacementFailed = error instanceof Error && error.message.includes('runtimePlacement');
-  }
-  assert(runtimePlacementFailed, 'Grassy Mountain must fail closed for runtime until Paramount publishes a sourced schedule year');
+  const runtimeParsed = parseProjectJsonV3(raw, { requireRuntimePlacement: true, taxScenario: 'runtime', fiscalScenario: 'runtime' });
+  const runtimeYears = runtimeParsed.engineInputWithoutPrices.yearsByPeriod;
+  assert(runtimeYears[0] === 2028 && runtimeYears[1] === 2029 && runtimeYears[2] === 2030,
+    '2029 consensus production start must map Y-2/Y-1/Y1 to 2028/2029/2030 without stretching the report-relative axis');
 
   assert(raw.metals.priceKeyByMetal.Au === 'XAU_USD_TOZ', 'Grassy Mountain Au must use the canonical gold price key');
   assert(raw.metals.priceKeyByMetal.Ag === 'XAG_USD_TOZ', 'Grassy Mountain Ag must use the canonical silver price key');
