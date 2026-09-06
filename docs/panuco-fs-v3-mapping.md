@@ -79,12 +79,12 @@ Table 22-2 is rounded to whole US$M and places:
 
 - initial capital: 82 / 154 / 3 in Y-2 / Y-1 / Y1 → US$239m
 - expansion: US$15m in Y3
-- sustaining: US$287m annual sum
+- sustaining: 29 / 47 / 31 / 34 / 33 / 41 / 25 / 33 / 16 → **US$289m annual sum**
 - closure: US$38m in Y11
 - salvage: US$10m in Y11
 - final working-capital release: US$2m in Y12
 
-The fixture keeps the annual Table 22-2 rows for NPV/IRR reconstruction and separately tests the more precise summary checkpoints. No rounding difference is balanced away.
+The FS therefore contains a **US$1.7m internal sustaining-capex discrepancy** between the precise US$287.3m summary and the rounded annual Table 22-2 cash-flow row. The fixture treats the annual US$289m row as canonical for NPV/IRR period reconciliation and retains US$287.3m as a separate summary checkpoint. No difference is balanced away.
 
 ## Reconciliation target
 
