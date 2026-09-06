@@ -3,6 +3,8 @@ import { resolveProjectPricesToEngineInput } from '../../jsonv1/resolvePrices.ts
 import { parseProjectJsonV3 } from '../compile.ts';
 import { reconcileProjectJsonV3ToReport } from '../reconciliation.ts';
 import {
+  GRASSY_MOUNTAIN_ANNUAL_PAYABLE_AG_OZ,
+  GRASSY_MOUNTAIN_ANNUAL_RECOVERED_AG_OZ,
   GRASSY_MOUNTAIN_ANNUAL_SUSTAINING_CAPEX_USD,
   GRASSY_MOUNTAIN_FS_V3,
   GRASSY_MOUNTAIN_REPORT_PERIODS,
@@ -12,6 +14,8 @@ import {
   GRASSY_MOUNTAIN_REPORT_TAX_USD,
   GRASSY_MOUNTAIN_SUMMARY_CLOSURE_USD,
   GRASSY_MOUNTAIN_SUMMARY_INITIAL_CAPEX_USD,
+  GRASSY_MOUNTAIN_SUMMARY_PAYABLE_AG_OZ,
+  GRASSY_MOUNTAIN_SUMMARY_RECOVERED_AG_OZ,
   GRASSY_MOUNTAIN_SUMMARY_SALVAGE_USD,
   GRASSY_MOUNTAIN_SUMMARY_SUSTAINING_CAPEX_USD,
 } from './fixtures/grassyMountainFs.ts';
@@ -75,7 +79,10 @@ async function runReportEngine() {
   assert(raw.metals.priceKeyByMetal.Ag === 'XAG_USD_TOZ', 'Grassy Mountain Ag must use the canonical silver price key');
   assert(raw.metals.revenueBasisByMetal.Au === 'PAYABLE_DIRECT' && raw.metals.revenueBasisByMetal.Ag === 'PAYABLE_DIRECT', 'Table 19-2 payable ounces must be the direct revenue quantities');
   assert(sum(raw.metals.payableQtyByMetal.Au) === 385_500, 'Rounded annual payable Au must preserve the 385.5 koz Table 19-2 total');
-  assert(sum(raw.metals.payableQtyByMetal.Ag) === 477_700, 'Rounded annual payable Ag must preserve the 477.7 koz Table 19-2 total');
+  assert(sum(raw.metals.payableQtyByMetal.Ag) === GRASSY_MOUNTAIN_ANNUAL_PAYABLE_AG_OZ, 'Rounded annual payable Ag row must sum to 477.8 koz');
+  assert(GRASSY_MOUNTAIN_ANNUAL_PAYABLE_AG_OZ - GRASSY_MOUNTAIN_SUMMARY_PAYABLE_AG_OZ === 100, 'Table 19-2 payable-Ag annual rows vs 477.7 koz summary discrepancy must remain explicit');
+  assert(sum(raw.metals.metalInProductQtyByMetal?.Ag ?? []) === GRASSY_MOUNTAIN_ANNUAL_RECOVERED_AG_OZ, 'Rounded annual recovered Ag row must sum to 480.0 koz');
+  assert(GRASSY_MOUNTAIN_SUMMARY_RECOVERED_AG_OZ - GRASSY_MOUNTAIN_ANNUAL_RECOVERED_AG_OZ === 100, 'Table 19-2 recovered-Ag 480.1 koz summary vs annual rows discrepancy must remain explicit');
   assert(raw.operations?.capacity.nameplateThroughput === 750 && raw.operations.capacity.throughputUnit === 'tpd', 'Report plant design must remain 750 short tons/day');
   assert(raw.operations?.oreMinedTonnes?.[1] === 5_200, 'Y-1 pre-commercial mined resource must remain 5.2 kt');
 
