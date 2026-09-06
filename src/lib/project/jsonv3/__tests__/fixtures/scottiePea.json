@@ -1,0 +1,106 @@
+{
+  "version": "project_json_v3",
+  "meta": {
+    "projectId": "scottie-pea-2025-unverified",
+    "projectName": "Scottie Gold Mine Project (2025 PEA Base Case - source-grounded runtime proxy)",
+    "currency": "USD",
+    "notes": "EJ VERIFIERAD REPORT-RECONCILIATION. Source: Tetra Tech Canada Inc., Preliminary Economic Assessment, NI 43-101 Technical Report for the Scottie Gold Mine Project, effective 28 October 2025. The public PEA discloses one pre-production year, seven production years and a terminal Year 8 cash-flow period, but not the annual sustaining-capital, working-capital, tax-pool/BC Mineral Tax or NPI cash-flow series used by the underlying financial model. This V3 therefore separates report facts from explicit runtime proxies and must not be described as report-verified. Report facts locked here: Au US$2,600/oz; CAD1.00=USD0.72; 5% mid-year discounting; 2.19 Mt plant feed; 1.24 Mt sorted concentrate; 94.7% LOM recovery; 457,600 oz recovered/payable-in-summary gold; smelter payability 88.3% LOM average; initial CAPEX C$128.6m; sustaining CAPEX C$76.7m including C$15m closure/reclamation distributed over LOM; salvage C$12.9m; 2.0% Franco-Nevada gross production royalty; statutory 15% federal + 12% BC corporate income tax plus separate BC Mineral Tax; reported AISC US$1,452/oz. Table 25-1 Y1-Y7 mine schedule is used for economic production. Table 16-20 separately shows a 4 kt Y8 tail and 2.191 Mt total; that internal report discrepancy is retained as evidence and is not blended into the economic schedule. Runtime proxies: annual recovered-gold shape is normalized to the report total 457,600 oz from Table 25-1 contained-gold shape; annual sorted-concentrate tonnes are allocated pro-rata to Table 25-1 plant feed while preserving 1.24 Mt LOM; annual non-closure sustaining CAPEX is allocated pro-rata to plant feed; closure C$15m is spread equally across Y1-Y7 because the PEA says it is distributed over LOM but gives no annual schedule; working capital targets one month of annual at-mine revenue and is fully released in terminal Y8; depreciation uses the legacy 27.5% declining-balance proxy solely to provide a runtime tax shield; runtime tax is the disclosed 27% general corporate rate with loss carryforward and does not reconstruct BC Mineral Tax, tax pools, new-mine allowance or NPI. The NPI is mentioned as included in the PEA economics but no rate, formula or annual series is disclosed, so no NPI amount is guessed."
+  },
+  "time": {
+    "masterN": 8,
+    "productionStartPeriod": 1,
+    "reportPeriodLabels": ["-1", "1", "2", "3", "4", "5", "6", "7", "8"],
+    "phaseByPeriod": ["construction", "ramp_up", "operations", "operations", "operations", "operations", "operations", "operations", "closure"],
+    "runtimePlacement": {
+      "productionStart": {
+        "year": 2029,
+        "sourceId": "scottie-pea-2025",
+        "pageOrTable": "Section 24.1 / Figure 24-1 p.24-1: Full Scale Commercial Production 2029",
+        "asOfDate": "2025-10-28",
+        "notes": "The PEA execution plan shows construction in 2028 and full-scale commercial production in 2029. With report productionStartPeriod=1, runtime t=0 maps to 2028 without stretching the relative economic axis."
+      },
+      "notes": "The report-relative -1,Y1..Y8 axis remains unchanged. Calendar placement is anchored only by the PEA's 2029 production milestone."
+    }
+  },
+  "metals": {
+    "payableQtyByMetal": {"Au": [0, 40155.308, 77800.247, 68598.504, 64415.733, 59395.878, 46011.364, 47683.766, 0]},
+    "metalInProductQtyByMetal": {"Au": [0, 45476, 88109, 77688, 72951, 67266, 52108, 54002, 0]},
+    "revenueBasisByMetal": {"Au": "METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION"},
+    "payableQtyUnitByMetal": {"Au": "toz"},
+    "priceKeyByMetal": {"Au": "XAU_USD_TOZ"},
+    "auPriceKey": "XAU_USD_TOZ"
+  },
+  "streamsByMetal": null,
+  "economics": {
+    "costModel": {
+      "mode": "COMPONENTS",
+      "components": [
+        {"id":"ug_development","label":"UG development - LOM-average proxy","category":"mining","seriesUSD":[0,5832928.8,10317542.4,9555451.2,9995119.2,11138256,9320961.6,7914024,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 21-3 p.21-6; Table 22-4 p.22-5","allocation":{"mode":"DIRECT_TO_METAL","metal":"Au"}},
+        {"id":"ug_stoping","label":"UG stoping - LOM-average proxy","category":"mining","seriesUSD":[0,8615426.4,15239347.2,14113713.6,14763117.6,16451568,13767364.8,11689272,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 21-3 p.21-6; Table 22-4 p.22-5","allocation":{"mode":"DIRECT_TO_METAL","metal":"Au"}},
+        {"id":"open_pit","label":"Open-pit mining - LOM-average proxy","category":"mining","seriesUSD":[0,2663575.2,4711449.6,4363444.8,4564216.8,5086224,4256366.4,3613896,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 21-3 p.21-6; Table 22-4 p.22-5","allocation":{"mode":"DIRECT_TO_METAL","metal":"Au"}},
+        {"id":"processing","label":"Processing - LOM-average proxy","category":"processing","seriesUSD":[0,2573308.8,4551782.4,4215571.2,4409539.2,4913856,4112121.6,3491424,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 21-3 p.21-6; Table 22-4 p.22-5","allocation":{"mode":"DIRECT_TO_METAL","metal":"Au"}},
+        {"id":"site_ga","label":"G&A - LOM-average proxy","category":"site_ga","seriesUSD":[0,4474634.4,7914931.2,7330305.6,7667589.6,8544528,7150420.8,6071112,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 21-3 p.21-6; Table 22-4 p.22-5","allocation":{"mode":"DIRECT_TO_METAL","metal":"Au"}},
+        {"id":"surface_services","label":"Surface services incl. water management - LOM-average proxy","category":"other_site_opex","seriesUSD":[0,2401372.8,4247654.4,3933907.2,4114915.2,4585536,3837369.6,3258144,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 21-3 p.21-6; Table 22-4 p.22-5","allocation":{"mode":"DIRECT_TO_METAL","metal":"Au"}}
+      ]
+    },
+    "sellingModel": {
+      "mode": "COMPONENTS",
+      "components": [
+        {"id":"treatment_charge","label":"Treatment charge","category":"treatment_charge","seriesUSD":[0,15239066.788655078,26955535.224153705,24964501.372369625,26113174.748398904,29099725.52607502,24351875.571820676,20676120.76852699,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 22-2 pp.22-2 to 22-3"},
+        {"id":"refining_charge","label":"Gold refining charge","category":"refining_charge","seriesUSD":[0,240931.848,466801.482,411591.024,386494.398,356375.268,276068.184,286102.596,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 22-2 p.22-3"},
+        {"id":"transport","label":"Site-to-port, port handling and ocean shipping","category":"transport","seriesUSD":[0,10806598.88889937,19115189.994435064,17703272.551664293,18517840.30710897,20635716.471265126,17268836.415427133,14662219.59800417,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 22-3 p.22-3"},
+        {"id":"insurance","label":"Insurance of invoiced product value","category":"insurance","seriesUSD":[0,130504.751,252850.80275,222945.138,209351.13225,193036.6035,149536.933,154972.2395,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 22-3 p.22-3"},
+        {"id":"transport_loss","label":"Product transport loss","category":"other_offsite","seriesUSD":[0,104403.8008,202280.6422,178356.1104,167480.9058,154429.2828,119629.5464,123977.7916,0],"sourceId":"scottie-pea-2025","pageOrTable":"Table 22-3 p.22-3"}
+      ]
+    },
+    "fiscalTakeModel": {
+      "mode": "RULES",
+      "items": [{
+        "id":"franco_nevada_gpr_2pct","label":"Franco-Nevada 2.0% Gross Production Royalty","placement":"REVENUE_DEDUCTION","base":{"line":"GROSS_METAL_VALUE"},"rate":{"type":"FIXED","rate":0.02},"start_t":1,"end_t":7,"sourceId":"scottie-pea-2025","pageOrTable":"Section 22.4 p.22-3","notes":"The 2.0% gross production royalty is report-sourced. The separate NPI mentioned in Section 22.1 is not modeled because the public PEA discloses no rate, formula or annual series."
+      }]
+    },
+    "taxModel": {"mode":"FLAT_RATE","taxRate":0.27,"lossCarryforward":true},
+    "depreciationUSD": [0,25462800,19996940,16889242,14490858,12835858,11853937,10795553,0]
+  },
+  "capital": {
+    "capexUSD": [92592000,0,0,0,0,0,0,0,0],
+    "sustainingCapexUSD": [0,4044087.831655993,7153361.390667887,6624988.106129917,6929818.847209515,7722378.774016469,6462411.710887466,5486953.339432754,0],
+    "closureUSD": [0,1542857.142857143,1542857.142857143,1542857.142857143,1542857.142857143,1542857.142857143,1542857.142857143,1542857.142857143,0],
+    "workingCapitalDeltaUSD": [0,6490191.226887129,6450474.11098464,-1701044.987574594,-1065739.9912603293,-1508047.0550068598,-2210533.3249173043,884233.2380847214,-7339533.217197403],
+    "terminalProceedsUSD": [0,0,0,0,0,0,0,0,9288000]
+  },
+  "operations": {
+    "capacity": {"throughputUnit":"tpd","nameplateThroughput":1000,"utilizationPct":0.9},
+    "oreMilledTonnes": [0,199000,352000,326000,341000,380000,318000,270000,0],
+    "oreTonnageUnit": "tonne",
+    "gradeByMetal": {"Au":[0,7.4,8.2,7.8,7,5.8,5.4,6.6,0]},
+    "gradeUnitByMetal": {"Au":"g/t"},
+    "recoveryPctByMetal": {"Au":[0,0.947,0.947,0.947,0.947,0.947,0.947,0.947,0]}
+  },
+  "verification": {
+    "report": {
+      "sourceId":"scottie-pea-2025",
+      "npvIrrPageOrTable":"Section 22.1 and Table 22-1 p.22-1; Table 22-4 p.22-5; Table 22-5 p.22-6",
+      "pricesPageOrTable":"Section 22.2 pp.22-1 to 22-2; Tables 22-2/22-3 pp.22-2 to 22-3; Table 22-4 p.22-5",
+      "periodsPageOrTable":"Section 22.7 pp.22-4 to 22-5; Figure 22-1 p.22-6; Section 24.1 / Figure 24-1 p.24-1; Table 25-1 p.25-2",
+      "discountRate":0.05,
+      "discountConvention":"mid_year",
+      "priceDeckByKey":{"XAU_USD_TOZ":2600},
+      "reportNPVPostTaxUSD":155376000,
+      "reportIRRPostTax":0.603,
+      "reportNPVPreTaxUSD":234792000,
+      "reportIRRPreTax":0.825,
+      "toleranceRelative":0.02,
+      "reportInitialCapexUSD":92592000,
+      "reportSustainingCapexUSD":44424000,
+      "reportClosureUSD":10800000,
+      "reportTerminalProceedsUSD":9288000,
+      "reportTerminalProceedsPeriod":8,
+      "assumptionsPageOrTable":"Sections 21.2.7, 21.3, 22.1-22.7; Tables 21-1/21-3, 22-2/22-4/22-5; Table 25-1",
+      "assumptionsNotes":"EJ VERIFIERAD. Public disclosure omits annual sustaining/closure allocation, annual working-capital balances, annual tax cash flows/tax pools and the NPI rate/formula/series. Report summaries include C$76.7m sustaining capital including C$15.0m closure; verification.reportSustainingCapexUSD therefore stores the arithmetically derived non-closure portion C$61.7m so the separated V3 sustaining and closure ledgers can be hard-checked without double counting. No working-capital hard target is stored because the report discloses only that WC varies annually and is recovered at mine-life end."
+    },
+    "reportedCostCheckpoints": [{
+      "metric":"AISC_AU_USD_PER_TOZ","value":1452,"unit":"USD/toz","period":{"kind":"LOM"},"sourceId":"scottie-pea-2025","pageOrTable":"Table 22-4 p.22-5","definitionNotes":"Reported DSO base-case LOM AISC checkpoint. This is evidence only and does not convert unknown annual PEA cash-flow rows into report-verified V3 inputs."
+    }]
+  }
+}
