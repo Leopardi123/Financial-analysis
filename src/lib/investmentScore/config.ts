@@ -23,6 +23,14 @@ export const INVESTMENT_SCORE_CONFIG = {
     managementMinimum: 'adequate',
     requireDownsideRobustness: true,
     requireNoFatalFlaw: true,
+    tier3Exception: {
+      valuationConvergenceRequired: 'EXTREME',
+      managementMinimum: 'strong',
+      optionalityMinimum: 'strong',
+      requireScaleOrLomOnlyTier3: true,
+      requireDownsideRobustness: true,
+      requireNoFatalFlaw: true,
+    },
   },
   continuous: {
     minScore: 1,
