@@ -13,9 +13,13 @@ export type SnapshotApiResponse = {
   diagnostics?: SnapshotDiagnostics;
 };
 
-export async function postCorporateSnapshot(payload: SnapshotRequest, opts: { refresh?: boolean } = {}): Promise<SnapshotApiResponse> {
+export async function postCorporateSnapshot(
+  payload: SnapshotRequest,
+  opts: { refresh?: boolean; cache?: boolean } = {},
+): Promise<SnapshotApiResponse> {
   const query = new URLSearchParams();
   if (opts.refresh) query.set('refresh', '1');
+  if (opts.cache) query.set('cache', '1');
   if (typeof window !== 'undefined') {
     const debugFromQuery = new URLSearchParams(window.location.search).get('debug') === '1';
     const debugFromStorage = window.localStorage.getItem('admin.debugParamEnabled') === '1';
