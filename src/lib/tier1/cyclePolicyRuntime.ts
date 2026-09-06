@@ -4,6 +4,7 @@ import { computeProjectEngineFullProductionV1 } from '../project/engineFullProdu
 import { computeProjectPhase2 } from '../project/phase2.ts';
 import { readHistoryRowsInRange } from '../prices/db/readHistory.ts';
 import type { PriceKey } from '../prices/keys.ts';
+import { readPersistentJsonCache, writePersistentJsonCache } from '../cache/persistentJsonCache.ts';
 import { analyzeRecentSustainedLows } from './recentSustainedLow.ts';
 import type { Tier1Gate } from './preRevenueLegacySnapshot.ts';
 
@@ -59,6 +60,13 @@ type WindowEval = {
   multipliersByMetal: Record<string, number>;
 };
 
+type BaseCycleEval = {
+  years: number[];
+  npv: number;
+  anchor: number;
+  prod: number;
+};
+
 type StressPriceResult = { value: number | null; reason: string | null };
 type CycleRuntimeDeps = { loadStressPriceFn?: (key: string) => Promise<StressPriceResult> };
 
@@ -73,7 +81,19 @@ function revenue(gross: Array<number | null>, credits: Array<number | null> | nu
 const method = `5-årig revenue-normaliserad NPV10 downside beta; stresspris = median av 3 separerade lågprisobservationer från 7 års historik med 6 månaders rullande medel; 7-årig survival-NPV10 är diagnostik och påverkar inte Tier; beta T1 ≤0,85x, T2 ≤1,15x, annars T3.`;
 
 const stressPriceCache = new Map<string, { expiresAt: number; promise: Promise<StressPriceResult> }>();
-const STRESS_PRICE_CACHE_TTL_MS = 60_000;
+const STRESS_PRICE_CACHE_TTL_MS = 30 * 60_000;
+const STRESS_PRICE_PERSISTENT_TTL_MS = 6 * 60 * 60_000;
+const STRESS_PRICE_CACHE_NAMESPACE = 'tier-cycle-stress-price-v1';
+
+function stressPriceFingerprint(asOfDate: string): string {
+  return JSON.stringify({
+    asOfDate,
+    lookbackYears: TIER1_CYCLE_POLICY.lookbackYears,
+    rollingMonths: TIER1_CYCLE_POLICY.rollingMonths,
+    selectedLowCount: TIER1_CYCLE_POLICY.selectedLowCount,
+    minimumSeparationMonths: TIER1_CYCLE_POLICY.minimumSeparationMonths,
+  });
+}
 
 async function loadStressPriceUncached(key: string): Promise<StressPriceResult> {
   const to = new Date().toISOString().slice(0, 10);
@@ -94,11 +114,34 @@ async function loadStressPriceUncached(key: string): Promise<StressPriceResult> 
 }
 
 async function loadStressPrice(key: string): Promise<StressPriceResult> {
-  const cacheKey = `${new Date().toISOString().slice(0, 10)}:${key}`;
+  const asOfDate = new Date().toISOString().slice(0, 10);
+  const cacheKey = `${asOfDate}:${key}`;
   const now = Date.now();
   const cached = stressPriceCache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.promise;
-  const promise = loadStressPriceUncached(key);
+
+  const promise = (async () => {
+    const fingerprint = stressPriceFingerprint(asOfDate);
+    const persisted = await readPersistentJsonCache<StressPriceResult>({
+      namespace: STRESS_PRICE_CACHE_NAMESPACE,
+      identity: key,
+      fingerprint,
+    });
+    if (persisted && finite(persisted.value)) return persisted;
+
+    const result = await loadStressPriceUncached(key);
+    if (finite(result.value)) {
+      await writePersistentJsonCache({
+        namespace: STRESS_PRICE_CACHE_NAMESPACE,
+        identity: key,
+        fingerprint,
+        payload: result,
+        ttlMs: STRESS_PRICE_PERSISTENT_TTL_MS,
+      });
+    }
+    return result;
+  })();
+
   stressPriceCache.set(cacheKey, { expiresAt: now + STRESS_PRICE_CACHE_TTL_MS, promise });
   void promise.then((result) => {
     if (!finite(result.value) && stressPriceCache.get(cacheKey)?.promise === promise) stressPriceCache.delete(cacheKey);
@@ -139,9 +182,24 @@ function phase(years: number[], fcff: Array<number | null>, prodYear: number, st
   return finite(o.npvToday_USD) ? { npv: o.npvToday_USD, irr: finite(o.irr) ? o.irr : null } : null;
 }
 
-async function evaluate(ps: Tier1CyclePreparedProject[], stressPrices: Map<string, number>, windowYears: number): Promise<WindowEval | null> {
-  let baseRev = 0, stressRev = 0;
+async function prepareBaseCycleEval(ps: Tier1CyclePreparedProject[]): Promise<BaseCycleEval | null> {
   const baseRuns = ps.map(x => ({ input: x.baseInput, output: x.baseOutput }));
+  const bc = await corp(ps, baseRuns);
+  const years = bc.corporateYearsByPeriod;
+  const anchor = Math.min(...ps.map(x => x.constructionStartYear));
+  const prod = Math.min(...ps.map(x => x.productionStartYear));
+  const base = phase(years, bc.fcffUSD_total, prod, anchor);
+  if (!base || !(base.npv > 0)) return null;
+  return { years, npv: base.npv, anchor, prod };
+}
+
+async function evaluate(
+  ps: Tier1CyclePreparedProject[],
+  stressPrices: Map<string, number>,
+  windowYears: number,
+  base: BaseCycleEval,
+): Promise<WindowEval | null> {
+  let baseRev = 0, stressRev = 0;
   const stressRuns: Array<{ input: any; output: any }> = [];
   const multipliersByMetal: Record<string, number> = {};
   for (const x of ps) {
@@ -161,14 +219,13 @@ async function evaluate(ps: Tier1CyclePreparedProject[], stressPrices: Map<strin
     if (!finite(br) || !finite(sr) || !(br > 0)) return null;
     baseRev += br; stressRev += sr; stressRuns.push({ input, output });
   }
-  const [bc, sc] = await Promise.all([corp(ps, baseRuns), corp(ps, stressRuns)]);
-  const years = bc.corporateYearsByPeriod;
-  if (JSON.stringify(years) !== JSON.stringify(sc.corporateYearsByPeriod)) return null;
-  const anchor = Math.min(...ps.map(x => x.constructionStartYear)), prod = Math.min(...ps.map(x => x.productionStartYear));
-  const b = phase(years, bc.fcffUSD_total, prod, anchor), s = phase(years, sc.fcffUSD_total, prod, anchor);
-  if (!b || !s || !(b.npv > 0)) return null;
-  const revenueRetention = stressRev / baseRev, revenueDrawdown = 1 - revenueRetention, npvRetention = s.npv / b.npv;
-  return { baseRevenue: baseRev, stressRevenue: stressRev, revenueRetention, baseNpv: b.npv, stressNpv: s.npv, npvRetention, beta: revenueDrawdown > 1e-9 ? (1 - npvRetention) / revenueDrawdown : NaN, stressIrr: s.irr, multipliersByMetal };
+  const sc = await corp(ps, stressRuns);
+  const years = sc.corporateYearsByPeriod;
+  if (JSON.stringify(years) !== JSON.stringify(base.years)) return null;
+  const s = phase(years, sc.fcffUSD_total, base.prod, base.anchor);
+  if (!s) return null;
+  const revenueRetention = stressRev / baseRev, revenueDrawdown = 1 - revenueRetention, npvRetention = s.npv / base.npv;
+  return { baseRevenue: baseRev, stressRevenue: stressRev, revenueRetention, baseNpv: base.npv, stressNpv: s.npv, npvRetention, beta: revenueDrawdown > 1e-9 ? (1 - npvRetention) / revenueDrawdown : NaN, stressIrr: s.irr, multipliersByMetal };
 }
 
 function notVerified(reason: string, projectCount = 0): Tier1CyclePolicyResult {
@@ -191,9 +248,12 @@ export async function computeTier1CyclePolicyFromPreparedProjects(
   }
   if (diagnostics.length) return { ...notVerified(diagnostics.join(' '), ps.length), diagnostics };
 
+  const base = await prepareBaseCycleEval(ps);
+  if (!base) return notVerified('CYCLE_EVALUATION_FAILED: canonical Corporate base-kassaflöde kunde inte bilda ett verifierat positivt base-NPV10.', ps.length);
+
   const [row5, row7] = await Promise.all([
-    evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.classificationStressYears),
-    evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.survivalStressYears),
+    evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.classificationStressYears, base),
+    evaluate(ps, stressPrices, TIER1_CYCLE_POLICY.survivalStressYears, base),
   ]);
   if (!row5 || !row7 || !finite(row5.beta)) return notVerified('CYCLE_EVALUATION_FAILED: canonical Corporate kassaflöde/revenue kunde inte bilda ett verifierat 5y/7y cycle-resultat.', ps.length);
 

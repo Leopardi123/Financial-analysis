@@ -1,5 +1,8 @@
 import preRevenueHandler from '../src/server/routes/tier1/pre-revenue.ts';
 import { loadProjectsForSymbol } from '../src/lib/api/loadProjectsForSymbol.ts';
+import { listCompanyProjects as listStoredCompanyProjects } from '../src/lib/db/companyProjects.ts';
+import { readPersistentJsonCache, writePersistentJsonCache } from '../src/lib/cache/persistentJsonCache.ts';
+import { buildTierRuntimeFingerprint } from '../src/lib/cache/runtimeEconomicsFingerprint.ts';
 import { isProjectJsonV3 } from '../src/lib/project/jsonv3/compile.ts';
 import { TIER1_COST_BENCHMARKS, type Tier1Metal } from '../src/lib/tier1/config.ts';
 import { assessCost, classifyTier } from '../src/lib/tier1/preRevenue.ts';
@@ -14,8 +17,22 @@ import {
 } from '../src/lib/tier1/costPosition.ts';
 import { buildTierCyclePriceDisplay } from '../src/server/routes/tier1/cycle-price-display.ts';
 
+const TIER_RESPONSE_CACHE_NAMESPACE = 'tier-pre-revenue-response-v1';
+const TIER_RESPONSE_CACHE_TTL_MS = 12 * 60_000;
+const TIER_NOT_VERIFIED_CACHE_TTL_MS = 60_000;
+
+type CachedTierResponse = { status: number; body: any };
+
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function setTierCacheHeaders(res: any, assessmentStatus: unknown, state: 'HIT' | 'MISS' | 'BYPASS'): void {
+  if (typeof res?.setHeader !== 'function') return;
+  res.setHeader('x-tier-runtime-cache', state);
+  if (state === 'BYPASS') return;
+  const seconds = assessmentStatus === 'NOT_VERIFIED' ? 5 : 60;
+  res.setHeader('Vercel-CDN-Cache-Control', `public, max-age=${seconds}`);
 }
 
 function sanitizeResolvedCuFallbackDiagnostics(assessment: any): void {
@@ -74,8 +91,10 @@ function readV3ReportedCostCheckpoints(rawJson: Record<string, unknown>, expecte
   });
 }
 
-async function collectReportedCostEvidence(symbol: string, primaryMetal: Tier1Metal): Promise<CostEvidenceDetail[]> {
-  const loaded = await loadProjectsForSymbol(symbol);
+async function collectReportedCostEvidence(
+  loaded: Awaited<ReturnType<typeof loadProjectsForSymbol>>,
+  primaryMetal: Tier1Metal,
+): Promise<CostEvidenceDetail[]> {
   const expectedMetric = TIER1_COST_BENCHMARKS[primaryMetal].metric;
   const details: CostEvidenceDetail[] = [];
 
@@ -262,6 +281,31 @@ async function applySourceLockedCostRecipes(args: {
 }
 
 export default async function handler(req: any, res: any): Promise<void> {
+  const symbol = String(req.query?.symbol ?? '').trim().toUpperCase();
+  const cacheBypass = String(req.query?.refresh ?? '') === '1';
+  let cacheFingerprint: string | null = null;
+
+  if (req.method === 'GET' && symbol && !cacheBypass) {
+    try {
+      const projectSummaries = await listStoredCompanyProjects(symbol);
+      cacheFingerprint = await buildTierRuntimeFingerprint({ symbol, projects: projectSummaries });
+      const cached = await readPersistentJsonCache<CachedTierResponse>({
+        namespace: TIER_RESPONSE_CACHE_NAMESPACE,
+        identity: symbol,
+        fingerprint: cacheFingerprint,
+      });
+      if (cached) {
+        setTierCacheHeaders(res, cached.body?.assessment?.status, 'HIT');
+        res.status(cached.status).json(cached.body);
+        return;
+      }
+    } catch {
+      cacheFingerprint = null;
+    }
+  } else if (cacheBypass) {
+    setTierCacheHeaders(res, null, 'BYPASS');
+  }
+
   let capturedStatus = 200;
   let capturedBody: any = null;
   const captureRes: any = {
@@ -277,14 +321,13 @@ export default async function handler(req: any, res: any): Promise<void> {
 
   await preRevenueHandler(req, captureRes);
 
-  const symbol = String(req.query?.symbol ?? '').trim().toUpperCase();
   const assessment = capturedBody?.assessment;
   if (capturedStatus === 200 && capturedBody?.ok === true && assessment && symbol) {
     try {
       const loaded = await loadProjectsForSymbol(symbol);
 
       if (assessment.primaryMetal) {
-        const evidence = await collectReportedCostEvidence(symbol, assessment.primaryMetal as Tier1Metal);
+        const evidence = await collectReportedCostEvidence(loaded, assessment.primaryMetal as Tier1Metal);
         assessment.support = assessment.support ?? {};
         assessment.support.reportedCostEvidence = evidence;
         if (evidence.length > 0) {
@@ -312,6 +355,22 @@ export default async function handler(req: any, res: any): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       assessment.diagnostics.push(`Tier post-processing: ${message}. Basberäkningen behålls.`);
     }
+  }
+
+  if (cacheFingerprint && capturedStatus === 200 && capturedBody?.ok === true) {
+    const ttlMs = capturedBody?.assessment?.status === 'NOT_VERIFIED'
+      ? TIER_NOT_VERIFIED_CACHE_TTL_MS
+      : TIER_RESPONSE_CACHE_TTL_MS;
+    await writePersistentJsonCache({
+      namespace: TIER_RESPONSE_CACHE_NAMESPACE,
+      identity: symbol,
+      fingerprint: cacheFingerprint,
+      payload: { status: capturedStatus, body: capturedBody } satisfies CachedTierResponse,
+      ttlMs,
+    });
+    setTierCacheHeaders(res, capturedBody?.assessment?.status, 'MISS');
+  } else if (!cacheBypass) {
+    setTierCacheHeaders(res, capturedBody?.assessment?.status, 'BYPASS');
   }
 
   res.status(capturedStatus).json(capturedBody);

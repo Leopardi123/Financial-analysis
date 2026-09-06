@@ -2,6 +2,8 @@ import { readHistoryRowsInRange } from "../src/lib/prices/db/readHistory.js";
 import { refreshHistoryRangeToMonthlyBlobs } from "../src/lib/prices/refreshHistory.js";
 import { PRICE_KEY_SET, type PriceKey } from "../src/lib/prices/keys.js";
 import { getLatestCanonicalPrice, getPriceProviderDescriptor } from "../src/lib/prices/providerService.js";
+import { readPersistentJsonCache, writePersistentJsonCache } from "../src/lib/cache/persistentJsonCache.js";
+import { buildCorporateRuntimeFingerprint } from "../src/lib/cache/runtimeEconomicsFingerprint.js";
 import {
   deleteCompanyProject,
   getCompanyProject,
@@ -17,6 +19,8 @@ import {
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 
+const CORPORATE_SNAPSHOT_CACHE_NAMESPACE = "corporate-snapshot-response-v1";
+const CORPORATE_SNAPSHOT_CACHE_TTL_MS = 12 * 60_000;
 
 function parseRequestBody(req: any): unknown {
   if (typeof req.body === "string") {
@@ -36,13 +40,37 @@ function sendValidationError(res: any, error: string, details?: unknown): void {
 async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
   const refresh = String(req.query?.refresh ?? "") === "1";
   const debug = String(req.query?.debug ?? "") === "1";
+  const cacheRequested = String(req.query?.cache ?? "") === "1" && !debug;
 
   try {
+    const body = parseRequestBody(req);
+    const bodyRecord = typeof body === "object" && body !== null && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : null;
+    const symbol = typeof bodyRecord?.symbol === "string" ? bodyRecord.symbol.trim().toUpperCase() : "";
+    let cacheFingerprint: string | null = null;
+    const cacheIdentity = symbol || "inline";
+
+    if (cacheRequested) {
+      const projectSummaries = symbol ? await listCompanyProjects(symbol) : [];
+      cacheFingerprint = await buildCorporateRuntimeFingerprint({ body, projects: projectSummaries });
+      const cached = await readPersistentJsonCache<{ ok: true; snapshot: unknown; diagnostics: unknown }>({
+        namespace: CORPORATE_SNAPSHOT_CACHE_NAMESPACE,
+        identity: cacheIdentity,
+        fingerprint: cacheFingerprint,
+      });
+      if (cached) {
+        res.setHeader("x-corporate-snapshot-runtime-cache", "HIT");
+        res.status(200).json(cached);
+        return;
+      }
+      res.setHeader("x-corporate-snapshot-runtime-cache", "MISS");
+    }
+
     const [{ runCorporateSnapshotPipeline }] = await Promise.all([
       import("../src/lib/snapshot/runCorporateSnapshot.js"),
     ]);
 
-    const body = parseRequestBody(req);
     const result = await runCorporateSnapshotPipeline({ body, refresh, debug });
 
     if (!result.ok) {
@@ -50,7 +78,18 @@ async function handleCorporateSnapshot(req: any, res: any): Promise<void> {
       return;
     }
 
-    res.status(200).json({ ok: true, snapshot: result.snapshot, diagnostics: result.diagnostics });
+    const responseBody = { ok: true as const, snapshot: result.snapshot, diagnostics: result.diagnostics };
+    if (cacheRequested && cacheFingerprint) {
+      await writePersistentJsonCache({
+        namespace: CORPORATE_SNAPSHOT_CACHE_NAMESPACE,
+        identity: cacheIdentity,
+        fingerprint: cacheFingerprint,
+        payload: responseBody,
+        ttlMs: CORPORATE_SNAPSHOT_CACHE_TTL_MS,
+      });
+    }
+
+    res.status(200).json(responseBody);
   } catch (error) {
     const diagnostics = {
       warnings: [] as string[],
@@ -80,7 +119,7 @@ const ROUTE_MAP: Record<string, () => Promise<{ default: Handler }>> = {
   "admin/init-db": () => import("../src/server/routes/admin/init-db.js"),
   "admin/refresh-companies": () => import("../src/server/routes/admin/refresh-companies.js"),
   "admin/fx/ingest": () => import("../src/server/routes/admin/fx-ingest.js"),
-  "admin/macro/ingest": () => import("../src/server/routes/admin/macro-ingest.js"),
+  "admin/macro/ingest": () => import("../src/server/routes/admin/macro/ingest.js"),
   "admin/macro/run-engine": () => import("../src/server/routes/admin/macro/run-engine.js"),
   "admin/rebuild-macro-snapshot": () => import("../src/server/routes/admin/rebuild-macro-snapshot.js"),
   "admin/refresh-price-screen": () => import("../src/server/routes/admin/refresh-price-screen.js"),

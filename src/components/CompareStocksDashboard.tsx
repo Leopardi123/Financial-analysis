@@ -3,8 +3,8 @@ import ProducerCompareDashboard from './ProducerCompareDashboard.tsx';
 import Tier1StatusCell from './Tier1StatusCell.tsx';
 import InvestmentScoreCell from './investmentScore/InvestmentScoreCell.tsx';
 import { getCompanyProject, listCompanyProjects, type CompanyProjectSummary } from '../lib/client/companyProjectsClient.ts';
-import { loadLiveCorporateFinancingState } from '../lib/client/corporateFinancingStateStore.ts';
 import { postCorporateSnapshot } from '../lib/client/snapshotClient.ts';
+import type { SnapshotRequest } from '../lib/api/validateSnapshotRequest.ts';
 import { getManualMetalPriceStore } from '../lib/engine/pricing/manualMetalPriceStore.ts';
 import { resolveCanonicalCorporateSnapshotInputs } from '../lib/corporate/snapshotInputResolver.ts';
 import {
@@ -28,7 +28,16 @@ type MetricColumn = readonly [key: MetricKey, label: string, help: string];
 type MetricGroup = { label: string; columns: readonly MetricColumn[] };
 
 type CompanyListResponse = { ok: boolean; companies?: Array<{ ticker: string; name: string }> };
-type ProfileResponse = { ok?: boolean; profile?: Record<string, unknown> | null };
+type ProfileResponse = {
+  ok?: boolean;
+  profile?: Record<string, unknown> | null;
+  corporateFinancingPreferences?: {
+    financingPlan?: SnapshotRequest['financingPlan'];
+    financingPlanByProject?: SnapshotRequest['financingPlanByProject'];
+    extraShares?: number;
+    updatedAtUtc?: string | null;
+  } | null;
+};
 type CompanyResponse = { balance?: Record<string, Array<number | null>>; income?: Record<string, Array<number | null>> };
 
 type PreRevenueCompany = {
@@ -135,15 +144,15 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
   if (projects.length === 0) return null;
   const localExtraShares = readManualExtraShares(company.ticker);
   try {
-    const [profileRes, statementsRes, persistedFinancing, projectRecords] = await Promise.all([
+    const [profileRes, statementsRes, projectRecords] = await Promise.all([
       fetch(`/api/company/profile?ticker=${encodeURIComponent(company.ticker)}`),
       fetch(`/api/company?ticker=${encodeURIComponent(company.ticker)}&period=fy`),
-      loadLiveCorporateFinancingState(company.ticker),
       Promise.all(projects.map((project) => getCompanyProject(company.ticker, project.project_id))),
     ]);
     const profileBody = await profileRes.json() as ProfileResponse;
     const statements = await statementsRes.json() as CompanyResponse;
     const profile = profileBody.profile ?? null;
+    const persistedFinancing = profileBody.corporateFinancingPreferences ?? null;
     const metals = extractMetals(projectRecords.map((record) => record.raw_json));
     const resolution = resolveCanonicalCorporateSnapshotInputs({
       symbol: company.ticker,
@@ -177,7 +186,7 @@ async function loadCanonicalCompany(company: { ticker: string; name: string }): 
       };
     }
 
-    const body = await postCorporateSnapshot(resolution.request, { refresh: targetCurrency !== 'USD' });
+    const body = await postCorporateSnapshot(resolution.request, { refresh: targetCurrency !== 'USD', cache: true });
     const snapshot = body.ok && body.snapshot ? body.snapshot : null;
     const metrics = snapshot
       ? deriveCorporatePreRevenueMetrics({
