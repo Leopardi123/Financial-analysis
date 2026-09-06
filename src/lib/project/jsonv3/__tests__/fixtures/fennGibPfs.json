@@ -1,0 +1,127 @@
+{
+  "version": "project_json_v3",
+  "meta": {
+    "projectId": "fenn-gib-pfs-2025-golden",
+    "projectName": "Fenn-Gib Gold Project",
+    "currency": "USD",
+    "notes": "NI 43-101 PFS golden fixture. Table 22-2 C$ cash-flow rows are converted to canonical USD with the report-locked C$1.35/US$1 assumption. The report-relative axis Y-3..Y16 is preserved exactly. Runtime calendar placement is kept separate and uses Mayfair current guidance for initial production in 2030, which maps report t=0 to 2027 without stretching the economic arrays. Table 21-1/Table 22-1 report C$60.9m sustaining capital while annual Table 22-2 cash-flow rows sum to C$68.2m; the annual cash-flow series is canonical for economic reconciliation and the discrepancy is retained explicitly in test evidence."
+  },
+  "time": {
+    "masterN": 18,
+    "productionStartPeriod": 3,
+    "nameplateCapacityPeriod": 4,
+    "reportPeriodLabels": ["-3", "-2", "-1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"],
+    "phaseByPeriod": ["construction", "construction", "construction", "ramp_up", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "closure"],
+    "runtimePlacement": {
+      "productionStart": {
+        "year": 2030,
+        "sourceId": "mayfair-gold-2026-01-26",
+        "pageOrTable": "Mayfair Gold Jan. 26, 2026 news release: goal of starting construction in 2028 with initial production in 2030",
+        "asOfDate": "2026-01-26",
+        "notes": "Initial production is the sourced runtime anchor. With report productionStartPeriod=3 this places economic t=0 in 2027. The separate company goal to start major construction in 2028 is not treated as report economic t=0 because it is not the same concept as the PFS three-year pre-production cash-flow axis."
+      },
+      "notes": "Current company schedule guidance is used only to place the unchanged report-relative economics on a runtime calendar. No constructionStart or nameplateCapacity calendar anchor is inferred."
+    }
+  },
+  "metals": {
+    "payableQtyByMetal": {"Au": [0, 0, 0, 57271.350000000006, 82058.95000000001, 70364.8, 69765.1, 73263.35, 75062.45, 58170.9, 54172.9, 52673.65, 61469.25, 68365.8, 62968.5, 61369.3, 53673.15, 18690.65, 0]},
+    "metalInProductQtyByMetal": {"Au": [0, 0, 0, 57300, 82100, 70400, 69800, 73300, 75100, 58200, 54200, 52700, 61500, 68400, 63000, 61400, 53700, 18700, 0]},
+    "revenueBasisByMetal": {"Au": "METAL_IN_PRODUCT_WITH_PAYABILITY_DEDUCTION"},
+    "payableQtyUnitByMetal": {"Au": "toz"},
+    "priceKeyByMetal": {"Au": "XAU_USD_TOZ"},
+    "auPriceKey": "XAU_USD_TOZ"
+  },
+  "streamsByMetal": null,
+  "economics": {
+    "costModel": {
+      "mode": "COMPONENTS",
+      "components": [
+        {"id": "mining", "label": "Mining Cost", "category": "mining", "seriesUSD": [0, 0, 0, 35037037.03703704, 41777777.777777776, 40222222.22222222, 42814814.81481481, 40962962.96296296, 45333333.33333333, 46592592.59259259, 47925925.925925925, 52518518.518518515, 43555555.55555555, 42740740.74074074, 32962962.962962963, 27777777.777777776, 22148148.148148146, 8370370.37037037, 0], "sourceId": "fenn-gib-pfs-2025", "pageOrTable": "Table 22-2 p.278"},
+        {"id": "processing", "label": "Processing Cost", "category": "processing", "seriesUSD": [0, 0, 0, 21407407.407407407, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 24666666.666666664, 15481481.481481481, 0], "sourceId": "fenn-gib-pfs-2025", "pageOrTable": "Table 22-2 p.278"},
+        {"id": "site_ga", "label": "G&A Costs", "category": "site_ga", "seriesUSD": [0, 0, 0, 8000000, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 8814814.814814813, 4592592.592592592, 0], "sourceId": "fenn-gib-pfs-2025", "pageOrTable": "Table 22-2 p.278"}
+      ]
+    },
+    "sellingModel": {
+      "mode": "COMPONENTS",
+      "components": [{"id": "dore_refining_transport", "label": "Doré refining and transport", "category": "other_offsite", "seriesUSD": [0, 0, 0, 286356.75, 410294.75000000006, 351824, 348825.5, 366316.75, 375312.25, 290854.5, 270864.5, 263368.25, 307346.25, 341829, 314842.5, 306846.5, 268365.75, 93453.25, 0], "sourceId": "fenn-gib-pfs-2025", "pageOrTable": "Table 22-1 pp.275-276; Table 22-2 p.278"}]
+    },
+    "fiscalTakeModel": {
+      "mode": "RULES",
+      "items": [],
+      "reportLockedItems": [{
+        "id": "property_nsr_royalties",
+        "label": "Property NSR royalties",
+        "reportFiscalTakeUSD": [0, 0, 0, 2972902.509259259, 4108223.7685185187, 3425953.7777777775, 3354878.2037037034, 3707757.3240740737, 3772835.898148148, 2894330.685185185, 2618024.3888888885, 2477372.4907407407, 3470431.5277777775, 3732245.0740740737, 3314787.129629629, 3026486.833333333, 2546449.064814815, 869509.7129629629, 0],
+        "placement": "REVENUE_DEDUCTION",
+        "runtimeProxyRule": {
+          "id": "property_nsr_royalties_runtime",
+          "label": "LOM-average NSR royalty proxy",
+          "placement": "REVENUE_DEDUCTION",
+          "base": {"line": "NET_SMELTER_RETURN"},
+          "rate": {"type": "FIXED", "rate": 0.017},
+          "start_t": 3,
+          "end_t": 17,
+          "sourceId": "fenn-gib-pfs-2025",
+          "pageOrTable": "Section 22.3.4 p.274; Table 22-1 pp.275-276; Section 4.8 pp.42-43",
+          "notes": "Report reconciliation uses the annual royalty residual after separating the disclosed US$5/oz refining/transport charge from Table 22-2 Royalties & Refining Costs. Runtime uses the report-disclosed 1.7% LOM-average NSR because annual claim-level royalty allocation is not disclosed; no property-level production allocation is guessed."
+        },
+        "sourceId": "fenn-gib-pfs-2025",
+        "pageOrTable": "Section 22.3.4 p.274; Table 22-2 p.278",
+        "notes": "The report states approximately C$64m undiscounted LOM royalties and provides only a combined annual Royalties & Refining Costs row. Annual report leg is locked to that row less the independently disclosed US$5/oz refining/transport charge."
+      }]
+    },
+    "taxModel": {
+      "mode": "REPORT_LOCKED_WITH_RUNTIME_PROXY",
+      "reportTaxCashFlowUSD": [0, 0, 0, 0, -10370370.37037037, -10000000, -39925925.925925925, -44000000, -44444444.44444444, -28296296.296296295, -25629629.629629627, -22814814.814814813, -34740740.74074074, -42222222.22222222, -40074074.074074075, -40370370.370370366, -34814814.81481481, -8814814.814814813, 222222.22222222222],
+      "runtime": {"method": "NOMINAL_RATE_WITH_LOSS_CARRYFORWARD", "taxRate": 0.265},
+      "notes": "REPORT: exact rounded Table 22-2 combined mining/provincial/federal tax cash-flow series, including historical tax positions and construction-start tax basis. RUNTIME: simplified 26.5% general corporate income-tax proxy with loss carryforward, equal to the current 15% Canadian federal general rate plus 11.5% Ontario general corporate rate. It does not reconstruct Ontario mining tax, historical tax pools or depreciation basis. Report reconciliation never uses this proxy."
+    },
+    "depreciationUSD": null
+  },
+  "capital": {
+    "capexUSD": [68962962.96296296, 139481481.48148146, 124888888.88888888, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "sustainingCapexUSD": [0, 0, 0, 9407407.407407407, 4518518.518518519, 4518518.518518519, 5333333.333333333, 5925925.925925925, 5037037.037037036, 3333333.333333333, 3481481.4814814813, 2074074.074074074, 1037037.037037037, 1629629.6296296294, 2370370.3703703703, 666666.6666666666, 666666.6666666666, 518518.5185185185, 0],
+    "closureUSD": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 36592592.59259259],
+    "workingCapitalDeltaUSD": [0, 0, 0, 9037037.037037037, 5333333.333333333, -2814814.814814815, -370370.37037037034, 1037037.037037037, 74074.07407407407, -4296296.296296296, -1111111.111111111, -740740.7407407407, 2888888.8888888885, 1777777.7777777778, -518518.5185185185, 74074.07407407407, -1481481.4814814813, -6518518.518518518, -2296296.296296296],
+    "terminalProceedsUSD": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  },
+  "operations": {
+    "capacity": {"throughputUnit": "tpd", "nameplateThroughput": 4800, "utilizationPct": null},
+    "oreMilledTonnes": [0, 0, 0, 1447000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 906000, 0],
+    "oreMinedTonnes": [0, 0, 773000, 674000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 1752000, 906000, 0],
+    "oreTonnageUnit": "tonne",
+    "gradeByMetal": {"Au": [0, 0, 0, 1.44, 1.65, 1.4, 1.39, 1.46, 1.49, 1.18, 1.1, 1.07, 1.24, 1.36, 1.26, 1.23, 1.09, 0.76, 0]},
+    "gradeUnitByMetal": {"Au": "g/t"},
+    "recoveryPctByMetal": {"Au": [0, 0, 0, 0.858, 0.884, 0.892, 0.892, 0.895, 0.896, 0.88, 0.875, 0.873, 0.884, 0.89, 0.885, 0.884, 0.874, 0.843, 0]}
+  },
+  "verification": {
+    "report": {
+      "sourceId": "fenn-gib-pfs-2025",
+      "npvIrrPageOrTable": "Section 22.4 and Table 22-1 pp.274-276; annual cash flow Table 22-2 p.278",
+      "pricesPageOrTable": "Section 22.3 p.274; Table 22-1 pp.275-276",
+      "periodsPageOrTable": "Section 21.2.2.1 p.241; Section 22.3 p.274; Table 22-2 p.278",
+      "discountRate": 0.05,
+      "discountConvention": "period_end_from_model_start",
+      "priceDeckByKey": {"XAU_USD_TOZ": 3100},
+      "reportNPVPostTaxUSD": 482740740.7407407,
+      "reportIRRPostTax": 0.241,
+      "reportNPVPreTaxUSD": 726296296.2962962,
+      "reportIRRPreTax": 0.288,
+      "toleranceRelative": 0.02,
+      "reportInitialCapexUSD": 333333333.3333333,
+      "reportSustainingCapexUSD": 50518518.518518515,
+      "reportClosureUSD": 36592592.59259259,
+      "reportClosurePeriod": 18,
+      "reportWorkingCapitalUnwindUSD": 2296296.296296296,
+      "reportWorkingCapitalUnwindPeriod": 18,
+      "reportTerminalProceedsUSD": 0,
+      "reportTerminalProceedsPeriod": null,
+      "assumptionsPageOrTable": "Sections 21.2.1-21.2.2 pp.240-241; Sections 22.2-22.4 pp.273-278; Tables 22-1 and 22-2",
+      "assumptionsNotes": "100% project basis; real Q3 2025 C$; C$1.35/US$1; US$3,100/oz Au; recovered gold subject to 99.95% payability; US$5/oz refining and transport; 1.7% LOM-average NSR; 36-month report pre-production cash-flow axis; annual end-period cash flows discounted to start of construction; 100% equity except equipment leases. Table 22-1/21-1 reports C$60.9m sustaining capital, while Table 22-2 annual sustaining cash-flow rows sum to C$68.2m. The annual Table 22-2 series is used for NPV/IRR reconciliation and the discrepancy is explicitly retained rather than balanced away. Runtime calendar placement is separately anchored to Mayfair current guidance for initial production in 2030."
+    },
+    "reportedCostCheckpoints": [
+      {"metric": "CASH_COST_AU_USD_PER_OZ", "value": 1203, "unit": "USD/oz Au", "period": {"kind": "LOM"}, "sourceId": "fenn-gib-pfs-2025", "pageOrTable": "Table 22-1 pp.275-276", "definitionNotes": "Report cash cost checkpoint. Evidence only; canonical economics remain the annual Table 22-2 cost series."},
+      {"metric": "AISC_AU_USD_PER_OZ", "value": 1292, "unit": "USD/oz Au", "period": {"kind": "LOM"}, "sourceId": "fenn-gib-pfs-2025", "pageOrTable": "Table 22-1 pp.275-276", "definitionNotes": "Report AISC checkpoint. Evidence only; it is not stored as a parallel calculation input."}
+    ]
+  }
+}
