@@ -24,15 +24,28 @@ Therefore:
 - t11 / Y10 = mixed final-production / annualized closure period
 - Table 19-2 places US$21.1m closure and US$15.8m salvage in Y10
 
-The report states an **18-month construction period** and a **9.3-year mine life**. Those durations do not authorize inventing calendar years.
+The report states an **18-month construction period** and a **9.3-year mine life**. Those durations define the report economics but do not themselves disclose calendar years.
 
 ## Runtime calendar placement
 
-`time.runtimePlacement = null` intentionally.
+The runtime calendar now uses a **user-approved 2029 consensus/working assumption for production start**, dated 2026-09-06.
 
-A current-source check through Paramount's September 2, 2026 BLM announcement and current Grassy Mountain project page confirms that the company has federal approvals and is sequencing work toward a construction decision, but it does **not** publish a construction-start year or first-production year. Therefore a 2027/2028/etc. runtime anchor would be a guess.
+This is deliberately separated from technical-report evidence and from company guidance:
 
-The fixture consequently fails closed when `requireRuntimePlacement=true`. It must not be activated in Project / Corporate / Compare Stocks until Paramount publishes a sourced calendar anchor.
+- Paramount's May 28, 2026 FS release says state permitting was expected in H2 2026 and the FS contains an 18-month construction duration.
+- Paramount's September 2, 2026 release confirms BLM Plan of Operations approval and continued sequencing toward a construction decision.
+- Paramount still does **not** directly guide to a construction-start or production-start calendar year.
+- The user explicitly approved **2029** as the runtime consensus assumption.
+
+Accordingly `time.runtimePlacement.productionStart.year = 2029` with `sourceId = user-approved-consensus-2026-09-06`. It must not be described as report-verified or company-guided timing.
+
+Because `productionStartPeriod = 1`, runtime placement maps the unchanged report-relative axis as:
+
+- Y-2 / t0 → **2028**
+- Y-1 / t1 → **2029**
+- Y1 / t2 → **2030**
+
+No economic arrays are stretched, interpolated or shifted. Report reconciliation ignores runtime calendar placement.
 
 ## Report deck and assumptions
 
@@ -56,12 +69,15 @@ The report tax leg uses the exact rounded annual Table 19-2 tax series. Runtime 
 
 ## Production and revenue
 
-Table 19-2 publishes annual recovered and payable metal. V3 uses the payable rows directly as the revenue quantities:
+Table 19-2 publishes annual recovered and payable metal. V3 uses the payable rows directly as the revenue quantities.
 
-- payable Au: **385.5 koz** total
-- payable Ag: **477.7 koz** total
-- recovered Au: **385.8 koz** total
-- recovered Ag: **480.1 koz** total
+The rounded annual rows sum to:
+
+- payable Au: **385.5 koz**
+- payable Ag: **477.8 koz**
+- recovered Ag: **480.0 koz**
+
+The Table 19-2 summary cells separately state **477.7 koz payable Ag** and **480.1 koz recovered Ag**. Those two 0.1 koz report-internal rounding differences are retained explicitly and are not balanced away.
 
 At the locked report deck, the rounded payable quantities reconstruct annual revenue to within US$0.2m per period of Table 19-2, which is consistent with the table's 0.1 koz / US$0.1m rounding.
 
@@ -105,7 +121,7 @@ Expected annual-table reconstruction from the fixture is approximately:
 - pre-tax NPV5: **US$447.0m** vs US$458.9m, about **-2.60%**
 - pre-tax IRR: **41.63%** vs 42.8%, about **-2.74% relative**
 
-With `toleranceRelative = 0.02`, the JSON therefore remains **Ej verifierad**. This is intentional: the missing detailed closure timing / intra-period timing is material enough to prevent the public annual table from satisfying the hard reconciliation guard.
+With `toleranceRelative = 0.02`, the JSON therefore remains **Ej verifierad**. This is intentional: the missing detailed closure timing / intra-period timing is material enough to prevent the public annual table from satisfying the hard reconciliation guard. The user-approved 2029 runtime placement does not change these report-deck reconciliation results.
 
 ## Cost checkpoints
 
@@ -125,3 +141,4 @@ The report defines cash cost as mining + processing + mine-level G&A + refining 
 - royalty treatment: Section 19.5, pp.293-295
 - NPV / IRR: Section 19.6 and Table 19-1, pp.294-296
 - annual economics, production, capital and FCFF: Table 19-2, pp.296-298
+- runtime consensus context: Paramount FS results release, 28 May 2026; Paramount BLM Plan of Operations approval release, 2 September 2026; user approval of 2029 working assumption, 6 September 2026
