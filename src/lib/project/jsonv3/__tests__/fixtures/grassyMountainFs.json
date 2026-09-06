@@ -4,7 +4,7 @@
     "projectId": "grassy-mountain-fs-2026-golden",
     "projectName": "Grassy Mountain Gold Project",
     "currency": "USD",
-    "notes": "S-K 1300 2026 Feasibility Study fixture. Table 19-2 pp.296-298 is canonical for the public annual economic axis Y-2,Y-1,Y1..Y10 and annual cash-flow placement. The report explicitly states that detailed closure cash flows extend 20+ years beyond mine life and are not shown in the annual table; Table 19-2 collapses the disclosed US$21.1m closure total into Y10. The detailed timing is therefore not reconstructible from the public report. The report also states cash flows are taken at the midpoint of each period. No current company source gives a construction-start or first-production calendar year, so runtimePlacement is intentionally null and this fixture must not be activated in Project/Corporate/Compare until a sourced calendar anchor exists."
+    "notes": "S-K 1300 2026 Feasibility Study fixture. Table 19-2 pp.296-298 is canonical for the public annual economic axis Y-2,Y-1,Y1..Y10 and annual cash-flow placement. The report explicitly states that detailed closure cash flows extend 20+ years beyond mine life and are not shown in the annual table; Table 19-2 collapses the disclosed US$21.1m closure total into Y10. The detailed timing is therefore not reconstructible from the public report. The report also states cash flows are taken at the midpoint of each period. Runtime calendar placement uses a user-approved 2029 production-start consensus assumption as of 2026-09-06, informed by the current permitting status and the FS 18-month construction duration. It is explicitly not report or company production-year guidance and does not alter the report-relative economic axis or reconciliation."
   },
   "time": {
     "masterN": 11,
@@ -12,7 +12,16 @@
     "nameplateCapacityPeriod": null,
     "reportPeriodLabels": ["-2", "-1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
     "phaseByPeriod": ["construction", "ramp_up", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "operations", "closure"],
-    "runtimePlacement": null
+    "runtimePlacement": {
+      "productionStart": {
+        "year": 2029,
+        "sourceId": "user-approved-consensus-2026-09-06",
+        "pageOrTable": "User-approved consensus runtime assumption informed by Paramount's May 28, 2026 FS release, the September 2, 2026 BLM Plan of Operations approval, and the FS 18-month construction duration; Paramount does not directly guide to a production-start year.",
+        "asOfDate": "2026-09-06",
+        "notes": "Runtime calendar assumption only. This is not technical-report timing evidence and not company production-year guidance. With productionStartPeriod=1 it maps report Y-2/t0 to 2028, Y-1/t1 to 2029 and Y1/t2 to 2030 without stretching or shifting the report-relative arrays."
+      },
+      "notes": "2029 is an explicit user-approved consensus/working assumption for runtime placement. Report reconciliation ignores runtime placement and remains tied exactly to Table 19-2 Y-2,Y-1,Y1..Y10."
+    }
   },
   "metals": {
     "payableQtyByMetal": {
