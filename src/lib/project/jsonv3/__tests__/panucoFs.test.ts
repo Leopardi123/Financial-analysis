@@ -5,6 +5,7 @@ import { reconcileProjectJsonV3ToReport } from '../reconciliation.ts';
 import type { ProjectJsonV3 } from '../schema.ts';
 import {
   PANUCO_FS_V3,
+  PANUCO_REPORT_CASHFLOW_SUSTAINING_CAPEX_USD,
   PANUCO_REPORT_PERIODS,
   PANUCO_REPORT_POST_TAX_FCFF_USD,
   PANUCO_REPORT_PRE_TAX_FCFF_USD,
@@ -88,7 +89,9 @@ async function runEngine(raw: ProjectJsonV3, leg: 'report' | 'runtime') {
   const initialAnnual = sum(raw.capital.capexUSD.slice(0, 3));
   assert(Math.abs(initialAnnual - PANUCO_SUMMARY_INITIAL_CAPEX_USD) <= 500_000, `Rounded Table 22-2 initial capital ${initialAnnual} must reconcile to US$238.7m summary`);
   assert(Math.abs((raw.capital.capexUSD[4] ?? 0) - PANUCO_SUMMARY_EXPANSION_CAPEX_USD) <= 500_000, 'Report Y3/t4 expansion capital must reconcile to US$15.4m summary');
-  assert(Math.abs(sum(raw.capital.sustainingCapexUSD) - PANUCO_SUMMARY_SUSTAINING_CAPEX_USD) <= 500_000, 'Rounded annual sustaining capital must reconcile to US$287.3m summary');
+  assert(sum(raw.capital.sustainingCapexUSD) === PANUCO_REPORT_CASHFLOW_SUSTAINING_CAPEX_USD, 'Table 22-2 rounded annual sustaining capital must sum to US$289m');
+  assert(PANUCO_SUMMARY_SUSTAINING_CAPEX_USD === 287_300_000, 'Table 21-1 / Table 22-1 sustaining summary must remain US$287.3m');
+  assert(PANUCO_REPORT_CASHFLOW_SUSTAINING_CAPEX_USD - PANUCO_SUMMARY_SUSTAINING_CAPEX_USD === 1_700_000, 'The report-internal US$1.7m sustaining-capital rounding discrepancy must remain explicit');
   assert(Math.abs(sum(raw.capital.closureUSD) - PANUCO_SUMMARY_CLOSURE_USD) <= 500_000, 'Rounded annual closure must reconcile to US$37.5m summary');
   assert(raw.capital.closureUSD[12] === 38_000_000, 'Closure must remain in report Y11/t12');
   assert(raw.capital.terminalProceedsUSD?.[12] === 10_000_000, 'US$10m salvage must remain terminal proceeds in report Y11/t12');
@@ -102,6 +105,7 @@ async function runEngine(raw: ProjectJsonV3, leg: 'report' | 'runtime') {
   assert(report.discountConvention === 'mid_year', 'FS explicitly uses mid-period discounting');
   assert(report.reportNPVPostTaxUSD === 1_802_000_000 && report.reportIRRPostTax === 1.111, 'Post-tax headline must remain US$1.802bn / 111.1%');
   assert(report.reportNPVPreTaxUSD === 2_842_000_000 && report.reportIRRPreTax === 1.593, 'Pre-tax headline must remain US$2.842bn / 159.3%');
+  assert(report.reportSustainingCapexUSD === PANUCO_REPORT_CASHFLOW_SUSTAINING_CAPEX_USD, 'Generic reconciliation must hard-check the canonical annual Table 22-2 sustaining row, not balance it to the US$287.3m summary');
 
   assert(raw.economics.taxModel.mode === 'REPORT_LOCKED_WITH_RUNTIME_PROXY', 'Panuco must use the published annual tax series for report reconciliation');
   assert(Math.abs(-sum(raw.economics.taxModel.reportTaxCashFlowUSD) - PANUCO_REPORT_TOTAL_TAX_USD) <= 1, 'Table 22-2 combined taxes must total US$1.364bn');
@@ -148,6 +152,6 @@ async function runEngine(raw: ProjectJsonV3, leg: 'report' | 'runtime') {
   );
 
   console.log(
-    `Panuco FS V3 VERIFIED | NPV5 post report=${reconciliation.reportNPVPostTaxUSD} model=${reconciliation.modelNPVPostTaxUSD} relDiff=${reconciliation.npvRelativeDifference} | IRR post report=${reconciliation.reportIRRPostTax} model=${reconciliation.modelIRRPostTax} relDiff=${reconciliation.irrRelativeDifference} | NPV5 pre report=${reconciliation.reportNPVPreTaxUSD} model=${reconciliation.modelNPVPreTaxUSD} relDiff=${reconciliation.npvPreTaxRelativeDifference} | IRR pre report=${reconciliation.reportIRRPreTax} model=${reconciliation.modelIRRPreTax} relDiff=${reconciliation.irrPreTaxRelativeDifference} | maxFCFFdiff post=${postTaxMaxDiff} pre=${preTaxMaxDiff} | maxRevenueDiff=${revenueDiff}`,
+    `Panuco FS V3 VERIFIED | NPV5 post report=${reconciliation.reportNPVPostTaxUSD} model=${reconciliation.modelNPVPostTaxUSD} relDiff=${reconciliation.npvRelativeDifference} | IRR post report=${reconciliation.reportIRRPostTax} model=${reconciliation.modelIRRPostTax} relDiff=${reconciliation.irrRelativeDifference} | NPV5 pre report=${reconciliation.reportNPVPreTaxUSD} model=${reconciliation.modelNPVPreTaxUSD} relDiff=${reconciliation.npvPreTaxRelativeDifference} | IRR pre report=${reconciliation.reportIRRPreTax} model=${reconciliation.modelIRRPreTax} relDiff=${reconciliation.irrPreTaxRelativeDifference} | sustaining summary=${PANUCO_SUMMARY_SUSTAINING_CAPEX_USD} Table22-2=${PANUCO_REPORT_CASHFLOW_SUSTAINING_CAPEX_USD} | maxFCFFdiff post=${postTaxMaxDiff} pre=${preTaxMaxDiff} | maxRevenueDiff=${revenueDiff}`,
   );
 })();
