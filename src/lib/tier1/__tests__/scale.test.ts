@@ -7,6 +7,7 @@ import {
   getTier1ScaleThreshold,
   normalizeDiscoveredScaleQuantity,
   normalizeTier1ScaleQuantity,
+  roundScaleEquivalentForTier,
 } from '../scale.ts';
 
 assert.equal(getTier1ScaleThreshold('Mo')?.minimumAnnualQuantity, 10_000);
@@ -17,6 +18,12 @@ assert.equal(getTier1ScaleThreshold('U3O8')?.minimumAnnualQuantity, 5_000_000);
 assert.equal(getTier1ScaleThreshold('U3O8')?.unit, 'lb');
 assert.equal(getTier1ScaleThreshold('WO3')?.minimumAnnualQuantity, 2_000);
 assert.equal(getTier1ScaleThreshold('WO3')?.unit, 'tonne');
+
+assert.equal(roundScaleEquivalentForTier(0.993), 1.0, 'ABRA-like 0.993x classifies at 1.0x');
+assert.equal(roundScaleEquivalentForTier(0.949), 0.9);
+assert.equal(roundScaleEquivalentForTier(0.95), 1.0);
+assert.equal(roundScaleEquivalentForTier(0.349), 0.3);
+assert.equal(roundScaleEquivalentForTier(0.35), 0.4);
 
 const exactThresholds = assessTier1ScaleProducts({
   Mo: { averageAnnualQuantity: 10_000, unit: 'tonne' },
@@ -103,7 +110,18 @@ assert.equal(sustainedWindow.endYear, 2041);
 assert.equal(sustainedWindow.products.Cu.equivalent, 0.6);
 assert.equal(sustainedWindow.products.Mo.equivalent, 0.5);
 assert.equal(sustainedWindow.products.Sn.scored, false);
-assert.ok(Math.abs((sustainedWindow.combinedEquivalent ?? 0) - 1.1) < 1e-12);
+assert.equal(sustainedWindow.combinedEquivalent, 1.1);
+
+const abraLikeWindow = bestSustainedTier1ScaleWindow({
+  quantityByProductByYear: new Map([
+    ['Au', new Map(Array.from({ length: 10 }, (_, index) => [2030 + index, 75_400]))],
+    ['Ag', new Map(Array.from({ length: 10 }, (_, index) => [2030 + index, 11_130_000]))],
+  ]),
+  unitByProduct: new Map([['Au', 'toz'], ['Ag', 'toz']]),
+  productionYears: new Set(Array.from({ length: 10 }, (_, index) => 2030 + index)),
+  sustainedScaleYears: 10,
+});
+assert.equal(abraLikeWindow.combinedEquivalent, 1.0, 'full-precision 0.993-ish combined scale is rounded only after sustained-window selection');
 
 assert.equal(normalizeTier1ScaleQuantity({ product: 'Mo', value: 1, fromUnit: 'toz', toUnit: 'tonne' }), null);
 assert.equal(normalizeTier1ScaleQuantity({ product: 'U', value: 1, fromUnit: 'lb', toUnit: 'lb' }), 1);

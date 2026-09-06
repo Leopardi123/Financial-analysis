@@ -102,6 +102,16 @@ function finiteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+/**
+ * Tier classification uses one-decimal scale precision, but only after all
+ * physical quantities, metal equivalents and sustained-window selection have
+ * been calculated at full precision. This avoids moving the selected window
+ * because of presentation/classification rounding.
+ */
+export function roundScaleEquivalentForTier(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10) / 10;
+}
+
 function isMassUnit(unit: string): unit is MassUnit {
   return unit === 'tonne' || unit === 'short_ton' || unit === 'long_ton' || unit === 'lb' || unit === 'kg';
 }
@@ -247,6 +257,8 @@ export function assessTier1ScaleProducts(
 /**
  * Select the best contiguous sustained-scale window using all physical products
  * for visibility and only threshold-enabled exact products for the score.
+ * Candidate windows are compared at full precision. Only the selected final
+ * combined scale is rounded to one decimal for downstream Tier classification.
  */
 export function bestSustainedTier1ScaleWindow(args: {
   quantityByProductByYear: Map<string, Map<number, number>>;
@@ -291,5 +303,14 @@ export function bestSustainedTier1ScaleWindow(args: {
     if (!best || candidateScore > bestScore) best = candidate;
   }
 
-  return best ?? { startYear: null, endYear: null, years: null, averagesByProduct: {}, products: {}, combinedEquivalent: null };
+  if (!best) {
+    return { startYear: null, endYear: null, years: null, averagesByProduct: {}, products: {}, combinedEquivalent: null };
+  }
+
+  return {
+    ...best,
+    combinedEquivalent: finiteNonNegative(best.combinedEquivalent)
+      ? roundScaleEquivalentForTier(best.combinedEquivalent)
+      : null,
+  };
 }

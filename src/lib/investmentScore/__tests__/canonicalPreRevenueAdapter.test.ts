@@ -6,25 +6,54 @@ function tierAssessment(args: {
   status?: Tier1PreRevenueAssessment['status'];
   cycleStatus?: 'PASS' | 'FAIL' | 'NOT_VERIFIED';
   cycleTier?: 1 | 2 | 3 | null;
+  lomTier?: 1 | 2 | 3 | null;
+  scaleTier?: 1 | 2 | 3 | null;
+  capitalReturnsTier?: 1 | 2 | 3 | null;
+  survivalNpv10Usd?: number | null;
 } = {}): Tier1PreRevenueAssessment {
+  const lomTier = args.lomTier === undefined ? 1 : args.lomTier;
+  const scaleTier = args.scaleTier === undefined ? 1 : args.scaleTier;
+  const capitalReturnsTier = args.capitalReturnsTier === undefined ? 1 : args.capitalReturnsTier;
+  const cycleTier = args.cycleTier === undefined ? 1 : args.cycleTier;
   return {
     status: args.status ?? 'TIER_1',
     classificationReason: 'test',
     primaryMetal: 'Au',
     primaryMetalRevenueShare: 1,
     gates: {
-      lom: { status: 'PASS', tier: 1, value: 30, threshold: 15, unit: 'år', reason: 'test' },
-      scale: { status: 'PASS', tier: 1, value: 1, threshold: 1, unit: 'scale-equivalent', reason: 'test' },
-      cost: { status: 'PASS', tier: 1, value: 1, threshold: 1, unit: 'USD/toz', reason: 'test' },
-      cycle: {
-        status: args.cycleStatus ?? 'PASS',
-        tier: args.cycleTier === undefined ? 1 : args.cycleTier,
-        value: 1,
-        threshold: 0,
-        unit: 'USD NPV10',
+      lom: {
+        status: lomTier === null ? 'NOT_VERIFIED' : lomTier === 1 ? 'PASS' : 'FAIL',
+        tier: lomTier,
+        value: 30,
+        threshold: 15,
+        unit: 'år',
         reason: 'test',
       },
-      capitalReturns: { status: 'PASS', tier: 1, value: 0.3, threshold: 0.25, unit: 'IRR', reason: 'test' },
+      scale: {
+        status: scaleTier === null ? 'NOT_VERIFIED' : scaleTier === 1 ? 'PASS' : 'FAIL',
+        tier: scaleTier,
+        value: 1,
+        threshold: 1,
+        unit: 'scale-equivalent',
+        reason: 'test',
+      },
+      cost: { status: 'NOT_VERIFIED', tier: null, value: null, threshold: null, unit: null, reason: 'N/A' },
+      cycle: {
+        status: args.cycleStatus ?? (cycleTier === null ? 'NOT_VERIFIED' : 'PASS'),
+        tier: cycleTier,
+        value: 1,
+        threshold: 0.85,
+        unit: 'NPV downside beta',
+        reason: 'test',
+      },
+      capitalReturns: {
+        status: capitalReturnsTier === null ? 'NOT_VERIFIED' : capitalReturnsTier === 1 ? 'PASS' : 'FAIL',
+        tier: capitalReturnsTier,
+        value: 0.3,
+        threshold: 0.25,
+        unit: 'IRR',
+        reason: 'test',
+      },
     },
     support: {
       tierBasePriceMode: 'SPOT',
@@ -33,29 +62,36 @@ function tierAssessment(args: {
       tierBaseIrr: 0.3,
       tierBaseNpvOverInitialCapex: 1,
       cycleNpv10Usd: 1,
-      cycleDurationProductionPeriods: 3,
+      cycleDurationProductionPeriods: 5,
       cycleMultipliersByMetal: {},
       cycleMethod: 'test',
+      cycleSurvivalNpv10Usd: args.survivalNpv10Usd === undefined ? 1 : args.survivalNpv10Usd,
+      cycleSurvivalProductionPeriods: 7,
+    } as Tier1PreRevenueAssessment['support'] & {
+      cycleSurvivalNpv10Usd: number | null;
+      cycleSurvivalProductionPeriods: number;
     },
     diagnostics: [],
   };
 }
 
+const snapshot = {
+  NAV_today_TargetCurrency: 1_000,
+  financing: { shares_post_financing: 100 },
+  aggregation: { corporateYearsByPeriod: [2029, 2030, 2031, 2032, 2033, 2034] },
+  series: { payableQtyByMetal: { Au: [0, 10, 20, 0, 30, 0] } },
+  corporateValuationTimeSeries: {
+    rows: [
+      { evEbitda6xPerShare: 6 },
+      { evEbitda6xPerShare: 10 },
+      { evEbitda6xPerShare: null },
+    ],
+  },
+};
+
 {
   const result = adaptCanonicalPreRevenueToInvestmentScore({
-    snapshot: {
-      NAV_today_TargetCurrency: 1_000,
-      financing: { shares_post_financing: 100 },
-      aggregation: { corporateYearsByPeriod: [2029, 2030, 2031, 2032, 2033, 2034] },
-      series: { payableQtyByMetal: { Au: [0, 10, 20, 0, 30, 0] } },
-      corporateValuationTimeSeries: {
-        rows: [
-          { evEbitda6xPerShare: 6 },
-          { evEbitda6xPerShare: 10 },
-          { evEbitda6xPerShare: null },
-        ],
-      },
-    },
+    snapshot,
     tierAssessment: tierAssessment(),
     priceCurrentTargetCurrency: 2,
     manualExtraShares: 25,
@@ -72,11 +108,26 @@ function tierAssessment(args: {
   assert.equal(result.sources.lomYears, 'CORPORATE_CANONICAL_PHYSICAL_PAYABLE_PRODUCTION_SPAN');
   assert.equal(result.inputs.tier, 1);
   assert.equal(result.inputs.cycleResistanceTier1Pass, true);
-  assert.equal(result.inputs.downsideRobustnessPass, true, 'Score-3 downside robustness reuses the canonical Tier cycle gate during v0 calibration');
-  assert.equal(result.sources.downsideRobustnessPass, 'TIER1_PRE_REVENUE_CYCLE_GATE_V0_CALIBRATION');
+  assert.equal(result.inputs.downsideRobustnessPass, true, 'positive 7y survival NPV10 independently passes Score-3 downside robustness');
+  assert.equal(result.sources.downsideRobustnessPass, 'TIER1_PRE_REVENUE_7Y_SURVIVAL_NPV10');
   assert.equal(result.inputs.rawScore, null);
   assert.equal(result.sources.pNav, 'CORPORATE_PNAV_POST_FINANCING');
   assert.equal(result.sources.peak6xVsPrice, 'CORPORATE_PEAK_6X_VS_CURRENT_PRICE');
+}
+
+{
+  const result = adaptCanonicalPreRevenueToInvestmentScore({
+    snapshot,
+    tierAssessment: tierAssessment({ cycleTier: 2, survivalNpv10Usd: 250 }),
+    priceCurrentTargetCurrency: 2,
+    manualExtraShares: 0,
+    management: null,
+    optionality: null,
+    fatalFlaw: false,
+  });
+
+  assert.equal(result.inputs.cycleResistanceTier1Pass, false, 'Cycle Tier 2 is a verified false for the Tier-1 cycle gate, not unknown');
+  assert.equal(result.inputs.downsideRobustnessPass, true, 'Cycle Tier 2 may still pass Score-3 downside when 7y survival NPV10 stays positive');
 }
 
 {
@@ -88,7 +139,7 @@ function tierAssessment(args: {
       series: { payableQtyByMetal: { Au: [0, 1, null, 2] } },
       corporateValuationTimeSeries: { rows: [] },
     },
-    tierAssessment: tierAssessment({ status: 'NOT_VERIFIED', cycleStatus: 'NOT_VERIFIED', cycleTier: null }),
+    tierAssessment: tierAssessment({ status: 'NOT_VERIFIED', cycleStatus: 'NOT_VERIFIED', cycleTier: null, survivalNpv10Usd: null }),
     priceCurrentTargetCurrency: 2,
     manualExtraShares: 0,
     management: null,
@@ -112,7 +163,7 @@ function tierAssessment(args: {
 {
   const result = adaptCanonicalPreRevenueToInvestmentScore({
     snapshot: null,
-    tierAssessment: tierAssessment({ status: 'NOT_QUALIFIED', cycleStatus: 'FAIL', cycleTier: null }),
+    tierAssessment: tierAssessment({ status: 'NOT_QUALIFIED', cycleStatus: 'FAIL', cycleTier: null, survivalNpv10Usd: -1 }),
     priceCurrentTargetCurrency: null,
     manualExtraShares: 0,
     management: null,
@@ -122,7 +173,45 @@ function tierAssessment(args: {
 
   assert.equal(result.inputs.tier, null);
   assert.equal(result.inputs.valuationConvergence, 'NOT_VERIFIED');
-  assert.equal(result.inputs.cycleResistanceTier1Pass, false);
-  assert.equal(result.inputs.downsideRobustnessPass, false, 'failed Tier cycle gate also fails Score-3 downside robustness during v0 calibration');
+  assert.equal(result.inputs.cycleResistanceTier1Pass, null, 'a cycle result without a classified Tier is not a verified Tier-1 comparison');
+  assert.equal(result.inputs.downsideRobustnessPass, false, 'non-positive 7y survival NPV10 independently fails Score-3 downside robustness');
   assert.equal(result.inputs.fatalFlaw, true);
 }
+
+{
+  const allowed = adaptCanonicalPreRevenueToInvestmentScore({
+    snapshot,
+    tierAssessment: tierAssessment({ status: 'TIER_3', lomTier: 3, scaleTier: 3, capitalReturnsTier: 1, cycleTier: 2, survivalNpv10Usd: 10 }),
+    priceCurrentTargetCurrency: 2,
+    manualExtraShares: 0,
+    management: null,
+    optionality: null,
+    fatalFlaw: false,
+  });
+  assert.equal(allowed.inputs.tier3ScaleOrLomOnlyExceptionEligible, true, 'LOM and scale may both be Tier 3 when capital returns and cycle are no worse than Tier 2');
+  assert.equal(allowed.sources.tier3ExceptionEligibility, 'TIER1_PRE_REVENUE_ACTIVE_GATE_TIERS');
+
+  const blockedByCapitalReturns = adaptCanonicalPreRevenueToInvestmentScore({
+    snapshot,
+    tierAssessment: tierAssessment({ status: 'TIER_3', lomTier: 3, scaleTier: 1, capitalReturnsTier: 3, cycleTier: 1, survivalNpv10Usd: 10 }),
+    priceCurrentTargetCurrency: 2,
+    manualExtraShares: 0,
+    management: null,
+    optionality: null,
+    fatalFlaw: false,
+  });
+  assert.equal(blockedByCapitalReturns.inputs.tier3ScaleOrLomOnlyExceptionEligible, false);
+
+  const blockedByCycle = adaptCanonicalPreRevenueToInvestmentScore({
+    snapshot,
+    tierAssessment: tierAssessment({ status: 'TIER_3', lomTier: 1, scaleTier: 3, capitalReturnsTier: 1, cycleTier: 3, survivalNpv10Usd: 10 }),
+    priceCurrentTargetCurrency: 2,
+    manualExtraShares: 0,
+    management: null,
+    optionality: null,
+    fatalFlaw: false,
+  });
+  assert.equal(blockedByCycle.inputs.tier3ScaleOrLomOnlyExceptionEligible, false);
+}
+
+console.log('canonicalPreRevenueAdapter tests passed');

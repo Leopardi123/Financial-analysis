@@ -23,6 +23,14 @@ const managementRank: Record<ManagementRating, number> = {
   exceptional: 3,
 };
 
+const optionalityRank: Record<OptionalityRating, number> = {
+  unassessed: -1,
+  none: 0,
+  some: 1,
+  strong: 2,
+  exceptional: 3,
+};
+
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -49,6 +57,11 @@ function gate(score: 1 | 2 | 3, checks: GateCheck[]): ScoreGateResult {
 function managementAtLeast(actual: ManagementRating | null, minimum: ManagementRating): boolean | null {
   if (actual === null || actual === 'unassessed') return null;
   return managementRank[actual] >= managementRank[minimum];
+}
+
+function optionalityAtLeast(actual: OptionalityRating | null, minimum: OptionalityRating): boolean | null {
+  if (actual === null || actual === 'unassessed') return null;
+  return optionalityRank[actual] >= optionalityRank[minimum];
 }
 
 function longevityPass(
@@ -147,19 +160,59 @@ function score2Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings):
   ]);
 }
 
+function score3TierPath(input: InvestmentScoreInputs): boolean | null {
+  const c = INVESTMENT_SCORE_CONFIG.score3;
+  if (input.tier === null) return null;
+  if (input.tier <= c.tierMax) return true;
+  if (input.tier !== 3) return false;
+  return input.tier3ScaleOrLomOnlyExceptionEligible ?? null;
+}
+
 function score3Gate(input: InvestmentScoreInputs, manual: DerivedManualRatings): ScoreGateResult {
   const c = INVESTMENT_SCORE_CONFIG.score3;
+  const exceptionalTier3Path = input.tier === 3;
+  const convergenceRequired = exceptionalTier3Path
+    ? c.tier3Exception.valuationConvergenceRequired
+    : c.valuationConvergenceRequired;
+  const managementMinimum = exceptionalTier3Path
+    ? c.tier3Exception.managementMinimum
+    : c.managementMinimum;
+
   return gate(3, [
-    check('tier', 'Tier 1-2 required', input.tier === null ? null : input.tier <= c.tierMax, input.tier, `<= ${c.tierMax}`),
-    convergenceCheck(input, c.valuationConvergenceRequired),
-    check('management', 'Adequate management minimum', managementAtLeast(manual.managementRating, c.managementMinimum), manual.managementRating, `>= ${c.managementMinimum}`),
+    check(
+      'tier',
+      exceptionalTier3Path ? 'Tier 3 allowed only for scale/LOM exception' : 'Tier 1-2 required',
+      score3TierPath(input),
+      input.tier,
+      exceptionalTier3Path ? 'Tier 3 only from LOM and/or scale; capital returns and cycle <= Tier 2' : `<= ${c.tierMax}`,
+      exceptionalTier3Path
+        ? 'Tier 3 may reach Score 3 only when the Tier-3 weakness is confined to LOM and/or physical scale.'
+        : undefined,
+    ),
+    convergenceCheck(input, convergenceRequired),
+    check(
+      'management',
+      exceptionalTier3Path ? 'Strong management minimum for Tier-3 exception' : 'Adequate management minimum',
+      managementAtLeast(manual.managementRating, managementMinimum),
+      manual.managementRating,
+      `>= ${managementMinimum}`,
+    ),
+    check(
+      'optionality',
+      exceptionalTier3Path ? 'Strong optionality minimum for Tier-3 exception' : 'Optionality not required for standard Score-3 path',
+      exceptionalTier3Path
+        ? optionalityAtLeast(manual.optionalityRating, c.tier3Exception.optionalityMinimum)
+        : true,
+      manual.optionalityRating,
+      exceptionalTier3Path ? `>= ${c.tier3Exception.optionalityMinimum}` : 'N/A',
+    ),
     check(
       'downsideRobustness',
-      'Downside robustness',
+      '7-year survival downside robustness',
       input.downsideRobustnessPass,
       input.downsideRobustnessPass,
       true,
-      'v0 calibration: this currently reuses the exact canonical Tier cycle gate. Recalibrate only through the central adapter/rule after real project JSON testing.',
+      'PASS requires positive NPV10 after the canonical seven-production-year historical-low price stress. This is intentionally separate from the 5-year downside-beta cycle Tier.',
     ),
     check('fatalFlaw', 'No fatal flaw', input.fatalFlaw === null ? null : input.fatalFlaw === false, input.fatalFlaw, false),
   ]);

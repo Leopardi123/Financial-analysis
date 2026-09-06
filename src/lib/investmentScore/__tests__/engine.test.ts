@@ -1,3 +1,4 @@
+import './tier3Exception.test.ts';
 import assert from 'node:assert/strict';
 import { computeInvestmentScore } from '../engine.ts';
 import type {

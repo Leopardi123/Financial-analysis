@@ -40,6 +40,15 @@ export type InvestmentScoreInputs = {
   downsideRobustnessPass: boolean | null;
   fatalFlaw: boolean | null;
 
+  /**
+   * Canonical adapter result for the exceptional Tier-3 -> Score-3 path.
+   * True only when Tier 3 is caused exclusively by LOM and/or scale while
+   * capital returns and cycle are no worse than Tier 2. Optional for backwards
+   * compatibility with non-canonical unit-test builders; Tier-3 use treats a
+   * missing value as unverified.
+   */
+  tier3ScaleOrLomOnlyExceptionEligible?: boolean | null;
+
   /** Manual evidence only. Aggregate ratings are derived centrally by the engine. */
   management: ManagementEvidence | null;
   optionality: OptionalityEvidence | null;

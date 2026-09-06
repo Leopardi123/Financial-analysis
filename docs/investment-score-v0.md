@@ -1,10 +1,10 @@
 # Investment Score v0
 
-Status: implementation foundation. Thresholds marked preliminary must be calibrated against real project JSON before the feature is considered complete. Runtime/build verification is still pending; do not treat this branch as verified until tests/CI run successfully.
+Status: calibration implementation. Runtime/build verification is still pending; do not treat this branch as verified until tests/CI run successfully.
 
 ## Purpose
 
-Keep the existing Tier engine independent: Tier answers how strong the project is regardless of share price. Investment Score answers how attractive the equity is today given project quality, valuation, rerating potential, management and optionality.
+Keep the Tier engine conceptually independent: Tier answers how strong the project is regardless of share price. Investment Score answers how attractive the equity is today given project quality, valuation, rerating potential, management and optionality.
 
 Scale: 1 best, 10 worst.
 
@@ -21,14 +21,34 @@ Scale: 1 best, 10 worst.
 
 ## Hard implementation constraints
 
-- Single source of truth: thresholds, gates, weights and adjustments live only in `src/lib/investmentScore`.
-- Additive only: do not change Project, Corporate, Compare Stocks metrics, Tier, NAV, P/NAV, EV/EBITDA, AuEq, financing, PF shares, price decks or upstream project/producer calculations.
-- Investment Score may consume canonical upstream outputs read-only.
+- Single source of truth: Investment Score thresholds, gates, weights and adjustments live only in `src/lib/investmentScore`.
+- Investment Score consumes canonical upstream outputs read-only and never rewrites project economics.
 - Missing required evidence must produce `Ej verifierad`; never infer zero, midpoint or hidden proxy.
-- Tier is independent. Investment Score may read Tier but never modify it.
+- Tier remains independent from share price and Investment Score.
 - Optionality is positive-only. Management is two-way.
 - Hard gates always take precedence over continuous score.
 - UI must never calculate or alter the score.
+- The Tier scale precision rule described below is an explicit Tier policy change approved during calibration; it is not an Investment Score backdoor into Tier.
+
+## Tier physical-scale precision
+
+Physical production, unit normalization, per-product scale equivalents and sustained-window selection are calculated at full precision.
+
+Only after the best sustained scale window has been selected is the final combined scale rounded to **one decimal** for Tier classification and presentation.
+
+The Tier boundaries remain unchanged:
+
+- Tier 1: combined scale >= 1.0x
+- Tier 2: combined scale >= 0.4x
+- Tier 3: combined scale < 0.4x
+
+Examples:
+
+- 0.993x full-precision combined scale -> 1.0x classification scale -> Tier 1.
+- 0.949x -> 0.9x -> Tier 2.
+- 0.350x -> 0.4x -> Tier 2.
+
+Rounding must never happen before product aggregation or sustained-window selection.
 
 ## Canonical valuation convergence
 
@@ -77,25 +97,47 @@ All must pass:
 
 ## Score 3 — Strong Buy
 
+### Standard path
+
 All must pass:
 
 - Tier 1-2.
 - At least `STRONG` canonical valuation convergence.
-- Management >= Adequate/Good; final minimum to be calibrated.
-- Downside robustness passes.
+- Management >= Adequate.
+- Seven-year survival downside robustness passes.
 - No identified fatal flaw.
 
-### v0 downside-robustness calibration rule
+### Exceptional Tier-3 path
 
-For the first real-JSON calibration, Score 3 deliberately uses **the exact same canonical Tier cycle gate** already used as cycle resistance for Scores 1-2. No second stress model is introduced yet.
+A Tier-3 project may reach Score 3 only when all of the following are true:
 
-That means:
+- Tier 3 is caused exclusively by **LOM and/or physical scale**. LOM and scale may both be Tier 3.
+- Capital returns are no worse than Tier 2.
+- Cycle resistance is no worse than Tier 2.
+- `EXTREME` canonical valuation convergence.
+- Management >= Strong.
+- Optionality >= Strong.
+- Seven-year survival downside robustness passes.
+- No identified fatal flaw.
 
-- Tier cycle gate `PASS` -> Score-3 `downsideRobustnessPass = true`.
-- Tier cycle gate `FAIL` -> Score-3 `downsideRobustnessPass = false`.
-- Tier cycle gate `NOT_VERIFIED` -> Score-3 downside robustness is `Ej verifierad`.
+Tier 3 caused by Tier-3 capital returns or Tier-3 cycle resistance cannot use this exception. The exception therefore permits a small and/or short-life project to be a Strong Buy when price, team, optionality and downside survival are unusually strong, but it does not allow weak economics to be bought away by valuation.
 
-This is a calibration starting point, not a claim that Score 3 permanently needs the same severity as Scores 1-2. After running a mixed set of real project JSONs, the central rule may be relaxed or replaced if it makes Score 3 systematically too restrictive. Any such change must happen in the canonical Investment Score adapter/rule only; no project-specific exception is allowed.
+## Score-3 downside robustness
+
+Score-3 downside robustness is deliberately separate from the Tier cycle classification.
+
+The canonical Tier cycle runtime already calculates two different stress views using the same historical-low price deck:
+
+- Five-production-year revenue-normalized NPV10 downside beta: this determines cycle Tier.
+- Seven-production-year survival NPV10: this is the Investment Score downside gate.
+
+The Score-3 rule is:
+
+- `7y survival NPV10 > 0` -> `downsideRobustnessPass = true`.
+- `7y survival NPV10 <= 0` -> `downsideRobustnessPass = false`.
+- Missing/uncomputable survival NPV10 -> `Ej verifierad`.
+
+This removes the previous double penalty where a verified Cycle Tier 2 automatically failed Score 3. A project may therefore have Cycle Tier 2 yet still pass Score-3 downside robustness if it retains positive NPV10 through the seven-year stress.
 
 ## Scores 4-10 · continuous v0 calibration
 
@@ -171,6 +213,6 @@ Canonical engine output must expose at least:
 
 ## Calibration plan
 
-Test against a deliberately mixed set of 8-12 existing project JSONs: obvious Tier 1, expensive Tier 1, extremely cheap Tier 1, cheap Tier 2, long-LOM/high-cost case, high-IRR/short-LOM case, low-P/NAV/distant-cash-flow case, high Peak-6x/weaker-NAV case, mediocre asset at extreme discount and excellent asset at fair value.
+Test against a deliberately mixed set of existing project JSONs, including Tier 1, Tier 2 cycle cases that survive the seven-year stress, Tier 3 caused only by scale/LOM, and Tier 3 caused by weak capital returns or cycle resistance.
 
 No project-specific exception rules. All changes during calibration must be made centrally.
