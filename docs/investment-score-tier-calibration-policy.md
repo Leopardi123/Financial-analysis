@@ -1,0 +1,1 @@
+Locked policy: one-decimal scale classification after full-precision calculation; Score-3 downside = positive canonical seven-year survival NPV10; Tier-3 Score-3 exception only for scale/LOM with strong management and optionality, EXTREME valuation, cycle/capital returns no worse than Tier 2, and no fatal flaw.
